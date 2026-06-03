@@ -27,6 +27,8 @@ export interface RadarrAddResponse {
 export interface PublicSettings {
   radarrUrl: string;
   hasRadarrApiKey: boolean;
+  letterboxdExportUrl: string;
+  hasLetterboxdCookie: boolean;
   dataDir: string;
 }
 

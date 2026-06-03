@@ -6,11 +6,15 @@ import type { MovieReview } from "@/app/types/movie";
 export interface StoredSettings {
   radarrUrl: string;
   radarrApiKey: string;
+  letterboxdExportUrl: string;
+  letterboxdCookie: string;
 }
 
 export interface PublicSettings {
   radarrUrl: string;
   hasRadarrApiKey: boolean;
+  letterboxdExportUrl: string;
+  hasLetterboxdCookie: boolean;
   dataDir: string;
 }
 
@@ -23,9 +27,13 @@ interface ReviewCacheFile {
   usernames: Record<string, ReviewCacheEntry>;
 }
 
+export const defaultLetterboxdExportUrl = "https://letterboxd.com/user/exportdata";
+
 const emptySettings: StoredSettings = {
   radarrUrl: "",
   radarrApiKey: "",
+  letterboxdExportUrl: defaultLetterboxdExportUrl,
+  letterboxdCookie: "",
 };
 
 const emptyReviewCache: ReviewCacheFile = {
@@ -99,6 +107,11 @@ export async function getSettings(): Promise<StoredSettings> {
   return {
     radarrUrl: typeof settings.radarrUrl === "string" ? settings.radarrUrl : "",
     radarrApiKey: typeof settings.radarrApiKey === "string" ? settings.radarrApiKey : "",
+    letterboxdExportUrl:
+      typeof settings.letterboxdExportUrl === "string" && settings.letterboxdExportUrl
+        ? settings.letterboxdExportUrl
+        : defaultLetterboxdExportUrl,
+    letterboxdCookie: typeof settings.letterboxdCookie === "string" ? settings.letterboxdCookie : "",
   };
 }
 
@@ -110,6 +123,8 @@ export function toPublicSettings(settings: StoredSettings): PublicSettings {
   return {
     radarrUrl: settings.radarrUrl,
     hasRadarrApiKey: settings.radarrApiKey.length > 0,
+    letterboxdExportUrl: settings.letterboxdExportUrl,
+    hasLetterboxdCookie: settings.letterboxdCookie.length > 0,
     dataDir: getDataDir(),
   };
 }

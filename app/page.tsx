@@ -25,6 +25,8 @@ const defaultConfig: LocalConfig = {
 const defaultSettings: PublicSettings = {
   radarrUrl: "",
   hasRadarrApiKey: false,
+  letterboxdExportUrl: "https://letterboxd.com/user/exportdata",
+  hasLetterboxdCookie: false,
   dataDir: "",
 };
 
@@ -93,7 +95,12 @@ export default function Home() {
   const [config, setConfig] = useState<LocalConfig>(defaultConfig);
   const [hasLoadedConfig, setHasLoadedConfig] = useState(false);
   const [settings, setSettings] = useState<PublicSettings>(defaultSettings);
-  const [settingsDraft, setSettingsDraft] = useState({ radarrUrl: "", radarrApiKey: "" });
+  const [settingsDraft, setSettingsDraft] = useState({
+    radarrUrl: "",
+    radarrApiKey: "",
+    letterboxdExportUrl: "https://letterboxd.com/user/exportdata",
+    letterboxdCookie: "",
+  });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
@@ -108,6 +115,7 @@ export default function Home() {
   const [isImporting, setIsImporting] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [isFetchingExport, setIsFetchingExport] = useState(false);
 
   useEffect(() => {
     const savedConfig = window.localStorage.getItem(STORAGE_KEY);
@@ -165,7 +173,12 @@ export default function Home() {
       }
 
       setSettings(body);
-      setSettingsDraft({ radarrUrl: body.radarrUrl, radarrApiKey: "" });
+      setSettingsDraft({
+        radarrUrl: body.radarrUrl,
+        radarrApiKey: "",
+        letterboxdExportUrl: body.letterboxdExportUrl,
+        letterboxdCookie: "",
+      });
     } catch (error) {
       setSettingsError(error instanceof Error ? error.message : "Unable to load settings.");
     }
@@ -192,7 +205,12 @@ export default function Home() {
       }
 
       setSettings(body);
-      setSettingsDraft({ radarrUrl: body.radarrUrl, radarrApiKey: "" });
+      setSettingsDraft({
+        radarrUrl: body.radarrUrl,
+        radarrApiKey: "",
+        letterboxdExportUrl: body.letterboxdExportUrl,
+        letterboxdCookie: "",
+      });
       setSettingsMessage("Settings saved to persistent server storage.");
     } catch (error) {
       setSettingsError(error instanceof Error ? error.message : "Unable to save settings.");
@@ -287,6 +305,54 @@ export default function Home() {
     }
   }
 
+  async function fetchLetterboxdExport() {
+    if (!config.username.trim()) {
+      setImportError("Enter a Letterboxd username before fetching the export.");
+      return;
+    }
+
+    if (!settings.hasLetterboxdCookie) {
+      setImportError("Save your Letterboxd session cookie in Settings before fetching the export.");
+      return;
+    }
+
+    setIsFetchingExport(true);
+    setImportMessage(null);
+    setImportError(null);
+
+    try {
+      const response = await fetch("/api/letterboxd/export", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ username: config.username.trim() }),
+      });
+      const body = (await response.json().catch(() => null)) as LetterboxdImportResponse | null;
+
+      if (!response.ok || !body) {
+        throw new Error(apiMessage(body, "Unable to fetch Letterboxd export."));
+      }
+
+      const fileSummary = body.importedFiles?.length
+        ? ` Files: ${body.importedFiles
+            .map((file) => `${file.fileName} (${file.importedCount})`)
+            .join(", ")}.`
+        : "";
+
+      setMovies(body.movies.filter(isMovieReview));
+      setImportMessage(
+        `Fetched and imported ${body.importedCount} rated movies. Cache now contains ${body.totalCached} movies.${fileSummary}`,
+      );
+      setSendStates({});
+      setSendMessages({});
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Unable to fetch Letterboxd export.");
+    } finally {
+      setIsFetchingExport(false);
+    }
+  }
+
   async function sendToRadarr(movie: MovieReview) {
     const key = movieKey(movie);
 
@@ -365,7 +431,12 @@ export default function Home() {
                 <button
                   className="rounded-xl border border-white/10 bg-white px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-orange-200 focus:outline-none focus:ring-2 focus:ring-orange-300 focus:ring-offset-2 focus:ring-offset-slate-950"
                   onClick={() => {
-                    setSettingsDraft({ radarrUrl: settings.radarrUrl, radarrApiKey: "" });
+                    setSettingsDraft({
+                      radarrUrl: settings.radarrUrl,
+                      radarrApiKey: "",
+                      letterboxdExportUrl: settings.letterboxdExportUrl,
+                      letterboxdCookie: "",
+                    });
                     setSettingsMessage(null);
                     setSettingsError(null);
                     setImportMessage(null);
@@ -561,14 +632,49 @@ export default function Home() {
                 />
               </label>
 
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-semibold text-slate-200">Letterboxd Export URL</span>
+                <input
+                  className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300 focus:ring-2 focus:ring-orange-300/30"
+                  placeholder="https://letterboxd.com/user/exportdata"
+                  value={settingsDraft.letterboxdExportUrl}
+                  onChange={(event) =>
+                    setSettingsDraft((current) => ({
+                      ...current,
+                      letterboxdExportUrl: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-semibold text-slate-200">Letterboxd Session Cookie</span>
+                <textarea
+                  className="min-h-24 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300 focus:ring-2 focus:ring-orange-300/30"
+                  placeholder={
+                    settings.hasLetterboxdCookie
+                      ? "Saved cookie configured; leave blank to keep it"
+                      : "Paste the Cookie header from an authenticated Letterboxd browser request"
+                  }
+                  value={settingsDraft.letterboxdCookie}
+                  onChange={(event) =>
+                    setSettingsDraft((current) => ({ ...current, letterboxdCookie: event.target.value }))
+                  }
+                />
+              </label>
+
               <div className="rounded-2xl bg-white/[0.05] p-4 text-sm text-slate-400">
                 <p>
                   <span className="font-semibold text-slate-300">Storage directory:</span>{" "}
                   {settings.dataDir || "Loading..."}
                 </p>
                 <p className="mt-2">
-                  The API key is stored in plaintext in this directory. Restrict access to the
-                  eventual container volume.
+                  <span className="font-semibold text-slate-300">Letterboxd cookie:</span>{" "}
+                  {settings.hasLetterboxdCookie ? "Configured" : "Not configured"}
+                </p>
+                <p className="mt-2">
+                  API keys and cookies are stored in plaintext in this directory. Restrict access to
+                  the eventual container volume.
                 </p>
               </div>
 
@@ -605,8 +711,27 @@ export default function Home() {
                 </p>
               </div>
 
+              <div className="rounded-2xl border border-orange-300/20 bg-orange-300/10 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-semibold text-orange-100">Automated export fetch</p>
+                    <p className="mt-1 text-sm leading-6 text-orange-100/80">
+                      Uses the saved Letterboxd session cookie to download and import the export ZIP.
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-2xl bg-orange-400 px-5 py-3 font-bold text-slate-950 transition hover:bg-orange-300 disabled:cursor-not-allowed disabled:opacity-70"
+                    disabled={isFetchingExport}
+                    onClick={() => void fetchLetterboxdExport()}
+                    type="button"
+                  >
+                    {isFetchingExport ? "Fetching..." : "Fetch Export ZIP"}
+                  </button>
+                </div>
+              </div>
+
               <label className="flex flex-col gap-2">
-                <span className="text-sm font-semibold text-slate-200">Letterboxd export .zip or CSV</span>
+                <span className="text-sm font-semibold text-slate-200">Manual fallback: export .zip or CSV</span>
                 <input
                   accept=".zip,.csv,application/zip,text/csv"
                   className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-slate-200 file:mr-4 file:rounded-xl file:border-0 file:bg-white file:px-4 file:py-2 file:font-semibold file:text-slate-950"
@@ -631,7 +756,7 @@ export default function Home() {
                 disabled={isImporting}
                 type="submit"
               >
-                {isImporting ? "Importing..." : "Import Reviews CSV"}
+                {isImporting ? "Importing..." : "Import Export File"}
               </button>
             </form>
           </div>
