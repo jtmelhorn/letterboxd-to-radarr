@@ -2,6 +2,9 @@ export interface MovieReview {
   title: string;
   year: number | null;
   rating: number;
+  posterUrl?: string;
+  reviewText?: string;
+  letterboxdUrl?: string;
 }
 
 export interface LetterboxdResponse {

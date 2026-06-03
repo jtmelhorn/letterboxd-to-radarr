@@ -94,10 +94,31 @@ function sanitizeMovie(movie: MovieReview): MovieReview | null {
     return null;
   }
 
+  const result: MovieReview = { title, year, rating };
+
+  if (typeof movie.posterUrl === "string" && movie.posterUrl.trim()) {
+    result.posterUrl = movie.posterUrl.trim();
+  }
+
+  if (typeof movie.reviewText === "string" && movie.reviewText.trim()) {
+    result.reviewText = movie.reviewText.trim();
+  }
+
+  if (typeof movie.letterboxdUrl === "string" && movie.letterboxdUrl.trim()) {
+    result.letterboxdUrl = movie.letterboxdUrl.trim();
+  }
+
+  return result;
+}
+
+function mergeMovieData(existing: MovieReview, incoming: MovieReview): MovieReview {
   return {
-    title,
-    year,
-    rating,
+    title: incoming.title,
+    year: incoming.year ?? existing.year,
+    rating: incoming.rating,
+    posterUrl: incoming.posterUrl ?? existing.posterUrl,
+    reviewText: incoming.reviewText ?? existing.reviewText,
+    letterboxdUrl: incoming.letterboxdUrl ?? existing.letterboxdUrl,
   };
 }
 
@@ -143,14 +164,25 @@ export async function mergeCachedReviews(
   const cache = await readJsonFile<ReviewCacheFile>(reviewCachePath(), emptyReviewCache);
   const normalizedUsername = normalizeUsername(username);
   const existingMovies = cache.usernames[normalizedUsername]?.movies ?? [];
+
+  // Build existing map first (lower priority baseline)
   const merged = new Map<string, MovieReview>();
-
-  for (const movie of [...incomingMovies, ...existingMovies]) {
+  for (const movie of existingMovies) {
     const sanitized = sanitizeMovie(movie);
-
     if (sanitized) {
       merged.set(reviewKey(sanitized), sanitized);
     }
+  }
+
+  // Merge incoming on top, combining the best data from both sources
+  for (const movie of incomingMovies) {
+    const sanitized = sanitizeMovie(movie);
+    if (!sanitized) continue;
+
+    const key = reviewKey(sanitized);
+    const existing = merged.get(key);
+
+    merged.set(key, existing ? mergeMovieData(existing, sanitized) : sanitized);
   }
 
   const movies = Array.from(merged.values());
