@@ -2,23 +2,32 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import type { MovieReview, RadarrAddResponse } from "@/app/types/movie";
+import type {
+  LetterboxdImportResponse,
+  MovieReview,
+  PublicSettings,
+  RadarrAddResponse,
+} from "@/app/types/movie";
 
-interface AppConfig {
+interface LocalConfig {
   username: string;
-  radarrUrl: string;
-  radarrApiKey: string;
 }
 
 type SendState = "idle" | "loading" | "added" | "error";
 
-const STORAGE_KEY = "letterboxd-to-radarr-config";
+const STORAGE_KEY = "letterboxd-to-radarr-local-config";
 const ratingOptions = Array.from({ length: 9 }, (_, index) => 1 + index * 0.5);
 
-const defaultConfig: AppConfig = {
+const defaultConfig: LocalConfig = {
   username: "",
+};
+
+const defaultSettings: PublicSettings = {
   radarrUrl: "",
-  radarrApiKey: "",
+  hasRadarrApiKey: false,
+  letterboxdExportUrl: "https://letterboxd.com/user/exportdata",
+  hasLetterboxdCookie: false,
+  dataDir: "",
 };
 
 function movieKey(movie: MovieReview): string {
@@ -83,27 +92,45 @@ function sendButtonLabel(state: SendState): string {
 }
 
 export default function Home() {
-  const [config, setConfig] = useState<AppConfig>(defaultConfig);
+  const [config, setConfig] = useState<LocalConfig>(defaultConfig);
   const [hasLoadedConfig, setHasLoadedConfig] = useState(false);
+  const [settings, setSettings] = useState<PublicSettings>(defaultSettings);
+  const [settingsDraft, setSettingsDraft] = useState({
+    radarrUrl: "",
+    radarrApiKey: "",
+    letterboxdExportUrl: "https://letterboxd.com/user/exportdata",
+    letterboxdCookie: "",
+  });
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const [minimumRating, setMinimumRating] = useState(4);
   const [movies, setMovies] = useState<MovieReview[]>([]);
   const [isFetching, setIsFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sendStates, setSendStates] = useState<Record<string, SendState>>({});
   const [sendMessages, setSendMessages] = useState<Record<string, string>>({});
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [isFetchingExport, setIsFetchingExport] = useState(false);
 
   useEffect(() => {
     const savedConfig = window.localStorage.getItem(STORAGE_KEY);
 
     if (savedConfig) {
       try {
-        const parsed = JSON.parse(savedConfig) as Partial<AppConfig>;
+        const parsed = JSON.parse(savedConfig) as Partial<LocalConfig> & { minimumRating?: number };
 
         setConfig({
           username: parsed.username ?? "",
-          radarrUrl: parsed.radarrUrl ?? "",
-          radarrApiKey: parsed.radarrApiKey ?? "",
         });
+
+        if (typeof parsed.minimumRating === "number") {
+          setMinimumRating(parsed.minimumRating);
+        }
       } catch {
         window.localStorage.removeItem(STORAGE_KEY);
       }
@@ -117,19 +144,79 @@ export default function Home() {
       return;
     }
 
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-  }, [config, hasLoadedConfig]);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...config, minimumRating }));
+  }, [config, hasLoadedConfig, minimumRating]);
+
+  useEffect(() => {
+    void loadSettings();
+  }, []);
 
   const filteredMovies = useMemo(
     () => movies.filter((movie) => movie.rating >= minimumRating),
     [minimumRating, movies],
   );
 
-  function updateConfig(field: keyof AppConfig, value: string) {
+  function updateConfig(field: keyof LocalConfig, value: string) {
     setConfig((current) => ({
       ...current,
       [field]: value,
     }));
+  }
+
+  async function loadSettings() {
+    try {
+      const response = await fetch("/api/settings", { cache: "no-store" });
+      const body = (await response.json().catch(() => null)) as PublicSettings | null;
+
+      if (!response.ok || !body) {
+        throw new Error(apiMessage(body, "Unable to load settings."));
+      }
+
+      setSettings(body);
+      setSettingsDraft({
+        radarrUrl: body.radarrUrl,
+        radarrApiKey: "",
+        letterboxdExportUrl: body.letterboxdExportUrl,
+        letterboxdCookie: "",
+      });
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : "Unable to load settings.");
+    }
+  }
+
+  async function saveSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSavingSettings(true);
+    setSettingsMessage(null);
+    setSettingsError(null);
+
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(settingsDraft),
+      });
+      const body = (await response.json().catch(() => null)) as PublicSettings | null;
+
+      if (!response.ok || !body) {
+        throw new Error(apiMessage(body, "Unable to save settings."));
+      }
+
+      setSettings(body);
+      setSettingsDraft({
+        radarrUrl: body.radarrUrl,
+        radarrApiKey: "",
+        letterboxdExportUrl: body.letterboxdExportUrl,
+        letterboxdCookie: "",
+      });
+      setSettingsMessage("Settings saved to persistent server storage.");
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : "Unable to save settings.");
+    } finally {
+      setIsSavingSettings(false);
+    }
   }
 
   async function fetchReviews(event: FormEvent<HTMLFormElement>) {
@@ -167,14 +254,113 @@ export default function Home() {
     }
   }
 
+  async function importLetterboxdCsv(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!config.username.trim()) {
+      setImportError("Enter a Letterboxd username before importing reviews.");
+      return;
+    }
+
+    if (!importFile) {
+      setImportError("Choose the Letterboxd export .zip, or a reviews.csv, ratings.csv, or diary.csv file.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("username", config.username.trim());
+    formData.append("file", importFile);
+
+    setIsImporting(true);
+    setImportMessage(null);
+    setImportError(null);
+
+    try {
+      const response = await fetch("/api/letterboxd/import", {
+        method: "POST",
+        body: formData,
+      });
+      const body = (await response.json().catch(() => null)) as LetterboxdImportResponse | null;
+
+      if (!response.ok || !body) {
+        throw new Error(apiMessage(body, "Unable to import Letterboxd export."));
+      }
+
+      setMovies(body.movies.filter(isMovieReview));
+      const fileSummary = body.importedFiles?.length
+        ? ` Files: ${body.importedFiles
+            .map((file) => `${file.fileName} (${file.importedCount})`)
+            .join(", ")}.`
+        : "";
+
+      setImportMessage(
+        `Imported ${body.importedCount} rated movies. Cache now contains ${body.totalCached} movies.${fileSummary}`,
+      );
+      setSendStates({});
+      setSendMessages({});
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Unable to import Letterboxd export.");
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  async function fetchLetterboxdExport() {
+    if (!config.username.trim()) {
+      setImportError("Enter a Letterboxd username before fetching the export.");
+      return;
+    }
+
+    if (!settings.hasLetterboxdCookie) {
+      setImportError("Save your Letterboxd session cookie in Settings before fetching the export.");
+      return;
+    }
+
+    setIsFetchingExport(true);
+    setImportMessage(null);
+    setImportError(null);
+
+    try {
+      const response = await fetch("/api/letterboxd/export", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ username: config.username.trim() }),
+      });
+      const body = (await response.json().catch(() => null)) as LetterboxdImportResponse | null;
+
+      if (!response.ok || !body) {
+        throw new Error(apiMessage(body, "Unable to fetch Letterboxd export."));
+      }
+
+      const fileSummary = body.importedFiles?.length
+        ? ` Files: ${body.importedFiles
+            .map((file) => `${file.fileName} (${file.importedCount})`)
+            .join(", ")}.`
+        : "";
+
+      setMovies(body.movies.filter(isMovieReview));
+      setImportMessage(
+        `Fetched and imported ${body.importedCount} rated movies. Cache now contains ${body.totalCached} movies.${fileSummary}`,
+      );
+      setSendStates({});
+      setSendMessages({});
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Unable to fetch Letterboxd export.");
+    } finally {
+      setIsFetchingExport(false);
+    }
+  }
+
   async function sendToRadarr(movie: MovieReview) {
     const key = movieKey(movie);
 
-    if (!config.radarrUrl.trim() || !config.radarrApiKey.trim()) {
+    if (!settings.radarrUrl || !settings.hasRadarrApiKey) {
       setSendStates((current) => ({ ...current, [key]: "error" }));
       setSendMessages((current) => ({
         ...current,
-        [key]: "Enter your Radarr Base URL and API key first.",
+        [key]: "Open Settings and save your Radarr Base URL and API key first.",
       }));
       return;
     }
@@ -191,8 +377,6 @@ export default function Home() {
         body: JSON.stringify({
           title: movie.title,
           year: movie.year,
-          radarrUrl: config.radarrUrl.trim(),
-          radarrApiKey: config.radarrApiKey.trim(),
         }),
       });
       const body = (await response.json().catch(() => null)) as Partial<RadarrAddResponse> | null;
@@ -230,12 +414,40 @@ export default function Home() {
                 </h1>
               </div>
               <p className="max-w-2xl text-lg leading-8 text-slate-300">
-                Fetch your public Letterboxd RSS feed, filter by star rating, and add the movies
-                directly to Radarr with automatic quality profile and root folder discovery.
+                Fetch your latest Letterboxd RSS items, persist them server-side, import your
+                Letterboxd export for full history, and add selected movies directly to Radarr.
               </p>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm text-slate-400">Radarr settings</p>
+                  <p className="mt-1 font-semibold text-white">
+                    {settings.radarrUrl ? "Configured" : "Not configured"}
+                    {settings.hasRadarrApiKey ? " with API key" : ""}
+                  </p>
+                </div>
+                <button
+                  className="rounded-xl border border-white/10 bg-white px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-orange-200 focus:outline-none focus:ring-2 focus:ring-orange-300 focus:ring-offset-2 focus:ring-offset-slate-950"
+                  onClick={() => {
+                    setSettingsDraft({
+                      radarrUrl: settings.radarrUrl,
+                      radarrApiKey: "",
+                      letterboxdExportUrl: settings.letterboxdExportUrl,
+                      letterboxdCookie: "",
+                    });
+                    setSettingsMessage(null);
+                    setSettingsError(null);
+                    setImportMessage(null);
+                    setImportError(null);
+                    setIsSettingsOpen(true);
+                  }}
+                  type="button"
+                >
+                  Settings
+                </button>
+              </div>
               <dl className="grid grid-cols-2 gap-4 text-sm">
                 <div className="rounded-2xl bg-white/[0.06] p-4">
                   <dt className="text-slate-400">Reviews loaded</dt>
@@ -247,16 +459,16 @@ export default function Home() {
                 </div>
               </dl>
               <p className="mt-4 text-sm leading-6 text-slate-400">
-                Configuration is stored in this browser&apos;s localStorage, including the Radarr API
-                key.
+                Radarr URL, API key, and cached Letterboxd reviews are stored on the server so they
+                can later live on a mounted container volume.
               </p>
             </div>
           </div>
         </section>
 
         <section className="rounded-3xl border border-white/10 bg-slate-950/80 p-6 shadow-xl shadow-black/20 sm:p-8">
-          <form className="grid gap-5 lg:grid-cols-12" onSubmit={fetchReviews}>
-            <label className="flex flex-col gap-2 lg:col-span-3">
+          <form className="grid gap-5 md:grid-cols-[1fr_16rem_auto]" onSubmit={fetchReviews}>
+            <label className="flex flex-col gap-2">
               <span className="text-sm font-semibold text-slate-200">Letterboxd Username</span>
               <input
                 className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300 focus:ring-2 focus:ring-orange-300/30"
@@ -266,28 +478,7 @@ export default function Home() {
               />
             </label>
 
-            <label className="flex flex-col gap-2 lg:col-span-3">
-              <span className="text-sm font-semibold text-slate-200">Radarr Base URL</span>
-              <input
-                className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300 focus:ring-2 focus:ring-orange-300/30"
-                placeholder="http://192.168.1.100:7878"
-                value={config.radarrUrl}
-                onChange={(event) => updateConfig("radarrUrl", event.target.value)}
-              />
-            </label>
-
-            <label className="flex flex-col gap-2 lg:col-span-3">
-              <span className="text-sm font-semibold text-slate-200">Radarr API Key</span>
-              <input
-                className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300 focus:ring-2 focus:ring-orange-300/30"
-                placeholder="Paste API key"
-                type="password"
-                value={config.radarrApiKey}
-                onChange={(event) => updateConfig("radarrApiKey", event.target.value)}
-              />
-            </label>
-
-            <label className="flex flex-col gap-2 lg:col-span-2">
+            <label className="flex flex-col gap-2">
               <span className="text-sm font-semibold text-slate-200">Minimum Star Rating</span>
               <select
                 className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-white outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-300/30"
@@ -302,9 +493,9 @@ export default function Home() {
               </select>
             </label>
 
-            <div className="flex items-end lg:col-span-1">
+            <div className="flex items-end">
               <button
-                className="w-full rounded-2xl bg-white px-4 py-3 font-bold text-slate-950 transition hover:bg-orange-200 focus:outline-none focus:ring-2 focus:ring-orange-300 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-70"
+                className="w-full rounded-2xl bg-white px-4 py-3 font-bold text-slate-950 transition hover:bg-orange-200 focus:outline-none focus:ring-2 focus:ring-orange-300 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-70 md:w-auto"
                 disabled={isFetching}
                 type="submit"
               >
@@ -312,6 +503,11 @@ export default function Home() {
               </button>
             </div>
           </form>
+
+          <p className="mt-4 text-sm leading-6 text-slate-400">
+            RSS only exposes the latest 50 items. This app now merges every fetch into persistent
+            storage; use Settings to import the official Letterboxd export ZIP for older ratings.
+          </p>
 
           {fetchError ? (
             <div className="mt-5 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
@@ -325,7 +521,8 @@ export default function Home() {
             <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.04] p-10 text-center">
               <h2 className="text-2xl font-bold text-white">No reviews loaded yet</h2>
               <p className="mt-3 text-slate-400">
-                Enter your configuration, choose a minimum rating, and fetch reviews to begin.
+                Enter a Letterboxd username and fetch reviews, or import your Letterboxd export in
+                Settings to backfill more than the RSS limit.
               </p>
             </div>
           ) : filteredMovies.length === 0 ? (
@@ -383,6 +580,188 @@ export default function Home() {
           )}
         </section>
       </div>
+
+      {isSettingsOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-slate-950 p-6 shadow-2xl shadow-black sm:p-8">
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-wide text-orange-200">Settings</p>
+                <h2 className="mt-2 text-3xl font-black text-white">Persistent app settings</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                  Settings are saved to JSON on the server. Set LETTERBOXD_RADARR_DATA_DIR or
+                  APP_DATA_DIR later to point this at a container volume.
+                </p>
+              </div>
+              <button
+                className="rounded-full border border-white/10 px-3 py-1 text-sm font-semibold text-slate-300 transition hover:bg-white/10"
+                onClick={() => setIsSettingsOpen(false)}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+
+            <form className="space-y-4" onSubmit={saveSettings}>
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-semibold text-slate-200">Radarr Base URL</span>
+                <input
+                  className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300 focus:ring-2 focus:ring-orange-300/30"
+                  placeholder="http://192.168.1.100:7878"
+                  value={settingsDraft.radarrUrl}
+                  onChange={(event) =>
+                    setSettingsDraft((current) => ({ ...current, radarrUrl: event.target.value }))
+                  }
+                />
+              </label>
+
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-semibold text-slate-200">Radarr API Key</span>
+                <input
+                  className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300 focus:ring-2 focus:ring-orange-300/30"
+                  placeholder={
+                    settings.hasRadarrApiKey
+                      ? "Saved API key configured; leave blank to keep it"
+                      : "Paste API key"
+                  }
+                  type="password"
+                  value={settingsDraft.radarrApiKey}
+                  onChange={(event) =>
+                    setSettingsDraft((current) => ({ ...current, radarrApiKey: event.target.value }))
+                  }
+                />
+              </label>
+
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-semibold text-slate-200">Letterboxd Export URL</span>
+                <input
+                  className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300 focus:ring-2 focus:ring-orange-300/30"
+                  placeholder="https://letterboxd.com/user/exportdata"
+                  value={settingsDraft.letterboxdExportUrl}
+                  onChange={(event) =>
+                    setSettingsDraft((current) => ({
+                      ...current,
+                      letterboxdExportUrl: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-semibold text-slate-200">Letterboxd Session Cookie</span>
+                <textarea
+                  className="min-h-24 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300 focus:ring-2 focus:ring-orange-300/30"
+                  placeholder={
+                    settings.hasLetterboxdCookie
+                      ? "Saved cookie configured; leave blank to keep it"
+                      : "Paste the Cookie header from an authenticated Letterboxd browser request"
+                  }
+                  value={settingsDraft.letterboxdCookie}
+                  onChange={(event) =>
+                    setSettingsDraft((current) => ({ ...current, letterboxdCookie: event.target.value }))
+                  }
+                />
+              </label>
+
+              <div className="rounded-2xl bg-white/[0.05] p-4 text-sm text-slate-400">
+                <p>
+                  <span className="font-semibold text-slate-300">Storage directory:</span>{" "}
+                  {settings.dataDir || "Loading..."}
+                </p>
+                <p className="mt-2">
+                  <span className="font-semibold text-slate-300">Letterboxd cookie:</span>{" "}
+                  {settings.hasLetterboxdCookie ? "Configured" : "Not configured"}
+                </p>
+                <p className="mt-2">
+                  API keys and cookies are stored in plaintext in this directory. Restrict access to
+                  the eventual container volume.
+                </p>
+              </div>
+
+              {settingsMessage ? (
+                <div className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                  {settingsMessage}
+                </div>
+              ) : null}
+              {settingsError ? (
+                <div className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                  {settingsError}
+                </div>
+              ) : null}
+
+              <button
+                className="rounded-2xl bg-orange-400 px-5 py-3 font-bold text-slate-950 transition hover:bg-orange-300 disabled:cursor-not-allowed disabled:opacity-70"
+                disabled={isSavingSettings}
+                type="submit"
+              >
+                {isSavingSettings ? "Saving..." : "Save Settings"}
+              </button>
+            </form>
+
+            <div className="my-8 h-px bg-white/10" />
+
+            <form className="space-y-4" onSubmit={importLetterboxdCsv}>
+              <div>
+                <h3 className="text-xl font-bold text-white">Backfill Letterboxd history</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                  Letterboxd RSS is limited to 50 items. Export your account data from Letterboxd
+                  and upload the full <span className="font-semibold text-slate-200">.zip</span> file.
+                  The app reads reviews.csv, ratings.csv, and diary.csv from the archive to backfill
+                  older rated movies into the persistent cache.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-orange-300/20 bg-orange-300/10 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-semibold text-orange-100">Automated export fetch</p>
+                    <p className="mt-1 text-sm leading-6 text-orange-100/80">
+                      Uses the saved Letterboxd session cookie to download and import the export ZIP.
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-2xl bg-orange-400 px-5 py-3 font-bold text-slate-950 transition hover:bg-orange-300 disabled:cursor-not-allowed disabled:opacity-70"
+                    disabled={isFetchingExport}
+                    onClick={() => void fetchLetterboxdExport()}
+                    type="button"
+                  >
+                    {isFetchingExport ? "Fetching..." : "Fetch Export ZIP"}
+                  </button>
+                </div>
+              </div>
+
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-semibold text-slate-200">Manual fallback: export .zip or CSV</span>
+                <input
+                  accept=".zip,.csv,application/zip,text/csv"
+                  className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-slate-200 file:mr-4 file:rounded-xl file:border-0 file:bg-white file:px-4 file:py-2 file:font-semibold file:text-slate-950"
+                  onChange={(event) => setImportFile(event.target.files?.[0] ?? null)}
+                  type="file"
+                />
+              </label>
+
+              {importMessage ? (
+                <div className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                  {importMessage}
+                </div>
+              ) : null}
+              {importError ? (
+                <div className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                  {importError}
+                </div>
+              ) : null}
+
+              <button
+                className="rounded-2xl border border-white/10 bg-white px-5 py-3 font-bold text-slate-950 transition hover:bg-orange-200 disabled:cursor-not-allowed disabled:opacity-70"
+                disabled={isImporting}
+                type="submit"
+              >
+                {isImporting ? "Importing..." : "Import Export File"}
+              </button>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
