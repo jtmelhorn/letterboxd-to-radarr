@@ -38,6 +38,46 @@ function textValue(value: unknown): string {
   return "";
 }
 
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(parseInt(code, 10)));
+}
+
+function extractFromContent(content: string): { posterUrl?: string; reviewText?: string } {
+  if (!content) return {};
+
+  // Extract the first poster image URL from the content HTML
+  const imgMatch = content.match(/<img[^>]+src="([^"]+)"/i);
+  const posterUrl = imgMatch?.[1] ?? undefined;
+
+  // Strip HTML tags but preserve paragraph breaks as newlines
+  const withBreaks = content
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<[^>]+>/g, "");
+
+  const decoded = decodeHtmlEntities(withBreaks);
+
+  // Split into non-empty lines and filter out auto-generated "Watched…" lines
+  const lines = decoded
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .filter((line) => !/^Watched\s+.+\s+(on|\.)\s*/i.test(line) && !/^Watched\s*$/.test(line));
+
+  const reviewText = lines.join("\n\n").trim() || undefined;
+
+  return { posterUrl, reviewText };
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const username = searchParams.get("username")?.trim();
@@ -71,10 +111,19 @@ export async function GET(request: Request) {
           return null;
         }
 
+        const { posterUrl, reviewText } = extractFromContent(
+          typeof item.content === "string" ? item.content : "",
+        );
+
+        const letterboxdUrl = typeof item.link === "string" && item.link ? item.link : undefined;
+
         return {
           title,
           year: Number.isNaN(year) ? null : year,
           rating,
+          ...(posterUrl && { posterUrl }),
+          ...(reviewText && { reviewText }),
+          ...(letterboxdUrl && { letterboxdUrl }),
         };
       })
       .filter((movie): movie is MovieReview => movie !== null);

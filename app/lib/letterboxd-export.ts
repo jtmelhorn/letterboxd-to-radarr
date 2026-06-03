@@ -61,6 +61,7 @@ function rowToMovie(row: CsvRow): MovieReview | null {
   const title = pick(row, ["Name", "Title", "Film", "filmTitle", "Movie"]);
   const yearValue = pick(row, ["Year", "Released", "filmYear", "Release Year"]);
   const ratingValue = pick(row, ["Rating", "memberRating", "Member Rating", "Stars"]);
+  const reviewText = pick(row, ["Review", "review", "Review Text", "Notes"]).trim() || undefined;
   const year = Number.parseInt(yearValue, 10);
   const rating = parseRating(ratingValue);
 
@@ -72,6 +73,7 @@ function rowToMovie(row: CsvRow): MovieReview | null {
     title,
     year: Number.isNaN(year) ? null : year,
     rating,
+    ...(reviewText && { reviewText }),
   };
 }
 
