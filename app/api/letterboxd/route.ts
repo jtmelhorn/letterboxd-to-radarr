@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import Parser from "rss-parser";
 
+import { getCachedReviews, mergeCachedReviews } from "@/app/lib/storage";
 import type { MovieReview } from "@/app/types/movie";
 
 interface LetterboxdFeedItem {
@@ -12,6 +13,8 @@ interface LetterboxdFeedItem {
   "letterboxd:filmYear"?: string;
   "letterboxd:memberRating"?: string;
 }
+
+export const runtime = "nodejs";
 
 const parser = new Parser<Record<string, never>, LetterboxdFeedItem>({
   customFields: {
@@ -76,9 +79,17 @@ export async function GET(request: Request) {
       })
       .filter((movie): movie is MovieReview => movie !== null);
 
-    return NextResponse.json(movies);
+    const cachedMovies = await mergeCachedReviews(username, movies);
+
+    return NextResponse.json(cachedMovies);
   } catch (error) {
     console.error("Failed to fetch Letterboxd RSS feed", error);
+
+    const cachedMovies = await getCachedReviews(username);
+
+    if (cachedMovies.length > 0) {
+      return NextResponse.json(cachedMovies);
+    }
 
     return NextResponse.json(
       { message: "Unable to fetch or parse the Letterboxd RSS feed." },

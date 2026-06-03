@@ -23,3 +23,15 @@ export interface RadarrAddResponse {
     tmdbId: number;
   };
 }
+
+export interface PublicSettings {
+  radarrUrl: string;
+  hasRadarrApiKey: boolean;
+  dataDir: string;
+}
+
+export interface LetterboxdImportResponse {
+  importedCount: number;
+  totalCached: number;
+  movies: MovieReview[];
+}

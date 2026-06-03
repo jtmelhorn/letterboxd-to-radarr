@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
+import { getSettings } from "@/app/lib/storage";
 import type { RadarrAddRequest, RadarrAddResponse } from "@/app/types/movie";
+
+export const runtime = "nodejs";
 
 interface RadarrImage {
   coverType?: string;
@@ -118,14 +121,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "Request body must be valid JSON." }, { status: 400 });
   }
 
+  const settings = await getSettings();
   const title = body.title?.trim();
-  const radarrUrl = body.radarrUrl?.trim();
-  const radarrApiKey = body.radarrApiKey?.trim();
+  const radarrUrl = body.radarrUrl?.trim() || settings.radarrUrl;
+  const radarrApiKey = body.radarrApiKey?.trim() || settings.radarrApiKey;
   const year = firstNumber(body.year);
 
-  if (!title || !radarrUrl || !radarrApiKey) {
+  if (!title) {
+    return NextResponse.json({ message: "title is required." }, { status: 400 });
+  }
+
+  if (!radarrUrl || !radarrApiKey) {
     return NextResponse.json(
-      { message: "title, radarrUrl, and radarrApiKey are required." },
+      { message: "Configure the Radarr Base URL and API key in Settings first." },
       { status: 400 },
     );
   }
