@@ -1,34 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: light;
-
-  /* Apple design tokens */
-  --color-bg: #f5f5f7;
-  --color-surface: #ffffff;
-  --color-surface-secondary: #f9f9fb;
-  --color-border: rgba(0, 0, 0, 0.08);
-  --color-border-strong: rgba(0, 0, 0, 0.13);
-  --color-text-primary: #1d1d1f;
-  --color-text-secondary: #6e6e73;
-  --color-text-tertiary: #86868b;
-  --color-accent: #0071e3;
-  --color-accent-hover: #0077ed;
-  --color-success: #34c759;
-  --color-error: #ff3b30;
-
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-elevated:
-    0 8px 32px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.06),
-    0 0 0 1px rgba(0, 0, 0, 0.04);
-  --shadow-modal:
-    0 24px 80px rgba(0, 0, 0, 0.18), 0 8px 24px rgba(0, 0, 0, 0.1),
-    0 0 0 1px rgba(0, 0, 0, 0.05);
-
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 18px;
-  --radius-xl: 22px;
+  color-scheme: dark;
 }
 
 * {
@@ -42,8 +15,8 @@ html {
 body {
   min-height: 100%;
   margin: 0;
-  background: var(--color-bg);
-  color: var(--color-text-primary);
+  background: #09090b;
+  color: #fafafa;
   font-family:
     -apple-system,
     BlinkMacSystemFont,
@@ -67,79 +40,47 @@ textarea {
   font: inherit;
 }
 
-/* ── Reusable shadow utilities ────────────────────────── */
-.shadow-card {
-  box-shadow: var(--shadow-card);
-}
-
-.shadow-elevated {
-  box-shadow: var(--shadow-elevated);
-}
-
-.shadow-modal {
-  box-shadow: var(--shadow-modal);
-}
-
-/* ── Glassmorphism overlay ────────────────────────────── */
-.glass {
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-}
-
-/* ── Smooth accordion animation ──────────────────────── */
-.accordion-enter {
-  animation: accordion-down 0.22s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-@keyframes accordion-down {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* ── Star rating color ────────────────────────────────── */
-.star-rating {
-  color: #f59e0b;
-  letter-spacing: 0.02em;
-}
-
-/* ── Movie poster placeholder ─────────────────────────── */
-.poster-placeholder {
-  background: linear-gradient(145deg, #e8e8ed 0%, #d8d8dc 100%);
-}
-
-/* ── Smooth card hover transition ────────────────────── */
-.movie-card {
+/* ── Poster card hover ─────────────────────────────────── */
+.poster-card {
   transition:
-    box-shadow 0.2s ease,
-    transform 0.2s ease;
+    transform 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.18s ease;
+  position: relative;
 }
 
-.movie-card:hover {
-  box-shadow: var(--shadow-elevated);
-  transform: translateY(-2px);
+.poster-card:hover {
+  transform: scale(1.04);
+  z-index: 2;
+  box-shadow:
+    0 0 0 2px rgba(249, 115, 22, 0.55),
+    0 16px 40px rgba(0, 0, 0, 0.6);
 }
 
-/* ── Custom scrollbar for modal ──────────────────────── */
-.modal-scroll::-webkit-scrollbar {
-  width: 6px;
+/* ── Poster bottom fade ────────────────────────────────── */
+.poster-gradient {
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.97) 0%,
+    rgba(0, 0, 0, 0.72) 28%,
+    rgba(0, 0, 0, 0.25) 55%,
+    transparent 100%
+  );
 }
 
-.modal-scroll::-webkit-scrollbar-track {
+/* ── Custom scrollbar ──────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 5px;
+}
+
+::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.modal-scroll::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 3px;
 }
 
-.modal-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
 }
