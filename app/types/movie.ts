@@ -32,6 +32,10 @@ export interface PublicSettings {
 
 export interface LetterboxdImportResponse {
   importedCount: number;
+  importedFiles?: Array<{
+    fileName: string;
+    importedCount: number;
+  }>;
   totalCached: number;
   movies: MovieReview[];
 }

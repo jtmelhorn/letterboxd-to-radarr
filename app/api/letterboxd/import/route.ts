@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { parse } from "csv-parse/sync";
+import JSZip from "jszip";
 
 import { mergeCachedReviews } from "@/app/lib/storage";
 import type { MovieReview } from "@/app/types/movie";
@@ -8,11 +9,30 @@ export const runtime = "nodejs";
 
 type CsvRow = Record<string, string | undefined>;
 
+interface ParsedImportFile {
+  fileName: string;
+  movies: MovieReview[];
+}
+
+const exportCsvFilePattern = /(^|\/)(reviews|ratings|diary)\.csv$/i;
+
+function normalizeHeader(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 function pick(row: CsvRow, names: string[]): string {
+  const normalizedNames = new Set(names.map(normalizeHeader));
+
   for (const name of names) {
     const value = row[name];
 
     if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  for (const [key, value] of Object.entries(row)) {
+    if (normalizedNames.has(normalizeHeader(key)) && typeof value === "string" && value.trim()) {
       return value.trim();
     }
   }
@@ -34,9 +54,9 @@ function parseRating(value: string): number {
 }
 
 function rowToMovie(row: CsvRow): MovieReview | null {
-  const title = pick(row, ["Name", "Title", "Film", "filmTitle"]);
-  const yearValue = pick(row, ["Year", "Released", "filmYear"]);
-  const ratingValue = pick(row, ["Rating", "memberRating"]);
+  const title = pick(row, ["Name", "Title", "Film", "filmTitle", "Movie"]);
+  const yearValue = pick(row, ["Year", "Released", "filmYear", "Release Year"]);
+  const ratingValue = pick(row, ["Rating", "memberRating", "Member Rating", "Stars"]);
   const year = Number.parseInt(yearValue, 10);
   const rating = parseRating(ratingValue);
 
@@ -49,6 +69,46 @@ function rowToMovie(row: CsvRow): MovieReview | null {
     year: Number.isNaN(year) ? null : year,
     rating,
   };
+}
+
+function parseCsvFile(fileName: string, csv: string): ParsedImportFile {
+  const rows = parse(csv, {
+    bom: true,
+    columns: true,
+    relaxColumnCount: true,
+    skipEmptyLines: true,
+    trim: true,
+  }) as CsvRow[];
+
+  return {
+    fileName,
+    movies: rows.map(rowToMovie).filter((movie): movie is MovieReview => movie !== null),
+  };
+}
+
+async function parseZipExport(file: File): Promise<ParsedImportFile[]> {
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const csvFiles = Object.values(zip.files).filter(
+    (entry) => !entry.dir && exportCsvFilePattern.test(entry.name),
+  );
+
+  return Promise.all(
+    csvFiles.map(async (entry) => parseCsvFile(entry.name, await entry.async("string"))),
+  );
+}
+
+async function parseUploadedFile(file: File): Promise<ParsedImportFile[]> {
+  const fileName = file.name.toLowerCase();
+
+  if (fileName.endsWith(".zip")) {
+    return parseZipExport(file);
+  }
+
+  if (fileName.endsWith(".csv") || file.type === "text/csv") {
+    return [parseCsvFile(file.name || "uploaded.csv", await file.text())];
+  }
+
+  throw new Error("Unsupported file type.");
 }
 
 export async function POST(request: Request) {
@@ -65,28 +125,24 @@ export async function POST(request: Request) {
 
   if (!(file instanceof File)) {
     return NextResponse.json(
-      { message: "Upload the reviews.csv file from your Letterboxd export." },
+      { message: "Upload your Letterboxd export .zip, or a reviews.csv, ratings.csv, or diary.csv file." },
       { status: 400 },
     );
   }
 
   try {
-    const csv = await file.text();
-    const rows = parse(csv, {
-      bom: true,
-      columns: true,
-      relaxColumnCount: true,
-      skipEmptyLines: true,
-      trim: true,
-    }) as CsvRow[];
-
-    const importedMovies = rows
-      .map(rowToMovie)
-      .filter((movie): movie is MovieReview => movie !== null);
+    const parsedFiles = await parseUploadedFile(file);
+    const importedMovies = parsedFiles.flatMap((parsedFile) => parsedFile.movies);
+    const importedFiles = parsedFiles
+      .filter((parsedFile) => parsedFile.movies.length > 0)
+      .map((parsedFile) => ({
+        fileName: parsedFile.fileName,
+        importedCount: parsedFile.movies.length,
+      }));
 
     if (importedMovies.length === 0) {
       return NextResponse.json(
-        { message: "No rated movies were found in the uploaded CSV." },
+        { message: "No rated movies were found in the uploaded Letterboxd export." },
         { status: 400 },
       );
     }
@@ -95,14 +151,15 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       importedCount: importedMovies.length,
+      importedFiles,
       totalCached: movies.length,
       movies,
     });
   } catch (error) {
-    console.error("Failed to import Letterboxd CSV", error);
+    console.error("Failed to import Letterboxd export", error);
 
     return NextResponse.json(
-      { message: "Unable to parse the uploaded Letterboxd CSV." },
+      { message: "Unable to parse the uploaded Letterboxd export." },
       { status: 400 },
     );
   }

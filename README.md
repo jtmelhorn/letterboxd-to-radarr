@@ -12,6 +12,7 @@ Runtime dependencies:
 - `react-dom`
 - `rss-parser`
 - `csv-parse`
+- `jszip`
 
 Development dependencies:
 
@@ -43,7 +44,7 @@ Open http://localhost:3000 and enter:
 
 The Letterboxd username and minimum rating are stored in browser `localStorage`. Radarr Base URL, Radarr API key, and cached Letterboxd reviews are stored server-side as JSON. By default this data lives in `.data`; set `LETTERBOXD_RADARR_DATA_DIR` or `APP_DATA_DIR` to point at a persistent directory, such as a future container volume.
 
-Letterboxd RSS only exposes the latest 50 activity items. Fetching reviews now merges those items into the persistent cache. To backfill older reviews, use Settings to upload `reviews.csv` from a Letterboxd account export.
+Letterboxd RSS only exposes the latest 50 activity items. Fetching reviews now merges those items into the persistent cache. To backfill older reviews, use Settings to upload the official Letterboxd account export `.zip`. The importer reads `reviews.csv`, `ratings.csv`, and `diary.csv` from the archive; uploading one of those CSV files directly is also supported.
 
 ## Verification
 

@@ -245,7 +245,7 @@ export default function Home() {
     }
 
     if (!importFile) {
-      setImportError("Choose the reviews.csv file from your Letterboxd export.");
+      setImportError("Choose the Letterboxd export .zip, or a reviews.csv, ratings.csv, or diary.csv file.");
       return;
     }
 
@@ -265,17 +265,23 @@ export default function Home() {
       const body = (await response.json().catch(() => null)) as LetterboxdImportResponse | null;
 
       if (!response.ok || !body) {
-        throw new Error(apiMessage(body, "Unable to import Letterboxd CSV."));
+        throw new Error(apiMessage(body, "Unable to import Letterboxd export."));
       }
 
       setMovies(body.movies.filter(isMovieReview));
+      const fileSummary = body.importedFiles?.length
+        ? ` Files: ${body.importedFiles
+            .map((file) => `${file.fileName} (${file.importedCount})`)
+            .join(", ")}.`
+        : "";
+
       setImportMessage(
-        `Imported ${body.importedCount} rated reviews. Cache now contains ${body.totalCached} movies.`,
+        `Imported ${body.importedCount} rated movies. Cache now contains ${body.totalCached} movies.${fileSummary}`,
       );
       setSendStates({});
       setSendMessages({});
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : "Unable to import Letterboxd CSV.");
+      setImportError(error instanceof Error ? error.message : "Unable to import Letterboxd export.");
     } finally {
       setIsImporting(false);
     }
@@ -429,7 +435,7 @@ export default function Home() {
 
           <p className="mt-4 text-sm leading-6 text-slate-400">
             RSS only exposes the latest 50 items. This app now merges every fetch into persistent
-            storage; use Settings to import Letterboxd&apos;s reviews.csv for older reviews.
+            storage; use Settings to import the official Letterboxd export ZIP for older ratings.
           </p>
 
           {fetchError ? (
@@ -593,15 +599,16 @@ export default function Home() {
                 <h3 className="text-xl font-bold text-white">Backfill Letterboxd history</h3>
                 <p className="mt-2 text-sm leading-6 text-slate-400">
                   Letterboxd RSS is limited to 50 items. Export your account data from Letterboxd
-                  and upload <span className="font-semibold text-slate-200">reviews.csv</span> to
-                  import older rated reviews into the persistent cache.
+                  and upload the full <span className="font-semibold text-slate-200">.zip</span> file.
+                  The app reads reviews.csv, ratings.csv, and diary.csv from the archive to backfill
+                  older rated movies into the persistent cache.
                 </p>
               </div>
 
               <label className="flex flex-col gap-2">
-                <span className="text-sm font-semibold text-slate-200">Letterboxd reviews.csv</span>
+                <span className="text-sm font-semibold text-slate-200">Letterboxd export .zip or CSV</span>
                 <input
-                  accept=".csv,text/csv"
+                  accept=".zip,.csv,application/zip,text/csv"
                   className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-slate-200 file:mr-4 file:rounded-xl file:border-0 file:bg-white file:px-4 file:py-2 file:font-semibold file:text-slate-950"
                   onChange={(event) => setImportFile(event.target.files?.[0] ?? null)}
                   type="file"
