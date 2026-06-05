@@ -44,6 +44,46 @@ The Letterboxd username and minimum rating are stored in browser `localStorage`.
 
 Letterboxd RSS exposes the latest activity items. Fetching reviews merges those items into the persistent cache, sorts the movie wall by newest review date and then star rating, and automatically adds movies rated 4.0 stars or higher to Radarr when Radarr settings are configured.
 
+## Container
+
+Build the production image:
+
+```bash
+docker build -t letterboxd-to-radarr:latest .
+```
+
+Run it locally:
+
+```bash
+docker run --rm -p 3000:3000 \
+  -v letterboxd-radarr-data:/data \
+  -e REVIEWER=your-letterboxd-username \
+  -e SONARR=http://192.168.1.100:7878 \
+  -e API_KEY=your-api-key \
+  letterboxd-to-radarr:latest
+```
+
+The app is movie-focused and talks to Radarr. `SONARR` is accepted as a media-server URL alias for container compatibility with the requested variable names.
+
+Supported runtime variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `REVIEWER` or `LETTERBOXD_REVIEWER` | Prefills the Letterboxd username. |
+| `SONARR`, `SONARR_URL`, or `RADARR_URL` | Media server base URL. |
+| `API_KEY`, `SONARR_API_KEY`, or `RADARR_API_KEY` | Media server API key. |
+| `LETTERBOXD_RADARR_DATA_DIR` or `APP_DATA_DIR` | Persistent settings/cache directory. Defaults to `/data` in the container. |
+| `PORT` | HTTP port inside the container. Defaults to `3000`. |
+
+Tag and push to a public registry:
+
+```bash
+docker tag letterboxd-to-radarr:latest registry.example.com/your-name/letterboxd-to-radarr:latest
+docker push registry.example.com/your-name/letterboxd-to-radarr:latest
+```
+
+Pass secrets like `API_KEY` at runtime instead of baking them into the image.
+
 ## Verification
 
 ```bash

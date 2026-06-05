@@ -29,6 +29,7 @@ export interface RadarrAddResponse {
 }
 
 export interface PublicSettings {
+  reviewer: string;
   radarrUrl: string;
   hasRadarrApiKey: boolean;
   dataDir: string;

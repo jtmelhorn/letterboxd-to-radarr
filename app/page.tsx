@@ -21,6 +21,7 @@ const ratingOptions = Array.from({ length: 9 }, (_, i) => 1 + i * 0.5);
 const defaultConfig: LocalConfig = { username: "" };
 
 const defaultSettings: PublicSettings = {
+  reviewer: "",
   radarrUrl: "",
   hasRadarrApiKey: false,
   dataDir: "",
@@ -189,6 +190,7 @@ export default function Home() {
   const [minimumRating, setMinimumRating] = useState(4);
   const [movies, setMovies] = useState<MovieReview[]>([]);
   const [isFetching, setIsFetching] = useState(false);
+  const [hasAutoFetched, setHasAutoFetched] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sendStates, setSendStates] = useState<Record<string, SendState>>({});
   const [sendMessages, setSendMessages] = useState<Record<string, string>>({});
@@ -217,6 +219,16 @@ export default function Home() {
   useEffect(() => {
     void loadSettings();
   }, []);
+
+  useEffect(() => {
+    if (!hasLoadedConfig || !settings.reviewer || hasAutoFetched || isFetching) return;
+
+    const username = config.username.trim() || settings.reviewer.trim();
+    if (!username) return;
+
+    setHasAutoFetched(true);
+    void fetchReviewsForUsername(username, settings);
+  }, [config.username, hasAutoFetched, hasLoadedConfig, isFetching, settings]);
 
   // ── Close modals on ESC ────────────────────────────────────────────────
   useEffect(() => {
@@ -265,6 +277,9 @@ export default function Home() {
       const body = (await res.json().catch(() => null)) as PublicSettings | null;
       if (!res.ok || !body) throw new Error(apiMessage(body, "Unable to load settings."));
       setSettings(body);
+      if (body.reviewer) {
+        setConfig((current) => (current.username.trim() ? current : { username: body.reviewer }));
+      }
       setSettingsDraft({
         radarrUrl: body.radarrUrl,
         radarrApiKey: "",
@@ -303,6 +318,10 @@ export default function Home() {
   async function fetchReviews(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const username = config.username.trim();
+    await fetchReviewsForUsername(username);
+  }
+
+  async function fetchReviewsForUsername(username: string, currentSettings = settings) {
     if (!username) {
       setFetchError("Enter a Letterboxd username.");
       return;
@@ -318,7 +337,7 @@ export default function Home() {
       setMovies(fetchedMovies);
       setSendStates({});
       setSendMessages({});
-      void autoDownloadHighRatedMovies(fetchedMovies);
+      autoDownloadHighRatedMovies(fetchedMovies, currentSettings);
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : "Unable to fetch Letterboxd reviews.");
     } finally {
@@ -326,8 +345,8 @@ export default function Home() {
     }
   }
 
-  function autoDownloadHighRatedMovies(fetchedMovies: MovieReview[]) {
-    if (!settings.radarrUrl || !settings.hasRadarrApiKey) {
+  function autoDownloadHighRatedMovies(fetchedMovies: MovieReview[], currentSettings = settings) {
+    if (!currentSettings.radarrUrl || !currentSettings.hasRadarrApiKey) {
       return;
     }
 
@@ -339,13 +358,13 @@ export default function Home() {
       }
 
       queued.add(key);
-      void sendToRadarr(movie);
+      void sendToRadarr(movie, currentSettings);
     }
   }
 
-  async function sendToRadarr(movie: MovieReview) {
+  async function sendToRadarr(movie: MovieReview, currentSettings = settings) {
     const key = movieKey(movie);
-    if (!settings.radarrUrl || !settings.hasRadarrApiKey) {
+    if (!currentSettings.radarrUrl || !currentSettings.hasRadarrApiKey) {
       setSendStates((c) => ({ ...c, [key]: "error" }));
       setSendMessages((c) => ({
         ...c,

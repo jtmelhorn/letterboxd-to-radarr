@@ -9,6 +9,7 @@ export interface StoredSettings {
 }
 
 export interface PublicSettings {
+  reviewer: string;
   radarrUrl: string;
   hasRadarrApiKey: boolean;
   dataDir: string;
@@ -31,6 +32,29 @@ const emptySettings: StoredSettings = {
 const emptyReviewCache: ReviewCacheFile = {
   usernames: {},
 };
+
+function envValue(names: string[]): string {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+function configuredRadarrUrl(): string {
+  return envValue(["RADARR_URL", "SONARR_URL", "SONARR"]);
+}
+
+function configuredRadarrApiKey(): string {
+  return envValue(["RADARR_API_KEY", "SONARR_API_KEY", "API_KEY"]);
+}
+
+export function getConfiguredReviewer(): string {
+  return envValue(["LETTERBOXD_REVIEWER", "REVIEWER"]);
+}
 
 export function getDataDir(): string {
   return (
@@ -144,8 +168,10 @@ export async function getSettings(): Promise<StoredSettings> {
   const settings = await readJsonFile<Partial<StoredSettings>>(settingsPath(), emptySettings);
 
   return {
-    radarrUrl: typeof settings.radarrUrl === "string" ? settings.radarrUrl : "",
-    radarrApiKey: typeof settings.radarrApiKey === "string" ? settings.radarrApiKey : "",
+    radarrUrl: configuredRadarrUrl() || (typeof settings.radarrUrl === "string" ? settings.radarrUrl : ""),
+    radarrApiKey:
+      configuredRadarrApiKey() ||
+      (typeof settings.radarrApiKey === "string" ? settings.radarrApiKey : ""),
   };
 }
 
@@ -155,6 +181,7 @@ export async function saveSettings(settings: StoredSettings): Promise<void> {
 
 export function toPublicSettings(settings: StoredSettings): PublicSettings {
   return {
+    reviewer: getConfiguredReviewer(),
     radarrUrl: settings.radarrUrl,
     hasRadarrApiKey: settings.radarrApiKey.length > 0,
     dataDir: getDataDir(),
