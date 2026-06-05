@@ -252,10 +252,13 @@ export async function POST(request: Request) {
 
     if (!addResponse.ok) {
       const message = errorMessageFromBody(addResponseBody, "Unable to add movie to Radarr.");
+      if (isAlreadyExistsMessage(message)) {
+        return NextResponse.json({ message: "Already exists in Radarr." });
+      }
 
       return NextResponse.json(
-        { message: isAlreadyExistsMessage(message) ? "Already exists in Radarr." : message },
-        { status: isAlreadyExistsMessage(message) ? 409 : addResponse.status },
+        { message },
+        { status: addResponse.status },
       );
     }
 

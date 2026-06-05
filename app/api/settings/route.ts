@@ -7,8 +7,6 @@ export const runtime = "nodejs";
 interface SettingsRequestBody {
   radarrUrl?: unknown;
   radarrApiKey?: unknown;
-  letterboxdExportUrl?: unknown;
-  letterboxdCookie?: unknown;
 }
 
 function normalizeHttpUrl(value: string): string | null {
@@ -61,29 +59,10 @@ export async function PUT(request: Request) {
     typeof body.radarrApiKey === "string" && body.radarrApiKey.trim()
       ? body.radarrApiKey.trim()
       : currentSettings.radarrApiKey;
-  const letterboxdExportUrlValue =
-    typeof body.letterboxdExportUrl === "string"
-      ? body.letterboxdExportUrl
-      : currentSettings.letterboxdExportUrl;
-  const letterboxdExportUrl = normalizeHttpUrl(letterboxdExportUrlValue);
-
-  if (letterboxdExportUrl === null || !letterboxdExportUrl.includes("letterboxd.com")) {
-    return NextResponse.json(
-      { message: "Letterboxd export URL must be a valid Letterboxd http or https URL." },
-      { status: 400 },
-    );
-  }
-
-  const letterboxdCookie =
-    typeof body.letterboxdCookie === "string" && body.letterboxdCookie.trim()
-      ? body.letterboxdCookie.trim()
-      : currentSettings.letterboxdCookie;
 
   const settings = {
     radarrUrl,
     radarrApiKey,
-    letterboxdExportUrl,
-    letterboxdCookie,
   };
 
   await saveSettings(settings);

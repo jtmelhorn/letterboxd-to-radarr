@@ -9,6 +9,8 @@ interface LetterboxdFeedItem {
   filmTitle?: string;
   filmYear?: string;
   memberRating?: string;
+  isoDate?: string;
+  pubDate?: string;
   "letterboxd:filmTitle"?: string;
   "letterboxd:filmYear"?: string;
   "letterboxd:memberRating"?: string;
@@ -78,6 +80,15 @@ function extractFromContent(content: string): { posterUrl?: string; reviewText?:
   return { posterUrl, reviewText };
 }
 
+function normalizeDateString(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) {
+    return undefined;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const username = searchParams.get("username")?.trim();
@@ -116,11 +127,13 @@ export async function GET(request: Request) {
         );
 
         const letterboxdUrl = typeof item.link === "string" && item.link ? item.link : undefined;
+        const reviewedAt = normalizeDateString(item.isoDate ?? item.pubDate);
 
         return {
           title,
           year: Number.isNaN(year) ? null : year,
           rating,
+          ...(reviewedAt && { reviewedAt }),
           ...(posterUrl && { posterUrl }),
           ...(reviewText && { reviewText }),
           ...(letterboxdUrl && { letterboxdUrl }),

@@ -2,6 +2,7 @@ export interface MovieReview {
   title: string;
   year: number | null;
   rating: number;
+  reviewedAt?: string;
   posterUrl?: string;
   reviewText?: string;
   letterboxdUrl?: string;
@@ -28,19 +29,8 @@ export interface RadarrAddResponse {
 }
 
 export interface PublicSettings {
+  reviewer: string;
   radarrUrl: string;
   hasRadarrApiKey: boolean;
-  letterboxdExportUrl: string;
-  hasLetterboxdCookie: boolean;
   dataDir: string;
-}
-
-export interface LetterboxdImportResponse {
-  importedCount: number;
-  importedFiles?: Array<{
-    fileName: string;
-    importedCount: number;
-  }>;
-  totalCached: number;
-  movies: MovieReview[];
 }
