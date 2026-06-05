@@ -6,15 +6,11 @@ import type { MovieReview } from "@/app/types/movie";
 export interface StoredSettings {
   radarrUrl: string;
   radarrApiKey: string;
-  letterboxdExportUrl: string;
-  letterboxdCookie: string;
 }
 
 export interface PublicSettings {
   radarrUrl: string;
   hasRadarrApiKey: boolean;
-  letterboxdExportUrl: string;
-  hasLetterboxdCookie: boolean;
   dataDir: string;
 }
 
@@ -27,13 +23,9 @@ interface ReviewCacheFile {
   usernames: Record<string, ReviewCacheEntry>;
 }
 
-export const defaultLetterboxdExportUrl = "https://letterboxd.com/user/exportdata";
-
 const emptySettings: StoredSettings = {
   radarrUrl: "",
   radarrApiKey: "",
-  letterboxdExportUrl: defaultLetterboxdExportUrl,
-  letterboxdCookie: "",
 };
 
 const emptyReviewCache: ReviewCacheFile = {
@@ -85,6 +77,27 @@ function reviewKey(movie: MovieReview): string {
   return `${movie.title.trim().toLowerCase()}-${movie.year ?? "unknown"}`;
 }
 
+function reviewTime(movie: MovieReview): number {
+  if (!movie.reviewedAt) return 0;
+  const time = Date.parse(movie.reviewedAt);
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function sortReviews(movies: MovieReview[]): MovieReview[] {
+  return [...movies].sort((a, b) => {
+    const recencyDifference = reviewTime(b) - reviewTime(a);
+    if (recencyDifference !== 0) return recencyDifference;
+
+    const ratingDifference = b.rating - a.rating;
+    if (ratingDifference !== 0) return ratingDifference;
+
+    const titleDifference = a.title.localeCompare(b.title);
+    if (titleDifference !== 0) return titleDifference;
+
+    return (b.year ?? 0) - (a.year ?? 0);
+  });
+}
+
 function sanitizeMovie(movie: MovieReview): MovieReview | null {
   const title = movie.title.trim();
   const year = typeof movie.year === "number" && Number.isFinite(movie.year) ? movie.year : null;
@@ -95,6 +108,10 @@ function sanitizeMovie(movie: MovieReview): MovieReview | null {
   }
 
   const result: MovieReview = { title, year, rating };
+
+  if (typeof movie.reviewedAt === "string" && movie.reviewedAt.trim()) {
+    result.reviewedAt = movie.reviewedAt.trim();
+  }
 
   if (typeof movie.posterUrl === "string" && movie.posterUrl.trim()) {
     result.posterUrl = movie.posterUrl.trim();
@@ -116,6 +133,7 @@ function mergeMovieData(existing: MovieReview, incoming: MovieReview): MovieRevi
     title: incoming.title,
     year: incoming.year ?? existing.year,
     rating: incoming.rating,
+    reviewedAt: incoming.reviewedAt ?? existing.reviewedAt,
     posterUrl: incoming.posterUrl ?? existing.posterUrl,
     reviewText: incoming.reviewText ?? existing.reviewText,
     letterboxdUrl: incoming.letterboxdUrl ?? existing.letterboxdUrl,
@@ -128,11 +146,6 @@ export async function getSettings(): Promise<StoredSettings> {
   return {
     radarrUrl: typeof settings.radarrUrl === "string" ? settings.radarrUrl : "",
     radarrApiKey: typeof settings.radarrApiKey === "string" ? settings.radarrApiKey : "",
-    letterboxdExportUrl:
-      typeof settings.letterboxdExportUrl === "string" && settings.letterboxdExportUrl
-        ? settings.letterboxdExportUrl
-        : defaultLetterboxdExportUrl,
-    letterboxdCookie: typeof settings.letterboxdCookie === "string" ? settings.letterboxdCookie : "",
   };
 }
 
@@ -144,8 +157,6 @@ export function toPublicSettings(settings: StoredSettings): PublicSettings {
   return {
     radarrUrl: settings.radarrUrl,
     hasRadarrApiKey: settings.radarrApiKey.length > 0,
-    letterboxdExportUrl: settings.letterboxdExportUrl,
-    hasLetterboxdCookie: settings.letterboxdCookie.length > 0,
     dataDir: getDataDir(),
   };
 }
@@ -154,7 +165,7 @@ export async function getCachedReviews(username: string): Promise<MovieReview[]>
   const cache = await readJsonFile<ReviewCacheFile>(reviewCachePath(), emptyReviewCache);
   const entry = cache.usernames[normalizeUsername(username)];
 
-  return entry?.movies ?? [];
+  return sortReviews(entry?.movies ?? []);
 }
 
 export async function mergeCachedReviews(
@@ -185,7 +196,7 @@ export async function mergeCachedReviews(
     merged.set(key, existing ? mergeMovieData(existing, sanitized) : sanitized);
   }
 
-  const movies = Array.from(merged.values());
+  const movies = sortReviews(Array.from(merged.values()));
 
   cache.usernames[normalizedUsername] = {
     updatedAt: new Date().toISOString(),

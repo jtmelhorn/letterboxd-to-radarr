@@ -3,7 +3,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import type {
-  LetterboxdImportResponse,
   MovieReview,
   PublicSettings,
   RadarrAddResponse,
@@ -16,6 +15,7 @@ interface LocalConfig {
 type SendState = "idle" | "loading" | "added" | "error";
 
 const STORAGE_KEY = "letterboxd-to-radarr-local-config";
+const AUTO_DOWNLOAD_MINIMUM_RATING = 4;
 const ratingOptions = Array.from({ length: 9 }, (_, i) => 1 + i * 0.5);
 
 const defaultConfig: LocalConfig = { username: "" };
@@ -23,8 +23,6 @@ const defaultConfig: LocalConfig = { username: "" };
 const defaultSettings: PublicSettings = {
   radarrUrl: "",
   hasRadarrApiKey: false,
-  letterboxdExportUrl: "https://letterboxd.com/user/exportdata",
-  hasLetterboxdCookie: false,
   dataDir: "",
 };
 
@@ -45,8 +43,30 @@ function isMovieReview(value: unknown): value is MovieReview {
   return (
     typeof m.title === "string" &&
     (typeof m.year === "number" || m.year === null) &&
-    typeof m.rating === "number"
+    typeof m.rating === "number" &&
+    (typeof m.reviewedAt === "string" || typeof m.reviewedAt === "undefined")
   );
+}
+
+function reviewTime(movie: MovieReview): number {
+  if (!movie.reviewedAt) return 0;
+  const time = Date.parse(movie.reviewedAt);
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function sortMoviesByRecencyAndStars(movies: MovieReview[]): MovieReview[] {
+  return [...movies].sort((a, b) => {
+    const recencyDifference = reviewTime(b) - reviewTime(a);
+    if (recencyDifference !== 0) return recencyDifference;
+
+    const ratingDifference = b.rating - a.rating;
+    if (ratingDifference !== 0) return ratingDifference;
+
+    const titleDifference = a.title.localeCompare(b.title);
+    if (titleDifference !== 0) return titleDifference;
+
+    return (b.year ?? 0) - (a.year ?? 0);
+  });
 }
 
 function renderStars(rating: number): string {
@@ -161,8 +181,6 @@ export default function Home() {
   const [settingsDraft, setSettingsDraft] = useState({
     radarrUrl: "",
     radarrApiKey: "",
-    letterboxdExportUrl: "https://letterboxd.com/user/exportdata",
-    letterboxdCookie: "",
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -174,11 +192,6 @@ export default function Home() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sendStates, setSendStates] = useState<Record<string, SendState>>({});
   const [sendMessages, setSendMessages] = useState<Record<string, string>>({});
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [isImporting, setIsImporting] = useState(false);
-  const [importMessage, setImportMessage] = useState<string | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [isFetchingExport, setIsFetchingExport] = useState(false);
   const [activeMovieKey, setActiveMovieKey] = useState<string | null>(null);
 
   // ── localStorage hydration ─────────────────────────────────────────────
@@ -228,7 +241,7 @@ export default function Home() {
 
   // ── Derived state ──────────────────────────────────────────────────────
   const filteredMovies = useMemo(
-    () => movies.filter((m) => m.rating >= minimumRating),
+    () => sortMoviesByRecencyAndStars(movies.filter((m) => m.rating >= minimumRating)),
     [movies, minimumRating],
   );
 
@@ -255,8 +268,6 @@ export default function Home() {
       setSettingsDraft({
         radarrUrl: body.radarrUrl,
         radarrApiKey: "",
-        letterboxdExportUrl: body.letterboxdExportUrl,
-        letterboxdCookie: "",
       });
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : "Unable to load settings.");
@@ -280,8 +291,6 @@ export default function Home() {
       setSettingsDraft({
         radarrUrl: body.radarrUrl,
         radarrApiKey: "",
-        letterboxdExportUrl: body.letterboxdExportUrl,
-        letterboxdCookie: "",
       });
       setSettingsMessage("Settings saved to persistent server storage.");
     } catch (err) {
@@ -305,9 +314,11 @@ export default function Home() {
       const body = (await res.json().catch(() => null)) as unknown;
       if (!res.ok) throw new Error(apiMessage(body, "Unable to fetch Letterboxd reviews."));
       if (!Array.isArray(body)) throw new Error("Unexpected API response.");
-      setMovies(body.filter(isMovieReview));
+      const fetchedMovies = sortMoviesByRecencyAndStars(body.filter(isMovieReview));
+      setMovies(fetchedMovies);
       setSendStates({});
       setSendMessages({});
+      void autoDownloadHighRatedMovies(fetchedMovies);
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : "Unable to fetch Letterboxd reviews.");
     } finally {
@@ -315,75 +326,20 @@ export default function Home() {
     }
   }
 
-  async function importLetterboxdCsv(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!config.username.trim()) {
-      setImportError("Enter a Letterboxd username before importing.");
+  function autoDownloadHighRatedMovies(fetchedMovies: MovieReview[]) {
+    if (!settings.radarrUrl || !settings.hasRadarrApiKey) {
       return;
     }
-    if (!importFile) {
-      setImportError("Choose the Letterboxd export .zip, or a reviews.csv, ratings.csv, or diary.csv file.");
-      return;
-    }
-    const formData = new FormData();
-    formData.append("username", config.username.trim());
-    formData.append("file", importFile);
-    setIsImporting(true);
-    setImportMessage(null);
-    setImportError(null);
-    try {
-      const res = await fetch("/api/letterboxd/import", { method: "POST", body: formData });
-      const body = (await res.json().catch(() => null)) as LetterboxdImportResponse | null;
-      if (!res.ok || !body) throw new Error(apiMessage(body, "Unable to import Letterboxd export."));
-      setMovies(body.movies.filter(isMovieReview));
-      const fileSummary = body.importedFiles?.length
-        ? ` Files: ${body.importedFiles.map((f) => `${f.fileName} (${f.importedCount})`).join(", ")}.`
-        : "";
-      setImportMessage(
-        `Imported ${body.importedCount} rated movies. Cache now contains ${body.totalCached} movies.${fileSummary}`,
-      );
-      setSendStates({});
-      setSendMessages({});
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : "Unable to import Letterboxd export.");
-    } finally {
-      setIsImporting(false);
-    }
-  }
 
-  async function fetchLetterboxdExport() {
-    if (!config.username.trim()) {
-      setImportError("Enter a Letterboxd username before fetching the export.");
-      return;
-    }
-    if (!settings.hasLetterboxdCookie) {
-      setImportError("Save your Letterboxd session cookie in Settings before fetching the export.");
-      return;
-    }
-    setIsFetchingExport(true);
-    setImportMessage(null);
-    setImportError(null);
-    try {
-      const res = await fetch("/api/letterboxd/export", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: config.username.trim() }),
-      });
-      const body = (await res.json().catch(() => null)) as LetterboxdImportResponse | null;
-      if (!res.ok || !body) throw new Error(apiMessage(body, "Unable to fetch Letterboxd export."));
-      const fileSummary = body.importedFiles?.length
-        ? ` Files: ${body.importedFiles.map((f) => `${f.fileName} (${f.importedCount})`).join(", ")}.`
-        : "";
-      setMovies(body.movies.filter(isMovieReview));
-      setImportMessage(
-        `Fetched and imported ${body.importedCount} rated movies. Cache now contains ${body.totalCached} movies.${fileSummary}`,
-      );
-      setSendStates({});
-      setSendMessages({});
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : "Unable to fetch Letterboxd export.");
-    } finally {
-      setIsFetchingExport(false);
+    const queued = new Set<string>();
+    for (const movie of fetchedMovies) {
+      const key = movieKey(movie);
+      if (movie.rating < AUTO_DOWNLOAD_MINIMUM_RATING || queued.has(key)) {
+        continue;
+      }
+
+      queued.add(key);
+      void sendToRadarr(movie);
     }
   }
 
@@ -493,13 +449,9 @@ export default function Home() {
               setSettingsDraft({
                 radarrUrl: settings.radarrUrl,
                 radarrApiKey: "",
-                letterboxdExportUrl: settings.letterboxdExportUrl,
-                letterboxdCookie: "",
               });
               setSettingsMessage(null);
               setSettingsError(null);
-              setImportMessage(null);
-              setImportError(null);
               setIsSettingsOpen(true);
             }}
             type="button"
@@ -520,6 +472,11 @@ export default function Home() {
               <span className="text-zinc-600">of</span>
               <span className="font-semibold text-zinc-200">{movies.length}</span>
               <span className="text-zinc-600">films</span>
+              <span className="mx-1 text-zinc-700">·</span>
+              <span className="text-zinc-600">auto-downloads rated ≥</span>
+              <span className="font-bold text-amber-500">
+                {AUTO_DOWNLOAD_MINIMUM_RATING.toFixed(1)}★
+              </span>
               <span className="mx-1 text-zinc-700">·</span>
               <span className="text-zinc-600">rated ≥</span>
               <span className="font-bold text-amber-500">{minimumRating.toFixed(1)}★</span>
@@ -817,7 +774,7 @@ export default function Home() {
             {/* Scrollable content */}
             <div className="flex-1 space-y-8 overflow-y-auto px-7 py-6">
 
-              {/* Radarr + Letterboxd settings */}
+              {/* Radarr settings */}
               <form className="space-y-4" onSubmit={saveSettings}>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
                   Radarr
@@ -850,53 +807,13 @@ export default function Home() {
                   />
                 </label>
 
-                <p className="pt-1 text-[10px] font-bold uppercase tracking-widest text-zinc-600">
-                  Letterboxd
-                </p>
-
-                <label className="flex flex-col gap-1.5">
-                  <span className={labelCls}>Export URL</span>
-                  <input
-                    className={inputCls}
-                    placeholder="https://letterboxd.com/user/exportdata"
-                    value={settingsDraft.letterboxdExportUrl}
-                    onChange={(e) =>
-                      setSettingsDraft((c) => ({
-                        ...c,
-                        letterboxdExportUrl: e.target.value,
-                      }))
-                    }
-                  />
-                </label>
-
-                <label className="flex flex-col gap-1.5">
-                  <span className={labelCls}>Session Cookie</span>
-                  <textarea
-                    className="min-h-[4.5rem] resize-y rounded-xl border border-white/[0.09] bg-white/[0.05] px-4 py-3 text-sm text-white placeholder-zinc-600 transition focus:border-orange-500/40 focus:outline-none focus:ring-1 focus:ring-orange-500"
-                    placeholder={
-                      settings.hasLetterboxdCookie
-                        ? "Saved — leave blank to keep"
-                        : "Paste the Cookie header from an authenticated Letterboxd browser request"
-                    }
-                    value={settingsDraft.letterboxdCookie}
-                    onChange={(e) =>
-                      setSettingsDraft((c) => ({ ...c, letterboxdCookie: e.target.value }))
-                    }
-                  />
-                </label>
-
                 <div className="space-y-1.5 rounded-xl border border-white/[0.06] bg-white/[0.03] p-4 text-xs text-zinc-600">
                   <p>
                     <span className="font-medium text-zinc-400">Storage: </span>
                     {settings.dataDir || "Loading…"}
                   </p>
-                  <p>
-                    <span className="font-medium text-zinc-400">Cookie: </span>
-                    {settings.hasLetterboxdCookie ? "Configured" : "Not configured"}
-                  </p>
                   <p className="text-zinc-700">
-                    API keys and cookies are stored in plaintext. Restrict access to the container
-                    volume.
+                    API keys are stored in plaintext. Restrict access to the container volume.
                   </p>
                 </div>
 
@@ -917,67 +834,6 @@ export default function Home() {
                   type="submit"
                 >
                   {isSavingSettings ? "Saving…" : "Save Settings"}
-                </button>
-              </form>
-
-              <div className="h-px bg-white/[0.07]" />
-
-              {/* Backfill history */}
-              <form className="space-y-4" onSubmit={importLetterboxdCsv}>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
-                  Backfill history
-                </p>
-                <p className="text-sm leading-relaxed text-zinc-500">
-                  RSS is limited to 50 items. Export your Letterboxd data and upload the{" "}
-                  <span className="font-semibold text-zinc-300">.zip</span> to backfill your full
-                  review history.
-                </p>
-
-                {/* Automated fetch card */}
-                <div className="flex flex-col gap-4 rounded-xl border border-orange-500/20 bg-orange-500/[0.07] p-4 sm:flex-row sm:items-center">
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold text-orange-200">Automated fetch</p>
-                    <p className="mt-0.5 text-xs text-orange-300/70">
-                      Uses the saved session cookie to download and import automatically.
-                    </p>
-                  </div>
-                  <button
-                    className="h-9 flex-shrink-0 rounded-xl bg-orange-500 px-5 text-sm font-bold text-white transition hover:bg-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-500/40 disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={isFetchingExport}
-                    onClick={() => void fetchLetterboxdExport()}
-                    type="button"
-                  >
-                    {isFetchingExport ? "Fetching…" : "Fetch ZIP"}
-                  </button>
-                </div>
-
-                <label className="flex flex-col gap-1.5">
-                  <span className={labelCls}>Manual upload</span>
-                  <input
-                    accept=".zip,.csv,application/zip,text/csv"
-                    className="rounded-xl border border-white/[0.09] bg-white/[0.04] px-4 py-2.5 text-sm text-zinc-400 transition file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-700 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-zinc-200 hover:file:bg-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500"
-                    onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
-                    type="file"
-                  />
-                </label>
-
-                {importMessage ? (
-                  <div className="rounded-xl border border-green-500/20 bg-green-500/10 px-4 py-3 text-sm text-green-400">
-                    {importMessage}
-                  </div>
-                ) : null}
-                {importError ? (
-                  <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-                    {importError}
-                  </div>
-                ) : null}
-
-                <button
-                  className="h-10 rounded-xl border border-white/[0.09] bg-white/[0.05] px-6 text-sm font-bold text-zinc-200 transition hover:bg-white/10 focus:outline-none focus:ring-1 focus:ring-white/20 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={isImporting}
-                  type="submit"
-                >
-                  {isImporting ? "Importing…" : "Import File"}
                 </button>
               </form>
             </div>
