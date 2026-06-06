@@ -15,16 +15,26 @@
 
 :root {
   color-scheme: dark;
-  --ink-black: #14181c;
-  --surface: #2c3440;
-  --surface-hover: #343c48;
-  --granite: #67848c;
+  --ink-black: #0f1317;
+  --ink-panel: #171d23;
+  --surface: #202832;
+  --surface-elevated: #28313d;
+  --surface-hover: #303a47;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --granite: #8aa0a7;
   --lb-green: #00e054;
-  --lb-green-dark: #00ac1c;
-  --lb-orange: #ff8000;
-  --cornsilk: #ffffff;
-  --muted: #9ab0ac;
+  --lb-green-dark: #00b946;
+  --lb-orange: #ff9b2f;
+  --cornsilk: #f7fbff;
+  --muted: #afbdc5;
+  --muted-dim: #7f9099;
   --success: #00e054;
+  --warning: #ff9b2f;
+  --danger: #ff5b66;
+  --radius-card: 1.25rem;
+  --radius-control: 0.875rem;
+  --shadow-card: 0 20px 60px rgba(0, 0, 0, 0.26);
 }
 
 * {
@@ -40,7 +50,10 @@ body {
   min-height: 100%;
   margin: 0;
   background: var(--ink-black);
-  background-image: linear-gradient(180deg, #0f1214 0%, #14181c 240px, #14181c 100%);
+  background-image:
+    radial-gradient(circle at top left, rgba(255, 128, 0, 0.08), transparent 34rem),
+    radial-gradient(circle at top right, rgba(0, 224, 84, 0.07), transparent 30rem),
+    linear-gradient(180deg, #0c1014 0%, #11161b 240px, #14181c 100%);
   color: var(--cornsilk);
   font-family:
     -apple-system,
@@ -64,20 +77,26 @@ textarea {
   font: inherit;
 }
 
+:focus-visible {
+  outline: 2px solid rgba(0, 224, 84, 0.8);
+  outline-offset: 3px;
+}
+
 /* ── Poster card hover ─────────────────────────────────── */
 .poster-card {
   transition:
-    transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform 0.22s ease,
     box-shadow 0.25s ease,
     border-color 0.25s ease;
   position: relative;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
 }
 
-.poster-card:hover {
-  transform: scale(1.04);
+.poster-card:hover,
+.poster-card:focus-within {
+  transform: translateY(-3px) scale(1.015);
   z-index: 2;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.48);
 }
 
 /* ── Poster bottom fade ────────────────────────────────── */
@@ -91,7 +110,8 @@ textarea {
   transition: background 0.25s ease;
 }
 
-.poster-card:hover .poster-gradient {
+.poster-card:hover .poster-gradient,
+.poster-card:focus-within .poster-gradient {
   background: linear-gradient(
     to top,
     rgba(20, 24, 28, 0.98) 0%,
@@ -108,9 +128,9 @@ textarea {
   width: 1.5rem;
   align-items: center;
   justify-content: center;
-  border-radius: 0.25rem;
+  border-radius: 0.625rem;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(20, 24, 28, 0.9);
+  background: rgba(12, 16, 20, 0.86);
   color: var(--cornsilk);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
@@ -122,25 +142,25 @@ textarea {
 .poster-action-btn:hover {
   border-color: var(--lb-green);
   background: var(--lb-green);
-  color: #14181c;
+  color: var(--ink-black);
 }
 
-.poster-action-btn:focus {
-  outline: none;
+.poster-action-btn:focus-visible {
   box-shadow: 0 0 0 1px var(--lb-green);
 }
 
 /* ── Surface utilities ─────────────────────────────────── */
 .glass-container {
-  background: rgba(20, 24, 28, 0.92);
+  background: rgba(15, 19, 23, 0.88);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-subtle);
 }
 
 .glass-card {
-  background: var(--surface);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(40, 49, 61, 0.86), rgba(25, 31, 38, 0.92));
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-card);
   transition:
     background 0.2s ease,
     border-color 0.2s ease,
@@ -148,16 +168,16 @@ textarea {
 }
 
 .glass-card:hover {
-  background: var(--surface-hover);
-  border-color: rgba(0, 224, 84, 0.18);
+  background: linear-gradient(180deg, rgba(48, 58, 71, 0.88), rgba(28, 35, 43, 0.94));
+  border-color: rgba(0, 224, 84, 0.2);
   transform: translateY(-1px);
 }
 
 .glass-modal {
-  background: #1a1f24;
+  background: rgba(19, 24, 30, 0.98);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-strong);
 }
 
 /* ── Custom scrollbar ──────────────────────────────────── */
@@ -254,8 +274,8 @@ textarea {
 /* ── Full-viewport dashboard grid ─────────────────────────── */
 .poster-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 11rem), 1fr));
-  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 10.5rem), 1fr));
+  gap: 0.875rem;
   align-content: start;
   padding-block: 0.25rem 1rem;
   min-height: 0;
@@ -263,20 +283,20 @@ textarea {
 
 @media (min-width: 640px) {
   .poster-grid {
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
-    gap: 0.625rem;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 11.5rem), 1fr));
+    gap: 1rem;
   }
 }
 
 @media (min-width: 1024px) {
   .poster-grid {
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr));
-    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 12.5rem), 1fr));
+    gap: 1.125rem;
   }
 }
 
 @media (min-width: 1536px) {
   .poster-grid {
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 13.25rem), 1fr));
   }
 }

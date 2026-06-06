@@ -11,6 +11,7 @@ import { decryptSecret, encryptSecret } from "@/app/lib/crypto";
 import { getDb } from "@/app/lib/db";
 import { radarrTargets } from "@/app/lib/db/schema";
 import { isSetupComplete } from "@/app/lib/repos/appState";
+import { getReviewerGroup, updateDefaultGroupThreshold } from "@/app/lib/repos/reviewerGroups";
 import type {
   PublicSettings,
   ResolvedRadarrTarget,
@@ -32,6 +33,7 @@ export function getRadarrTarget(): ResolvedRadarrTarget {
   const row = readRow();
 
   const storedKey = row?.apiKeyEncrypted ? decryptSecret(row.apiKeyEncrypted) : "";
+  const defaultGroupThreshold = getReviewerGroup(1)?.autoThreshold;
 
   return {
     baseUrl: configuredRadarrUrl() || row?.baseUrl || "",
@@ -40,7 +42,7 @@ export function getRadarrTarget(): ResolvedRadarrTarget {
     qualityProfileName: row?.qualityProfileName ?? null,
     rootFolderPath: row?.rootFolderPath ?? null,
     minAvailability: row?.minAvailability ?? "announced",
-    autoThreshold: row?.autoThreshold ?? 4,
+    autoThreshold: defaultGroupThreshold ?? row?.autoThreshold ?? 4,
     monitored: row?.monitored ?? true,
   };
 }
@@ -71,6 +73,7 @@ export function saveSettings(update: SettingsUpdate): void {
   }
   if (typeof update.autoThreshold === "number") {
     values.autoThreshold = update.autoThreshold;
+    updateDefaultGroupThreshold(update.autoThreshold);
   }
   if (typeof update.monitored === "boolean") {
     values.monitored = update.monitored;

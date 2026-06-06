@@ -2,6 +2,7 @@ import { desc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/app/lib/db";
 import { reviews, syncResults } from "@/app/lib/db/schema";
+import { canonicalFilmGuid } from "@/app/lib/filmIdentity";
 import type { SyncResultItem } from "@/app/types/movie";
 
 export interface RecordSyncInput {
@@ -26,9 +27,9 @@ export function recordSyncResult(input: RecordSyncInput): void {
     .run();
 }
 
-export function getRecentSyncResults(userId: number, limit = 100): SyncResultItem[] {
+export function getRecentSyncResults(userId?: number, limit = 100): SyncResultItem[] {
   const db = getDb();
-  const rows = db
+  const query = db
     .select({
       id: syncResults.id,
       reviewId: syncResults.reviewId,
@@ -38,10 +39,14 @@ export function getRecentSyncResults(userId: number, limit = 100): SyncResultIte
       createdAt: syncResults.createdAt,
       title: reviews.title,
       year: reviews.year,
+      letterboxdUrl: reviews.letterboxdUrl,
+      guid: reviews.guid,
     })
     .from(syncResults)
     .innerJoin(reviews, eq(syncResults.reviewId, reviews.id))
-    .where(eq(reviews.userId, userId))
+    .$dynamic();
+
+  const rows = (typeof userId === "number" ? query.where(eq(reviews.userId, userId)) : query)
     .orderBy(desc(syncResults.createdAt))
     .limit(limit)
     .all();
@@ -49,6 +54,7 @@ export function getRecentSyncResults(userId: number, limit = 100): SyncResultIte
   return rows.map((row) => ({
     id: row.id,
     reviewId: row.reviewId,
+    filmId: canonicalFilmGuid(row),
     title: row.title,
     year: row.year,
     status: row.status,
@@ -73,5 +79,11 @@ export function clearSyncResultsForUser(userId: number): number {
     )
     .run();
 
+  return result.changes ?? 0;
+}
+
+export function clearAllSyncResults(): number {
+  const db = getDb();
+  const result = db.delete(syncResults).run();
   return result.changes ?? 0;
 }

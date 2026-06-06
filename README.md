@@ -1,7 +1,7 @@
 # Letterboxd to Radarr
 
-A Next.js App Router dashboard that reads a public Letterboxd RSS feed, filters reviews by star
-rating, and automatically sends highly rated movies to Radarr.
+A Next.js App Router dashboard that reads one or more public Letterboxd RSS feeds, combines
+reviews by film, averages reviewer ratings, and automatically sends highly rated movies to Radarr.
 
 Reviews, settings, and sync history are stored in a SQLite database. A background scheduler keeps
 Radarr in sync on an interval even when no browser is open, the Radarr API key is encrypted at
@@ -30,11 +30,11 @@ On first launch, the app walks you through:
 
 1. **Admin password** — required if `APP_PASSWORD` is not set in the environment (stored hashed in `/data`).
 2. **Sign in** — when `APP_PASSWORD` is set, or after you create a password in step 1.
-3. **Setup wizard** — full-screen control panel to confirm Letterboxd username, Radarr connection, quality profile, root folder, and auto-download threshold. This runs once per data volume even when env vars pre-fill the fields.
+3. **Setup wizard** — full-screen control panel to add the first Letterboxd reviewer, confirm Radarr connection, choose quality profile/root folder, and set the default auto-sync threshold. This runs once per data volume even when env vars pre-fill the fields.
 
 The placeholders are:
 
-- `REVIEWER`: your Letterboxd username, for example `jtmel`.
+- `REVIEWER`: optional initial Letterboxd reviewer handle, for example `jtmel`.
 - `RADARR`: your Radarr base URL, for example `http://radarr.example.com:7878`.
 - `API_KEY`: your Radarr API key from Radarr Settings > General > Security.
 
@@ -91,21 +91,24 @@ npm run dev
 
 Open http://localhost:3000 and enter:
 
-- Letterboxd username
+- One or more Letterboxd reviewer handles
 - Radarr base URL, for example `http://192.168.1.100:7878`
 - Radarr API key
 - Minimum star rating
 
-The Letterboxd username and the display rating filter are stored in browser `localStorage`. Everything else—Radarr connection, the auto-download threshold, quality profile, root folder, cached reviews, and sync history—is stored server-side in a SQLite database (`app.db`). In local development this data defaults to `web/.data`; Docker Compose stores it in the `letterboxd-radarr-data` volume mounted at `/data`. The Radarr API key is encrypted at rest with AES-256-GCM.
+The display rating filter is stored in browser `localStorage`. Everything else—Letterboxd reviewer sources, reviewer groups, group auto-sync thresholds, Radarr connection, quality profile, root folder, cached reviews, and sync history—is stored server-side in a SQLite database (`app.db`). In local development this data defaults to `web/.data`; Docker Compose stores it in the `letterboxd-radarr-data` volume mounted at `/data`. The Radarr API key is encrypted at rest with AES-256-GCM.
 
-Letterboxd RSS exposes the latest activity items. Fetching reviews merges those items (keyed by RSS guid) into the database, sorts the movie wall by newest review date and then star rating. A background scheduler and the "Sync Feed" action add movies rated at or above the configured threshold to Radarr, recording each outcome in the sync history. Adds are idempotent—a movie that already synced successfully is not re-sent.
+Letterboxd RSS exposes the latest activity items. Fetching reviews merges those items (keyed by RSS guid) into the database. The dashboard groups reviews by film identity, shows an average rating when multiple reviewers reviewed the same movie, and keeps each review visible in the movie detail view. A background scheduler evaluates enabled reviewer groups and adds movies whose group-average rating meets that group's threshold. Adds are idempotent—a movie that already synced successfully is not re-sent.
 
 ### API overview
 
-- `GET /api/reviews?handle=<user>&refresh=1` — read cached reviews (optionally refreshing from RSS); no Radarr side effects.
-- `POST /api/sync` `{ handle }` — fetch, upsert, and auto-add qualifying movies to Radarr; returns a run summary.
-- `GET /api/sync?handle=<user>` — recent sync history (activity log).
-- `POST /api/radarr` `{ reviewId }` — manually add a single stored review to Radarr.
+- `GET /api/reviewers`, `POST /api/reviewers`, `DELETE /api/reviewers?handle=<user>` — manage Letterboxd reviewer sources.
+- `GET|POST|PUT /api/reviewer-groups`, `DELETE /api/reviewer-groups?id=<id>` — manage named reviewer groups and group auto-sync thresholds.
+- `GET /api/reviews?scope=all|group&groupId=<id>&reviewer=<handle>&refresh=1` — read aggregated film reviews (optionally refreshing RSS); no Radarr side effects.
+- `POST /api/sync` `{ scope, reviewer, groupId }` — fetch, upsert, and auto-add qualifying aggregated movies to Radarr; returns a run summary.
+- `GET /api/sync?...` — recent sync history (activity log).
+- `POST /api/radarr` `{ reviewId }` — manually add a stored film representative to Radarr.
+- `GET /api/radarr/synced?...` — aggregated movies successfully sent to Radarr, including all reviewer details.
 - `GET /api/radarr/options` — available Radarr quality profiles and root folders.
 - `GET|PUT /api/settings`, `POST /api/settings/test` — read/update connection + automation settings and test connectivity.
 - `GET /api/auth/status` — bootstrap state (`needsPasswordSetup`, `needsLogin`, `setupComplete`).

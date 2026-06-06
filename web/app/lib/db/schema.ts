@@ -16,6 +16,37 @@ export const users = sqliteTable("users", {
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
 });
 
+export const reviewerGroups = sqliteTable("reviewer_groups", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull().unique(),
+  autoThreshold: real("auto_threshold").notNull().default(4),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+  updatedAt: text("updated_at")
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+});
+
+export const reviewerGroupMembers = sqliteTable(
+  "reviewer_group_members",
+  {
+    groupId: integer("group_id")
+      .notNull()
+      .references(() => reviewerGroups.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+  },
+  (table) => [
+    uniqueIndex("reviewer_group_members_unique").on(table.groupId, table.userId),
+    index("reviewer_group_members_user_idx").on(table.userId),
+  ],
+);
+
 /**
  * Singleton (id = 1) describing the Radarr endpoint and automation prefs.
  * Kept as a row (not env-only) so the background worker can read it.
@@ -97,3 +128,4 @@ export type ReviewRow = typeof reviews.$inferSelect;
 export type SyncResultRow = typeof syncResults.$inferSelect;
 export type RadarrTargetRow = typeof radarrTargets.$inferSelect;
 export type AppStateRow = typeof appState.$inferSelect;
+export type ReviewerGroupRow = typeof reviewerGroups.$inferSelect;

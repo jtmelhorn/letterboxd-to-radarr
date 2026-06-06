@@ -3,12 +3,13 @@ import pLimit from "p-limit";
 import { fetchLetterboxdReviews } from "@/app/lib/letterboxd";
 import { addMovie } from "@/app/lib/radarr";
 import type { AddMovieResult } from "@/app/lib/radarr";
-import { getReviewRows, hasSuccessfulSync } from "@/app/lib/repos/reviews";
+import { getAggregatedMovies } from "@/app/lib/repos/aggregatedReviews";
 import { upsertReviews } from "@/app/lib/repos/reviews";
+import { getReviewerGroup, listReviewerGroups } from "@/app/lib/repos/reviewerGroups";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
 import { getRecentSyncResults, recordSyncResult } from "@/app/lib/repos/syncResults";
-import { getOrCreateUser } from "@/app/lib/repos/users";
-import type { ResolvedRadarrTarget, SyncRunSummary } from "@/app/types/movie";
+import { findUser, getOrCreateUser, listUsers } from "@/app/lib/repos/users";
+import type { ReviewerScope, ResolvedRadarrTarget, SyncRunSummary } from "@/app/types/movie";
 
 const MAX_ATTEMPTS = 3;
 const RADARR_CONCURRENCY = 3;
@@ -17,6 +18,7 @@ export interface SyncOptions {
   auto: boolean;
   /** When true, retry movies even if a prior add failed (manual re-sync). */
   force?: boolean;
+  threshold?: number;
 }
 
 function delay(ms: number): Promise<void> {
@@ -55,20 +57,55 @@ async function addWithRetry(
   );
 }
 
-// Single-flight: collapse concurrent syncs for the same handle.
+function scopeKey(scope: ReviewerScope): string {
+  if (scope.type === "reviewer") return `reviewer:${scope.reviewer ?? ""}`.toLowerCase();
+  if (scope.type === "group") return `group:${scope.groupId ?? ""}`;
+  return "all";
+}
+
+function handlesForScope(scope: ReviewerScope): string[] {
+  if (scope.type === "reviewer" && scope.reviewer) {
+    return [scope.reviewer.trim().toLowerCase()].filter(Boolean);
+  }
+  if (scope.type === "group" && typeof scope.groupId === "number") {
+    return getReviewerGroup(scope.groupId)?.reviewerHandles ?? [];
+  }
+  return listUsers().map((user) => user.handle);
+}
+
+function thresholdForScope(scope: ReviewerScope, explicit?: number): number {
+  if (typeof explicit === "number") return explicit;
+  if (scope.type === "group" && typeof scope.groupId === "number") {
+    return getReviewerGroup(scope.groupId)?.autoThreshold ?? -1;
+  }
+  return listReviewerGroups()[0]?.autoThreshold ?? getRadarrTarget().autoThreshold;
+}
+
+async function refreshHandles(handles: string[]): Promise<number> {
+  let fetched = 0;
+  for (const handle of handles) {
+    const user = getOrCreateUser(handle);
+    const movies = await fetchLetterboxdReviews(handle);
+    upsertReviews(user.id, movies);
+    fetched += movies.length;
+  }
+  return fetched;
+}
+
+// Single-flight: collapse concurrent syncs for the same reviewer/scope.
 const inFlight = new Map<string, Promise<SyncRunSummary>>();
 
-async function executeSync(handle: string, options: SyncOptions): Promise<SyncRunSummary> {
-  const user = getOrCreateUser(handle);
-
-  const movies = await fetchLetterboxdReviews(handle);
-  upsertReviews(user.id, movies);
-
+async function executeSyncScope(
+  scope: ReviewerScope,
+  options: SyncOptions,
+): Promise<SyncRunSummary> {
+  const handles = handlesForScope(scope);
+  const fetched = await refreshHandles(handles);
   const target = getRadarrTarget();
-  const threshold = target.autoThreshold;
+  const threshold = thresholdForScope(scope, options.threshold);
 
   const summary: SyncRunSummary = {
-    fetched: movies.length,
+    fetched,
     added: 0,
     exists: 0,
     failed: 0,
@@ -80,23 +117,25 @@ async function executeSync(handle: string, options: SyncOptions): Promise<SyncRu
   const automationDisabled = options.auto && threshold === -1;
 
   if (!radarrConfigured || automationDisabled) {
-    summary.results = getRecentSyncResults(user.id, 100);
+    summary.results = getRecentSyncResults(undefined, 100);
     return summary;
   }
 
-  const rows = getReviewRows(user.id);
-  const candidates = rows.filter((row) => {
-    if (row.rating < threshold) return false;
+  const candidates = getAggregatedMovies(scope).filter((movie) => {
+    if (movie.averageRating < threshold) return false;
     if (options.force) return true;
-    return !hasSuccessfulSync(row.id);
+    return movie.status !== "added" && movie.status !== "exists";
   });
 
   const limit = pLimit(RADARR_CONCURRENCY);
 
   await Promise.all(
-    candidates.map((row) =>
+    candidates.map((movie) =>
       limit(async () => {
-        const result = await addWithRetry(target, { title: row.title, year: row.year });
+        const representativeReview = movie.reviews[0];
+        if (!representativeReview) return;
+
+        const result = await addWithRetry(target, { title: movie.title, year: movie.year });
         const status =
           result.status === "added"
             ? "added"
@@ -105,7 +144,7 @@ async function executeSync(handle: string, options: SyncOptions): Promise<SyncRu
               : "error";
 
         recordSyncResult({
-          reviewId: row.id,
+          reviewId: representativeReview.id,
           status,
           radarrTmdbId: result.movie?.tmdbId ?? null,
           message: result.message,
@@ -119,18 +158,29 @@ async function executeSync(handle: string, options: SyncOptions): Promise<SyncRu
     ),
   );
 
-  summary.results = getRecentSyncResults(user.id, 100);
+  summary.results = getRecentSyncResults(undefined, 100);
   return summary;
 }
 
-export function runSync(handle: string, options: SyncOptions): Promise<SyncRunSummary> {
-  const key = handle.toLowerCase();
+export function runSyncScope(scope: ReviewerScope, options: SyncOptions): Promise<SyncRunSummary> {
+  const key = scopeKey(scope);
   const existing = inFlight.get(key);
   if (existing) return existing;
 
-  const promise = executeSync(handle, options).finally(() => {
+  const promise = executeSyncScope(scope, options).finally(() => {
     inFlight.delete(key);
   });
   inFlight.set(key, promise);
   return promise;
+}
+
+export function runSync(handle: string, options: SyncOptions): Promise<SyncRunSummary> {
+  return runSyncScope({ type: "reviewer", reviewer: handle }, options);
+}
+
+export async function refreshReviewer(handle: string): Promise<number> {
+  if (!findUser(handle)) {
+    getOrCreateUser(handle);
+  }
+  return refreshHandles([handle]);
 }

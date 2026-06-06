@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { isRequestAuthorized } from "@/app/lib/auth";
+import { isValidAutoThreshold } from "@/app/lib/repos/reviewerGroups";
 import { getRadarrTarget, saveSettings, toPublicSettings } from "@/app/lib/repos/settings";
 import type { SettingsUpdate } from "@/app/types/movie";
 
@@ -78,6 +79,12 @@ export async function PUT(request: Request) {
     update.minAvailability = body.minAvailability;
   }
   if (typeof body.autoThreshold === "number") {
+    if (!isValidAutoThreshold(body.autoThreshold)) {
+      return NextResponse.json(
+        { message: "Auto-sync threshold must be disabled or between 1.0 and 5.0." },
+        { status: 400 },
+      );
+    }
     update.autoThreshold = body.autoThreshold;
   }
   if (typeof body.monitored === "boolean") {

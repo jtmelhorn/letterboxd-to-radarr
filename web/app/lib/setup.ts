@@ -1,4 +1,7 @@
+import { getConfiguredReviewer } from "@/app/lib/config";
+import { isValidHandle } from "@/app/lib/letterboxd";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
+import { getOrCreateUser, listUsers } from "@/app/lib/repos/users";
 
 export function validateSetupReady(): { ok: true } | { ok: false; message: string } {
   const target = getRadarrTarget();
@@ -30,6 +33,14 @@ export function validateSetupReady(): { ok: true } | { ok: false; message: strin
 
   if (typeof target.autoThreshold !== "number" || !Number.isFinite(target.autoThreshold)) {
     return { ok: false, message: "Auto-download threshold must be a valid number." };
+  }
+
+  const configuredReviewer = getConfiguredReviewer();
+  if (configuredReviewer && isValidHandle(configuredReviewer)) {
+    getOrCreateUser(configuredReviewer);
+  }
+  if (listUsers().length === 0) {
+    return { ok: false, message: "Add at least one Letterboxd reviewer before completing setup." };
   }
 
   return { ok: true };

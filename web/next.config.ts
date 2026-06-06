@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  turbopack: {
+    root: __dirname,
+  },
   // Keep the native SQLite binding out of the bundle; it is loaded from
   // node_modules at runtime.
   serverExternalPackages: ["better-sqlite3"],

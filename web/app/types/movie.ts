@@ -20,6 +20,39 @@ export interface ReviewDto extends MovieReview {
   status: "added" | "exists" | "error" | null;
 }
 
+export interface ReviewerDto {
+  id: number;
+  handle: string;
+}
+
+export interface ReviewerGroupDto {
+  id: number;
+  name: string;
+  autoThreshold: number;
+  reviewerHandles: string[];
+}
+
+export interface AggregatedReviewDto extends MovieReview {
+  id: number;
+  reviewerId: number;
+  reviewerHandle: string;
+  status: "added" | "exists" | "error" | null;
+}
+
+export interface AggregatedMovieDto {
+  id: string;
+  title: string;
+  year: number | null;
+  averageRating: number;
+  latestReviewedAt?: string;
+  posterUrl?: string;
+  letterboxdUrl?: string;
+  reviewerCount: number;
+  reviewerHandles: string[];
+  reviews: AggregatedReviewDto[];
+  status: "added" | "exists" | "error" | null;
+}
+
 export interface RadarrAddRequest {
   /** Preferred: reference a stored review by id. */
   reviewId?: number;
@@ -100,6 +133,7 @@ export interface RadarrOptionsResponse {
 export interface SyncResultItem {
   id: number;
   reviewId: number | null;
+  filmId?: string;
   title: string;
   year: number | null;
   status: string;
@@ -115,4 +149,10 @@ export interface SyncRunSummary {
   failed: number;
   threshold: number;
   results: SyncResultItem[];
+}
+
+export interface ReviewerScope {
+  type: "all" | "reviewer" | "group";
+  reviewer?: string;
+  groupId?: number;
 }

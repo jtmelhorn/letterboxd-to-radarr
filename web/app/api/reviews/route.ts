@@ -1,11 +1,32 @@
 import { NextResponse } from "next/server";
 
 import { isRequestAuthorized } from "@/app/lib/auth";
-import { fetchLetterboxdReviews, isValidHandle } from "@/app/lib/letterboxd";
-import { getReviewDtos, upsertReviews } from "@/app/lib/repos/reviews";
-import { getOrCreateUser } from "@/app/lib/repos/users";
+import { isValidHandle } from "@/app/lib/letterboxd";
+import { getAggregatedMovies } from "@/app/lib/repos/aggregatedReviews";
+import { getReviewerGroup } from "@/app/lib/repos/reviewerGroups";
+import { getOrCreateUser, listUsers } from "@/app/lib/repos/users";
+import { reviewerScopeFromSearchParams } from "@/app/lib/reviewerScope";
+import { refreshReviewer } from "@/app/lib/sync";
+import type { ReviewerScope } from "@/app/types/movie";
 
 export const runtime = "nodejs";
+
+async function refreshScope(scope: ReviewerScope): Promise<void> {
+  if (scope.type === "reviewer" && scope.reviewer) {
+    await refreshReviewer(scope.reviewer);
+    return;
+  }
+  if (scope.type === "group" && typeof scope.groupId === "number") {
+    const group = getReviewerGroup(scope.groupId);
+    for (const handle of group?.reviewerHandles ?? []) {
+      await refreshReviewer(handle);
+    }
+    return;
+  }
+  for (const reviewer of listUsers()) {
+    await refreshReviewer(reviewer.handle);
+  }
+}
 
 export async function GET(request: Request) {
   if (!isRequestAuthorized(request)) {
@@ -15,26 +36,22 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const handle = searchParams.get("handle")?.trim() ?? searchParams.get("username")?.trim();
   const refresh = searchParams.get("refresh") === "1";
+  const scope = reviewerScopeFromSearchParams(searchParams);
 
-  if (!handle) {
-    return NextResponse.json({ message: "A Letterboxd handle is required." }, { status: 400 });
-  }
-  if (!isValidHandle(handle)) {
+  if (handle && !isValidHandle(handle)) {
     return NextResponse.json(
       { message: "Handle can only contain letters, numbers, underscores, and hyphens." },
       { status: 400 },
     );
   }
-
-  const user = getOrCreateUser(handle);
+  if (handle) getOrCreateUser(handle);
 
   if (refresh) {
     try {
-      const movies = await fetchLetterboxdReviews(handle);
-      upsertReviews(user.id, movies);
+      await refreshScope(scope);
     } catch (error) {
       console.error("Failed to refresh Letterboxd reviews", error);
-      const cached = getReviewDtos(user.id);
+      const cached = getAggregatedMovies(scope);
       if (cached.length === 0) {
         return NextResponse.json(
           { message: "Unable to fetch or parse the Letterboxd RSS feed." },
@@ -46,5 +63,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ reviews: getReviewDtos(user.id) });
+  return NextResponse.json({ reviews: getAggregatedMovies(scope) });
 }

@@ -1,8 +1,9 @@
 import cron from "node-cron";
 
 import { getConfiguredReviewer } from "@/app/lib/config";
-import { listUsers } from "@/app/lib/repos/users";
-import { runSync } from "@/app/lib/sync";
+import { listEnabledReviewerGroups } from "@/app/lib/repos/reviewerGroups";
+import { getOrCreateUser } from "@/app/lib/repos/users";
+import { runSyncScope } from "@/app/lib/sync";
 
 let started = false;
 
@@ -14,33 +15,32 @@ function resolveSchedule(): string | null {
   return raw || "0 0 * * *";
 }
 
-/** Collect handles to sync: every known DB user, plus the env-configured one. */
-function handlesToSync(): string[] {
-  const handles = new Set<string>();
+function seedConfiguredReviewer(): void {
+  const reviewer = getConfiguredReviewer();
+  if (!reviewer) return;
   try {
-    for (const user of listUsers()) {
-      handles.add(user.handle);
-    }
+    getOrCreateUser(reviewer);
   } catch {
     // DB may not be ready yet; ignore.
   }
-  const reviewer = getConfiguredReviewer();
-  if (reviewer) handles.add(reviewer.toLowerCase());
-  return [...handles];
 }
 
 async function runScheduledSync(): Promise<void> {
-  const handles = handlesToSync();
-  for (const handle of handles) {
+  seedConfiguredReviewer();
+  const groups = listEnabledReviewerGroups();
+  for (const group of groups) {
     try {
-      const summary = await runSync(handle, { auto: true });
+      const summary = await runSyncScope(
+        { type: "group", groupId: group.id },
+        { auto: true, threshold: group.autoThreshold },
+      );
       if (summary.added > 0 || summary.failed > 0) {
         console.info(
-          `[scheduler] ${handle}: +${summary.added} added, ${summary.exists} existing, ${summary.failed} failed`,
+          `[scheduler] ${group.name}: +${summary.added} added, ${summary.exists} existing, ${summary.failed} failed`,
         );
       }
     } catch (error) {
-      console.error(`[scheduler] sync failed for ${handle}`, error);
+      console.error(`[scheduler] sync failed for group "${group.name}"`, error);
     }
   }
 }

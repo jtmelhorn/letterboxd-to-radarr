@@ -19,6 +19,23 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
+CREATE TABLE IF NOT EXISTS reviewer_groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  auto_threshold REAL NOT NULL DEFAULT 4,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS reviewer_group_members (
+  group_id INTEGER NOT NULL REFERENCES reviewer_groups(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY (group_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS reviewer_group_members_user_idx ON reviewer_group_members(user_id);
+
 CREATE TABLE IF NOT EXISTS radarr_targets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   base_url TEXT NOT NULL DEFAULT '',
@@ -94,6 +111,21 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
     .run();
 
   migrateLegacyJson(sqlite);
+
+  sqlite
+    .prepare(
+      `INSERT INTO reviewer_groups (id, name, auto_threshold)
+       SELECT 1, 'All reviewers', COALESCE((SELECT auto_threshold FROM radarr_targets WHERE id = 1), 4)
+       WHERE NOT EXISTS (SELECT 1 FROM reviewer_groups WHERE id = 1)`,
+    )
+    .run();
+
+  sqlite
+    .prepare(
+      `INSERT OR IGNORE INTO reviewer_group_members (group_id, user_id)
+       SELECT 1, id FROM users`,
+    )
+    .run();
 
   const db = drizzle(sqlite, { schema });
   return { sqlite, db };
