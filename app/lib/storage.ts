@@ -45,11 +45,11 @@ function envValue(names: string[]): string {
 }
 
 function configuredRadarrUrl(): string {
-  return envValue(["RADARR_URL", "SONARR_URL", "SONARR"]);
+  return envValue(["RADARR", "RADARR_URL"]);
 }
 
 function configuredRadarrApiKey(): string {
-  return envValue(["RADARR_API_KEY", "SONARR_API_KEY", "API_KEY"]);
+  return envValue(["RADARR_API_KEY", "API_KEY"]);
 }
 
 export function getConfiguredReviewer(): string {

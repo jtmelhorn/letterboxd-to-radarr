@@ -58,20 +58,18 @@ Run it locally:
 docker run --rm -p 3000:3000 \
   -v letterboxd-radarr-data:/data \
   -e REVIEWER=your-letterboxd-username \
-  -e SONARR=http://192.168.1.100:7878 \
+  -e RADARR=http://192.168.1.100:7878 \
   -e API_KEY=your-api-key \
   letterboxd-to-radarr:latest
 ```
-
-The app is movie-focused and talks to Radarr. `SONARR` is accepted as a media-server URL alias for container compatibility with the requested variable names.
 
 Supported runtime variables:
 
 | Variable | Purpose |
 | --- | --- |
 | `REVIEWER` or `LETTERBOXD_REVIEWER` | Prefills the Letterboxd username. |
-| `SONARR`, `SONARR_URL`, or `RADARR_URL` | Media server base URL. |
-| `API_KEY`, `SONARR_API_KEY`, or `RADARR_API_KEY` | Media server API key. |
+| `RADARR` or `RADARR_URL` | Media server base URL. |
+| `API_KEY` or `RADARR_API_KEY` | Media server API key. |
 | `LETTERBOXD_RADARR_DATA_DIR` or `APP_DATA_DIR` | Persistent settings/cache directory. Defaults to `/data` in the container. |
 | `PORT` | HTTP port inside the container. Defaults to `3000`. |
 
@@ -93,7 +91,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Open http://localhost:3080 by default, or whatever you set for `HOST_PORT`. The default host port `3080` is chosen to avoid common *arr suite ports such as Radarr (`7878`), Sonarr (`8989`), and Prowlarr (`9696`).
+Open http://localhost:3080 by default, or whatever you set for `HOST_PORT`. The default host port `3080` is chosen to avoid common *arr suite ports such as Radarr (`7878`) and Prowlarr (`9696`).
 
 To build the image locally instead of pulling from GitHub Container Registry, uncomment `build: .` in `docker-compose.yml`.
 
