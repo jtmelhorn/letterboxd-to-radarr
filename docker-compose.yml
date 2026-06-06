@@ -1,9 +1,9 @@
 services:
-  letterboxd-to-radarr:
+  letterboxdarr:
     image: ghcr.io/jtmelhorn/letterboxd-to-radarr:latest
     # Uncomment to build from this repo instead of pulling the published image.
     # build: ./web
-    container_name: letterboxd-to-radarr
+    container_name: letterboxdarr
     restart: unless-stopped
     ports:
       # Change the left side if 3080 conflicts with another service.

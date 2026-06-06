@@ -13,6 +13,7 @@ interface RadarrLookupMovie {
   titleSlug?: string;
   year?: number;
   tmdbId?: number;
+  genres?: string[];
   images?: RadarrImage[];
 }
 
@@ -30,6 +31,26 @@ export interface AddMovieInput {
   title: string;
   year: number | null;
   tmdbId?: number | null;
+}
+
+export interface MovieMetadataLookupInput {
+  title: string;
+  year: number | null;
+  tmdbMovieId?: number | null;
+}
+
+export interface MovieMetadataLookupResult {
+  status: "matched" | "not_found" | "error";
+  message: string;
+  httpStatus: number;
+  movie?: {
+    title: string;
+    year: number;
+    tmdbId: number;
+    genres: string[];
+    posterUrl?: string;
+    backdropUrl?: string;
+  };
 }
 
 export interface AddMovieResult {
@@ -97,6 +118,30 @@ function errorMessageFromBody(body: unknown, fallback: string): string {
 
 function isAlreadyExistsMessage(message: string): boolean {
   return /already|exists|has been added/i.test(message);
+}
+
+function normalizeLookupTitle(title: string): string {
+  return title
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/^(the|a|an)\s+/, "")
+    .trim();
+}
+
+function genreList(genres: unknown): string[] {
+  if (!Array.isArray(genres)) return [];
+  return [...new Set(genres.map((genre) => (typeof genre === "string" ? genre.trim() : "")).filter(Boolean))];
+}
+
+function imageUrl(images: RadarrImage[] | undefined, coverTypes: string[]): string | undefined {
+  if (!Array.isArray(images)) return undefined;
+  const wanted = new Set(coverTypes.map((coverType) => coverType.toLowerCase()));
+  const image = images.find((item) => item.coverType && wanted.has(item.coverType.toLowerCase()));
+  return image?.remoteUrl || image?.url || undefined;
 }
 
 function radarrFetch(baseUrl: string, apiKey: string, path: string, init?: RequestInit) {
@@ -202,17 +247,101 @@ function pickBestMatch(
   }
 
   const titleLower = input.title.trim().toLowerCase();
+  const normalizedTitle = normalizeLookupTitle(input.title);
   if (input.year) {
     const exact = valid.find(
       (r) => r.year === input.year && r.title?.trim().toLowerCase() === titleLower,
     );
     if (exact) return exact;
+    const normalizedExact = valid.find(
+      (r) => r.year === input.year && normalizeLookupTitle(r.title ?? "") === normalizedTitle,
+    );
+    if (normalizedExact) return normalizedExact;
+    const nearbyYear = valid.find(
+      (r) =>
+        typeof r.year === "number" &&
+        Math.abs(r.year - input.year!) <= 1 &&
+        normalizeLookupTitle(r.title ?? "") === normalizedTitle,
+    );
+    if (nearbyYear) return nearbyYear;
     const byYear = valid.find((r) => r.year === input.year);
     if (byYear) return byYear;
   }
 
   const byTitle = valid.find((r) => r.title?.trim().toLowerCase() === titleLower);
-  return byTitle ?? valid[0];
+  const normalizedByTitle = valid.find((r) => normalizeLookupTitle(r.title ?? "") === normalizedTitle);
+  return byTitle ?? normalizedByTitle ?? valid[0];
+}
+
+/**
+ * Use Radarr's existing movie lookup endpoint as the public metadata provider.
+ * Radarr already fronts TMDB metadata for configured users, so this avoids a
+ * separate TMDB/OMDb key while still letting us prefer RSS tmdb:movieId matches.
+ */
+export async function lookupMovieMetadata(
+  target: ResolvedRadarrTarget,
+  input: MovieMetadataLookupInput,
+): Promise<MovieMetadataLookupResult> {
+  const baseUrl = normalizeRadarrUrl(target.baseUrl);
+  if (!baseUrl) {
+    return { status: "error", message: "Radarr Base URL is invalid.", httpStatus: 400 };
+  }
+  if (!target.apiKey) {
+    return { status: "error", message: "Radarr API key is not configured.", httpStatus: 400 };
+  }
+
+  const lookupTerm = input.tmdbMovieId
+    ? `tmdb:${input.tmdbMovieId}`
+    : `${input.title}${input.year ? ` ${input.year}` : ""}`;
+
+  try {
+    const lookupResponse = await radarrFetch(
+      baseUrl,
+      target.apiKey,
+      `/api/v3/movie/lookup?term=${encodeURIComponent(lookupTerm)}`,
+    );
+    if (!lookupResponse.ok) {
+      return {
+        status: "error",
+        message: errorMessageFromBody(await readBody(lookupResponse), "Unable to look up movie metadata."),
+        httpStatus: lookupResponse.status,
+      };
+    }
+
+    const results = (await lookupResponse.json()) as RadarrLookupMovie[];
+    const match = pickBestMatch(Array.isArray(results) ? results : [], {
+      title: input.title,
+      year: input.year,
+      tmdbId: input.tmdbMovieId,
+    });
+    if (!match?.tmdbId || !match.title || !match.year) {
+      return {
+        status: "not_found",
+        message: "No matching movie metadata was found in Radarr lookup.",
+        httpStatus: 404,
+      };
+    }
+
+    return {
+      status: "matched",
+      message: "Movie metadata matched through Radarr lookup.",
+      httpStatus: 200,
+      movie: {
+        title: match.title,
+        year: match.year,
+        tmdbId: match.tmdbId,
+        genres: genreList(match.genres),
+        posterUrl: imageUrl(match.images, ["poster"]),
+        backdropUrl: imageUrl(match.images, ["fanart", "background", "banner"]),
+      },
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "Unable to communicate with Radarr.",
+      httpStatus: 502,
+    };
+  }
 }
 
 /**

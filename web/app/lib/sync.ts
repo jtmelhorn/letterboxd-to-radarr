@@ -4,7 +4,9 @@ import { fetchLetterboxdReviews } from "@/app/lib/letterboxd";
 import { addMovie } from "@/app/lib/radarr";
 import type { AddMovieResult } from "@/app/lib/radarr";
 import { getAggregatedMovies } from "@/app/lib/repos/aggregatedReviews";
-import { upsertReviews } from "@/app/lib/repos/reviews";
+import { enrichReviewsWithMetadata } from "@/app/lib/repos/movieMetadata";
+import { createPendingApproval } from "@/app/lib/repos/pendingApprovals";
+import { getReviewRows, upsertReviews } from "@/app/lib/repos/reviews";
 import { getReviewerGroup, listReviewerGroups } from "@/app/lib/repos/reviewerGroups";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
 import { getRecentSyncResults, recordSyncResult } from "@/app/lib/repos/syncResults";
@@ -31,7 +33,7 @@ function isRetryable(result: AddMovieResult): boolean {
 
 async function addWithRetry(
   target: ResolvedRadarrTarget,
-  input: { title: string; year: number | null },
+  input: { title: string; year: number | null; tmdbId?: number | null },
 ): Promise<AddMovieResult> {
   let last: AddMovieResult | null = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -76,9 +78,9 @@ function handlesForScope(scope: ReviewerScope): string[] {
 function thresholdForScope(scope: ReviewerScope, explicit?: number): number {
   if (typeof explicit === "number") return explicit;
   if (scope.type === "group" && typeof scope.groupId === "number") {
-    return getReviewerGroup(scope.groupId)?.autoThreshold ?? -1;
+    return getReviewerGroup(scope.groupId)?.ratingThreshold ?? -1;
   }
-  return listReviewerGroups()[0]?.autoThreshold ?? getRadarrTarget().autoThreshold;
+  return listReviewerGroups()[0]?.ratingThreshold ?? getRadarrTarget().autoThreshold;
 }
 
 async function refreshHandles(handles: string[]): Promise<number> {
@@ -87,6 +89,7 @@ async function refreshHandles(handles: string[]): Promise<number> {
     const user = getOrCreateUser(handle);
     const movies = await fetchLetterboxdReviews(handle);
     upsertReviews(user.id, movies);
+    await enrichReviewsWithMetadata(getReviewRows(user.id));
     fetched += movies.length;
   }
   return fetched;
@@ -109,6 +112,7 @@ async function executeSyncScope(
     added: 0,
     exists: 0,
     failed: 0,
+    pending: 0,
     threshold,
     results: [],
   };
@@ -127,6 +131,28 @@ async function executeSyncScope(
     return movie.status !== "added" && movie.status !== "exists";
   });
 
+  const group =
+    scope.type === "group" && typeof scope.groupId === "number" ? getReviewerGroup(scope.groupId) : null;
+
+  if (group?.requiresManualApproval) {
+    for (const movie of candidates) {
+      const representativeReview = movie.reviews[0];
+      if (!representativeReview) continue;
+      const pending = createPendingApproval({
+        groupId: group.id,
+        reviewId: representativeReview.id,
+        filmId: movie.id,
+        title: movie.title,
+        year: movie.year,
+        averageRating: movie.averageRating,
+        message: `Avg ${movie.averageRating.toFixed(1)} stars meets ${group.name}'s threshold.`,
+      });
+      if (pending) summary.pending = (summary.pending ?? 0) + 1;
+    }
+    summary.results = getRecentSyncResults(undefined, 100);
+    return summary;
+  }
+
   const limit = pLimit(RADARR_CONCURRENCY);
 
   await Promise.all(
@@ -135,7 +161,20 @@ async function executeSyncScope(
         const representativeReview = movie.reviews[0];
         if (!representativeReview) return;
 
-        const result = await addWithRetry(target, { title: movie.title, year: movie.year });
+        const parsedMetadataTmdbId =
+          movie.metadataSource === "radarr" && movie.metadataMediaType === "movie" && movie.metadataId
+            ? Number(movie.metadataId)
+            : null;
+        const result = await addWithRetry(target, {
+          title: movie.title,
+          year: movie.year,
+          tmdbId:
+            representativeReview.tmdbMovieId ??
+            movie.tmdbMovieId ??
+            (typeof parsedMetadataTmdbId === "number" && Number.isFinite(parsedMetadataTmdbId)
+              ? parsedMetadataTmdbId
+              : null),
+        });
         const status =
           result.status === "added"
             ? "added"

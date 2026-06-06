@@ -180,6 +180,26 @@ textarea {
   border: 1px solid var(--border-strong);
 }
 
+/* ── Brand wordmark ────────────────────────────────────── */
+.brand-wordmark {
+  display: inline-block;
+  font-family:
+    "Arial Black",
+    "Avenir Next Condensed",
+    "Trebuchet MS",
+    system-ui,
+    sans-serif;
+  font-weight: 900;
+  line-height: 0.95;
+  letter-spacing: 0;
+  color: transparent;
+  background: linear-gradient(90deg, var(--lb-green) 0%, var(--lb-orange) 58%, var(--cornsilk) 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  text-transform: lowercase;
+  text-shadow: 0 0 26px rgba(0, 224, 84, 0.18);
+}
+
 /* ── Modal movie card ──────────────────────────────────── */
 .modal-movie-card {
   width: 100%;

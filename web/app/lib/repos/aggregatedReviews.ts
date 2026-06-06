@@ -3,6 +3,7 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/app/lib/db";
 import { reviews, syncResults, users } from "@/app/lib/db/schema";
 import { canonicalFilmGuid } from "@/app/lib/filmIdentity";
+import { metadataForFilmIds } from "@/app/lib/repos/movieMetadata";
 import { getReviewerGroup } from "@/app/lib/repos/reviewerGroups";
 import { findUser, listUsers } from "@/app/lib/repos/users";
 import type {
@@ -24,8 +25,11 @@ interface ReviewWithHandle {
   rating: number;
   reviewedAt: string | null;
   posterUrl: string | null;
+  backdropUrl: string | null;
   reviewText: string | null;
   letterboxdUrl: string | null;
+  tmdbMovieId: number | null;
+  tmdbTvId: number | null;
 }
 
 function reviewTime(reviewedAt: string | null | undefined): number {
@@ -100,8 +104,11 @@ function rowsForScope(scope: ReviewerScope): ReviewWithHandle[] {
       rating: reviews.rating,
       reviewedAt: reviews.reviewedAt,
       posterUrl: reviews.posterUrl,
+      backdropUrl: reviews.backdropUrl,
       reviewText: reviews.reviewText,
       letterboxdUrl: reviews.letterboxdUrl,
+      tmdbMovieId: reviews.tmdbMovieId,
+      tmdbTvId: reviews.tmdbTvId,
     })
     .from(reviews)
     .innerJoin(users, eq(reviews.userId, users.id))
@@ -115,11 +122,15 @@ export function getAggregatedMovies(
 ): AggregatedMovieDto[] {
   const rows = rowsForScope(scope);
   const statusMap = syncStatusByReview(rows.map((row) => row.id));
+  const metadataMap = metadataForFilmIds(rows.map((row) => canonicalFilmGuid(row)));
   const grouped = new Map<string, AggregatedMovieDto>();
 
   for (const row of rows) {
     const filmId = canonicalFilmGuid(row);
     const status = statusMap.get(row.id) ?? null;
+    const metadata = metadataMap.get(filmId);
+    const posterUrl = row.posterUrl ?? metadata?.posterUrl ?? undefined;
+    const backdropUrl = row.backdropUrl ?? metadata?.backdropUrl ?? undefined;
     const review: AggregatedReviewDto = {
       id: row.id,
       reviewerId: row.userId,
@@ -130,9 +141,18 @@ export function getAggregatedMovies(
       guid: row.guid,
       status,
       ...(row.reviewedAt && { reviewedAt: row.reviewedAt }),
-      ...(row.posterUrl && { posterUrl: row.posterUrl }),
+      ...(posterUrl && { posterUrl }),
+      ...(backdropUrl && { backdropUrl }),
       ...(row.reviewText && { reviewText: row.reviewText }),
       ...(row.letterboxdUrl && { letterboxdUrl: row.letterboxdUrl }),
+      ...(row.tmdbMovieId && { tmdbMovieId: row.tmdbMovieId }),
+      ...(row.tmdbTvId && { tmdbTvId: row.tmdbTvId }),
+      genres: metadata?.genres ?? [],
+      metadataSource: metadata?.metadataSource ?? null,
+      metadataId: metadata?.metadataId ?? null,
+      metadataMediaType: metadata?.metadataMediaType ?? null,
+      metadataLookupStatus: metadata?.metadataLookupStatus ?? "pending",
+      metadataLastFetchedAt: metadata?.metadataLastFetchedAt ?? null,
     };
 
     const existing = grouped.get(filmId);
@@ -143,8 +163,17 @@ export function getAggregatedMovies(
         year: row.year,
         averageRating: row.rating,
         latestReviewedAt: row.reviewedAt ?? undefined,
-        posterUrl: row.posterUrl ?? undefined,
+        posterUrl,
+        backdropUrl,
         letterboxdUrl: row.letterboxdUrl ?? undefined,
+        tmdbMovieId: row.tmdbMovieId ?? undefined,
+        tmdbTvId: row.tmdbTvId ?? undefined,
+        genres: metadata?.genres ?? [],
+        metadataSource: metadata?.metadataSource ?? null,
+        metadataId: metadata?.metadataId ?? null,
+        metadataMediaType: metadata?.metadataMediaType ?? null,
+        metadataLookupStatus: metadata?.metadataLookupStatus ?? "pending",
+        metadataLastFetchedAt: metadata?.metadataLastFetchedAt ?? null,
         reviewerCount: 1,
         reviewerHandles: [row.reviewerHandle],
         reviews: [review],
@@ -160,8 +189,11 @@ export function getAggregatedMovies(
       existing.reviews.reduce((sum, item) => sum + item.rating, 0) / existing.reviews.length;
     existing.status =
       statusRank(status) > statusRank(existing.status) ? status : existing.status;
-    if (!existing.posterUrl && row.posterUrl) existing.posterUrl = row.posterUrl;
+    if (!existing.posterUrl && posterUrl) existing.posterUrl = posterUrl;
+    if (!existing.backdropUrl && backdropUrl) existing.backdropUrl = backdropUrl;
     if (!existing.letterboxdUrl && row.letterboxdUrl) existing.letterboxdUrl = row.letterboxdUrl;
+    if (!existing.tmdbMovieId && row.tmdbMovieId) existing.tmdbMovieId = row.tmdbMovieId;
+    if (!existing.tmdbTvId && row.tmdbTvId) existing.tmdbTvId = row.tmdbTvId;
     if (reviewTime(row.reviewedAt) > reviewTime(existing.latestReviewedAt)) {
       existing.latestReviewedAt = row.reviewedAt ?? undefined;
       existing.title = row.title;

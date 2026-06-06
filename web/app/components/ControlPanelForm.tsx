@@ -8,6 +8,7 @@ export interface SettingsDraft {
   radarrUrl: string;
   radarrApiKey: string;
   autoThreshold: number;
+  autoFetchMetadata: boolean;
   qualityProfileId: number | "";
   rootFolderPath: string;
 }
@@ -387,6 +388,26 @@ export function ControlPanelForm({
             <SelectChevron />
           </div>
         </div>
+
+        <label className="flex cursor-pointer items-start gap-3 rounded-[var(--radius-control)] border border-white/10 bg-black/15 p-3">
+          <input
+            checked={settingsDraft.autoFetchMetadata}
+            className="mt-0.5 h-4 w-4 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+            type="checkbox"
+            onChange={(e) =>
+              onDraftChange((current) => ({ ...current, autoFetchMetadata: e.target.checked }))
+            }
+          />
+          <span>
+            <span className="block text-sm font-semibold text-cornsilk">
+              Auto-fetch genres during RSS sync
+            </span>
+            <span className={helperCls}>
+              Uses your existing Radarr lookup for movies and public TVmaze lookup only for TV-style
+              entries. No separate TMDB, OMDb, or IMDb API key is required.
+            </span>
+          </span>
+        </label>
       </SectionCard>
 
       <Alert tone="info">

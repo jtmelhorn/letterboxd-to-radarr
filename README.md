@@ -1,11 +1,16 @@
-# Letterboxd to Radarr
+# letterboxdarr
 
 A Next.js App Router dashboard that reads one or more public Letterboxd RSS feeds, combines
-reviews by film, averages reviewer ratings, and automatically sends highly rated movies to Radarr.
+reviews by film, enriches cached movies with genres, averages reviewer ratings, and automatically
+sends highly rated movies to Radarr.
 
 Reviews, settings, and sync history are stored in a SQLite database. A background scheduler keeps
 Radarr in sync on an interval even when no browser is open, the Radarr API key is encrypted at
 rest, and the whole app can optionally sit behind a password.
+
+Genre metadata uses the user's existing Radarr lookup endpoint for movies. The app does not ship a
+maintainer TMDB/OMDb/IMDb key and does not require users to create a separate movie metadata API
+account. TVmaze is used only as a public fallback for TV-style Letterboxd entries.
 
 ## Docker Compose
 
@@ -37,6 +42,8 @@ The placeholders are:
 - `REVIEWER`: optional initial Letterboxd reviewer handle, for example `jtmel`.
 - `RADARR`: your Radarr base URL, for example `http://radarr.example.com:7878`.
 - `API_KEY`: your Radarr API key from Radarr Settings > General > Security.
+
+No separate movie metadata API key is required for genre enrichment.
 
 Optional environment variables:
 
@@ -96,9 +103,9 @@ Open http://localhost:3000 and enter:
 - Radarr API key
 - Minimum star rating
 
-The display rating filter is stored in browser `localStorage`. Everything else—Letterboxd reviewer sources, reviewer groups, group auto-sync thresholds, Radarr connection, quality profile, root folder, cached reviews, and sync history—is stored server-side in a SQLite database (`app.db`). In local development this data defaults to `web/.data`; Docker Compose stores it in the `letterboxd-radarr-data` volume mounted at `/data`. The Radarr API key is encrypted at rest with AES-256-GCM.
+The display rating, genre, and Radarr-status filters are stored in browser `localStorage`. Everything else—Letterboxd reviewer sources, reviewer groups, group auto-sync thresholds, Radarr connection, quality profile, root folder, cached reviews, movie metadata, and sync history—is stored server-side in a SQLite database (`app.db`). In local development this data defaults to `web/.data`; Docker Compose stores it in the `letterboxd-radarr-data` volume mounted at `/data`. The Radarr API key is encrypted at rest with AES-256-GCM.
 
-Letterboxd RSS exposes the latest activity items. Fetching reviews merges those items (keyed by RSS guid) into the database. The dashboard groups reviews by film identity, shows an average rating when multiple reviewers reviewed the same movie, and keeps each review visible in the movie detail view. A background scheduler evaluates enabled reviewer groups and adds movies whose group-average rating meets that group's threshold. Adds are idempotent—a movie that already synced successfully is not re-sent.
+Letterboxd RSS exposes the latest activity items. Fetching reviews merges those items (keyed by RSS guid) into the database, including `tmdb:movieId` and `tmdb:tvId` when Letterboxd provides them. When Radarr is configured and metadata auto-fetch is enabled, the app looks up missing genres through Radarr without adding the movie, caches matched/not-found/error results, and keeps RSS sync working even when metadata lookup fails. The dashboard groups reviews by film identity, shows an average rating when multiple reviewers reviewed the same movie, and keeps each review visible in the movie detail view. A background scheduler evaluates enabled reviewer groups and adds movies whose group-average rating meets that group's threshold. Adds are idempotent—a movie that already synced successfully is not re-sent.
 
 ### API overview
 
@@ -110,6 +117,7 @@ Letterboxd RSS exposes the latest activity items. Fetching reviews merges those 
 - `POST /api/radarr` `{ reviewId }` — manually add a stored film representative to Radarr.
 - `GET /api/radarr/synced?...` — aggregated movies successfully sent to Radarr, including all reviewer details.
 - `GET /api/radarr/options` — available Radarr quality profiles and root folders.
+- `POST /api/metadata/refresh` `{ reviewId }` — retry genre metadata lookup for one stored movie.
 - `GET|PUT /api/settings`, `POST /api/settings/test` — read/update connection + automation settings and test connectivity.
 - `GET /api/auth/status` — bootstrap state (`needsPasswordSetup`, `needsLogin`, `setupComplete`).
 - `POST /api/auth/setup-password` — set the admin password on first launch (when no env password).
@@ -121,7 +129,7 @@ Letterboxd RSS exposes the latest activity items. Fetching reviews merges those 
 Build the production image:
 
 ```bash
-docker build -t letterboxd-to-radarr:latest ./web
+docker build -t letterboxdarr:latest ./web
 ```
 
 Run it locally:
@@ -132,14 +140,14 @@ docker run --rm -p 3000:3000 \
   -e REVIEWER=your-letterboxd-username \
   -e RADARR=http://192.168.1.100:7878 \
   -e API_KEY=your-api-key \
-  letterboxd-to-radarr:latest
+  letterboxdarr:latest
 ```
 
 Tag and push to a public registry:
 
 ```bash
-docker tag letterboxd-to-radarr:latest registry.example.com/your-name/letterboxd-to-radarr:latest
-docker push registry.example.com/your-name/letterboxd-to-radarr:latest
+docker tag letterboxdarr:latest registry.example.com/your-name/letterboxdarr:latest
+docker push registry.example.com/your-name/letterboxdarr:latest
 ```
 
 Pass secrets like `API_KEY` at runtime instead of baking them into the image.

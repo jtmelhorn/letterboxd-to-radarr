@@ -1,11 +1,23 @@
+export type MetadataLookupStatus = "pending" | "matched" | "not_found" | "error";
+export type MetadataMediaType = "movie" | "tv";
+
 export interface MovieReview {
   title: string;
   year: number | null;
   rating: number;
   reviewedAt?: string;
   posterUrl?: string;
+  backdropUrl?: string;
   reviewText?: string;
   letterboxdUrl?: string;
+  tmdbMovieId?: number;
+  tmdbTvId?: number;
+  genres?: string[];
+  metadataSource?: string | null;
+  metadataId?: string | null;
+  metadataMediaType?: MetadataMediaType | null;
+  metadataLookupStatus?: MetadataLookupStatus;
+  metadataLastFetchedAt?: string | null;
   /** Stable identity from the Letterboxd RSS guid (or a derived fallback). */
   guid?: string;
 }
@@ -28,8 +40,29 @@ export interface ReviewerDto {
 export interface ReviewerGroupDto {
   id: number;
   name: string;
+  /** @deprecated Use ratingThreshold. */
   autoThreshold: number;
+  ratingThreshold: number;
+  syncInterval: SyncInterval;
+  requiresManualApproval: boolean;
   reviewerHandles: string[];
+}
+
+export type SyncInterval = "manual" | "30m" | "1h" | "12h" | "1d" | "1w";
+
+export interface PendingApprovalDto {
+  id: number;
+  groupId: number;
+  groupName: string;
+  reviewId: number;
+  filmId: string;
+  title: string;
+  year: number | null;
+  averageRating: number;
+  status: "pending" | "approved" | "rejected" | "error";
+  message: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AggregatedReviewDto extends MovieReview {
@@ -46,7 +79,16 @@ export interface AggregatedMovieDto {
   averageRating: number;
   latestReviewedAt?: string;
   posterUrl?: string;
+  backdropUrl?: string;
   letterboxdUrl?: string;
+  tmdbMovieId?: number;
+  tmdbTvId?: number;
+  genres: string[];
+  metadataSource: string | null;
+  metadataId: string | null;
+  metadataMediaType: MetadataMediaType | null;
+  metadataLookupStatus: MetadataLookupStatus;
+  metadataLastFetchedAt: string | null;
   reviewerCount: number;
   reviewerHandles: string[];
   reviews: AggregatedReviewDto[];
@@ -81,6 +123,7 @@ export interface ResolvedRadarrTarget {
   minAvailability: string;
   autoThreshold: number;
   monitored: boolean;
+  autoFetchMetadata: boolean;
 }
 
 export interface SettingsUpdate {
@@ -92,6 +135,7 @@ export interface SettingsUpdate {
   minAvailability?: string;
   autoThreshold?: number;
   monitored?: boolean;
+  autoFetchMetadata?: boolean;
 }
 
 export interface PublicSettings {
@@ -104,6 +148,7 @@ export interface PublicSettings {
   minAvailability: string;
   autoThreshold: number;
   monitored: boolean;
+  autoFetchMetadata: boolean;
   dataDir: string;
   authEnabled: boolean;
   setupComplete: boolean;
@@ -147,6 +192,7 @@ export interface SyncRunSummary {
   added: number;
   exists: number;
   failed: number;
+  pending?: number;
   threshold: number;
   results: SyncResultItem[];
 }

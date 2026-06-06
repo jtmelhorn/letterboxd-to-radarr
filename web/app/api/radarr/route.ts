@@ -43,7 +43,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await addMovie(target, { title, year });
+    const result = await addMovie(target, { title, year, tmdbId: review?.tmdbMovieId ?? null });
 
     if (review && (result.status === "added" || result.status === "exists" || result.status === "error")) {
       recordSyncResult({

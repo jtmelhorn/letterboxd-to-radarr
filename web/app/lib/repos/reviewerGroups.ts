@@ -2,7 +2,7 @@ import { asc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/app/lib/db";
 import { reviewerGroupMembers, reviewerGroups, users } from "@/app/lib/db/schema";
-import type { ReviewerGroupDto } from "@/app/types/movie";
+import type { ReviewerGroupDto, SyncInterval } from "@/app/types/movie";
 
 export const DEFAULT_REVIEWER_GROUP_ID = 1;
 
@@ -12,6 +12,12 @@ function normalizeGroupName(name: string): string {
 
 function normalizeThreshold(value: number): number {
   return value === -1 ? -1 : Math.round(value * 2) / 2;
+}
+
+const validSyncIntervals = new Set<SyncInterval>(["manual", "30m", "1h", "12h", "1d", "1w"]);
+
+export function isValidSyncInterval(value: string): value is SyncInterval {
+  return validSyncIntervals.has(value as SyncInterval);
 }
 
 export function isValidAutoThreshold(value: number): boolean {
@@ -38,6 +44,9 @@ export function listReviewerGroups(): ReviewerGroupDto[] {
     id: group.id,
     name: group.name,
     autoThreshold: group.autoThreshold,
+    ratingThreshold: group.autoThreshold,
+    syncInterval: isValidSyncInterval(group.syncInterval) ? group.syncInterval : "1d",
+    requiresManualApproval: group.requiresManualApproval,
     reviewerHandles: handlesForGroup(group.id),
   }));
 }
@@ -50,6 +59,9 @@ export function getReviewerGroup(groupId: number): ReviewerGroupDto | null {
     id: group.id,
     name: group.name,
     autoThreshold: group.autoThreshold,
+    ratingThreshold: group.autoThreshold,
+    syncInterval: isValidSyncInterval(group.syncInterval) ? group.syncInterval : "1d",
+    requiresManualApproval: group.requiresManualApproval,
     reviewerHandles: handlesForGroup(group.id),
   };
 }
@@ -70,20 +82,29 @@ function reviewerIdsFromHandles(handles: string[]): number[] {
 export function upsertReviewerGroup(input: {
   id?: number;
   name: string;
-  autoThreshold: number;
+  autoThreshold?: number;
+  ratingThreshold?: number;
+  syncInterval?: SyncInterval;
+  requiresManualApproval?: boolean;
   reviewerHandles: string[];
 }): ReviewerGroupDto {
   const name = normalizeGroupName(input.name);
   if (!name) {
     throw new Error("Group name is required.");
   }
-  if (!isValidAutoThreshold(input.autoThreshold)) {
+  const rawThreshold = input.ratingThreshold ?? input.autoThreshold ?? 4;
+  if (!isValidAutoThreshold(rawThreshold)) {
     throw new Error("Auto-sync threshold must be disabled or between 1.0 and 5.0.");
   }
 
   const db = getDb();
   const now = new Date().toISOString();
-  const autoThreshold = normalizeThreshold(input.autoThreshold);
+  const autoThreshold = normalizeThreshold(rawThreshold);
+  const syncInterval = input.syncInterval ?? "1d";
+  if (!isValidSyncInterval(syncInterval)) {
+    throw new Error("Sync interval is not supported.");
+  }
+  const requiresManualApproval = input.requiresManualApproval ?? false;
   const memberIds =
     typeof input.id === "number" && input.id === DEFAULT_REVIEWER_GROUP_ID
       ? []
@@ -94,13 +115,20 @@ export function upsertReviewerGroup(input: {
       typeof input.id === "number"
         ? tx
             .update(reviewerGroups)
-            .set({ name, autoThreshold, updatedAt: now })
+            .set({ name, autoThreshold, syncInterval, requiresManualApproval, updatedAt: now })
             .where(eq(reviewerGroups.id, input.id))
             .returning()
             .get()
         : tx
             .insert(reviewerGroups)
-            .values({ name, autoThreshold, createdAt: now, updatedAt: now })
+            .values({
+              name,
+              autoThreshold,
+              syncInterval,
+              requiresManualApproval,
+              createdAt: now,
+              updatedAt: now,
+            })
             .returning()
             .get();
 
@@ -125,6 +153,9 @@ export function upsertReviewerGroup(input: {
     id: group.id,
     name: group.name,
     autoThreshold: group.autoThreshold,
+    ratingThreshold: group.autoThreshold,
+    syncInterval: isValidSyncInterval(group.syncInterval) ? group.syncInterval : "1d",
+    requiresManualApproval: group.requiresManualApproval,
     reviewerHandles: handlesForGroup(group.id),
   };
 }
@@ -134,7 +165,9 @@ export function updateDefaultGroupThreshold(autoThreshold: number): ReviewerGrou
   return upsertReviewerGroup({
     id: DEFAULT_REVIEWER_GROUP_ID,
     name: existing?.name ?? "All reviewers",
-    autoThreshold,
+    ratingThreshold: autoThreshold,
+    syncInterval: existing?.syncInterval ?? "1d",
+    requiresManualApproval: existing?.requiresManualApproval ?? false,
     reviewerHandles: existing?.reviewerHandles ?? [],
   });
 }
@@ -151,6 +184,7 @@ export function deleteReviewerGroup(groupId: number): boolean {
 
 export function listEnabledReviewerGroups(): ReviewerGroupDto[] {
   return listReviewerGroups().filter(
-    (group) => group.autoThreshold !== -1 && group.reviewerHandles.length > 0,
+    (group) =>
+      group.ratingThreshold !== -1 && group.syncInterval !== "manual" && group.reviewerHandles.length > 0,
   );
 }

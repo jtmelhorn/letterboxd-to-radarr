@@ -1,18 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { DragEvent, FormEvent, ReactNode } from "react";
 
 import { canCompleteSetup, ControlPanelForm } from "@/app/components/ControlPanelForm";
 import type {
   AggregatedMovieDto,
   AuthStatusResponse,
+  PendingApprovalDto,
   PublicSettings,
   RadarrAddResponse,
   RadarrOptionsResponse,
   ReviewerDto,
   ReviewerGroupDto,
   ReviewerScope,
+  SyncInterval,
   SyncResultItem,
   SyncRunSummary,
 } from "@/app/types/movie";
@@ -46,8 +48,25 @@ interface AutoSyncSummary {
   threshold: number;
 }
 
-const STORAGE_KEY = "letterboxd-to-radarr-local-config";
+const STORAGE_KEY = "letterboxdarr-local-config";
+const LEGACY_STORAGE_KEY = "letterboxd-to-radarr-local-config";
+const UNKNOWN_GENRE = "Unknown genre";
 const ratingOptions = Array.from({ length: 9 }, (_, i) => 1 + i * 0.5);
+const groupRatingOptions = [3, 3.5, 4, 4.5, 5];
+const syncIntervalOptions: Array<{ value: SyncInterval; label: string }> = [
+  { value: "manual", label: "Manual only" },
+  { value: "30m", label: "Every 30 minutes" },
+  { value: "1h", label: "Every hour" },
+  { value: "12h", label: "Every 12 hours" },
+  { value: "1d", label: "Daily" },
+  { value: "1w", label: "Weekly" },
+];
+
+interface DraggedReviewer {
+  handle: string;
+  source: "pool" | "group";
+  groupId?: number;
+}
 
 type BootPhase = "loading" | "needsPasswordSetup" | "needsLogin" | "needsSetup" | "ready";
 type ScopeSelection = "all" | `reviewer:${string}` | `group:${number}`;
@@ -64,6 +83,7 @@ const defaultSettings: PublicSettings = {
   minAvailability: "announced",
   autoThreshold: 4,
   monitored: true,
+  autoFetchMetadata: true,
   dataDir: "",
   authEnabled: false,
   setupComplete: false,
@@ -122,6 +142,10 @@ function sortMoviesByRating(movies: AggregatedMovieDto[]): AggregatedMovieDto[] 
 function isAddedToRadarr(movie: AggregatedMovieDto, sendStates: Record<string, SendState>): boolean {
   const state = sendStates[movieKey(movie)] ?? statusToSendState(movie.status);
   return state === "added";
+}
+
+function movieGenres(movie: AggregatedMovieDto): string[] {
+  return movie.genres.length > 0 ? movie.genres : [UNKNOWN_GENRE];
 }
 
 function statusToSendState(status: AggregatedMovieDto["status"]): SendState {
@@ -622,6 +646,7 @@ export default function Home() {
     radarrUrl: "",
     radarrApiKey: "",
     autoThreshold: 4,
+    autoFetchMetadata: true,
     qualityProfileId: "" as number | "",
     rootFolderPath: "",
   });
@@ -653,14 +678,19 @@ export default function Home() {
 
   const [minimumRating, setMinimumRating] = useState(4);
   const [hideAdded, setHideAdded] = useState(false);
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [isGenreFilterOpen, setIsGenreFilterOpen] = useState(false);
   const [movies, setMovies] = useState<AggregatedMovieDto[]>([]);
   const [syncedMovies, setSyncedMovies] = useState<AggregatedMovieDto[]>([]);
   const [reviewers, setReviewers] = useState<ReviewerDto[]>([]);
   const [reviewerGroups, setReviewerGroups] = useState<ReviewerGroupDto[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<PendingApprovalDto[]>([]);
   const [scopeSelection, setScopeSelection] = useState<ScopeSelection>("all");
   const [newReviewerInput, setNewReviewerInput] = useState("");
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupThreshold, setNewGroupThreshold] = useState(4);
+  const [draggedReviewer, setDraggedReviewer] = useState<DraggedReviewer | null>(null);
+  const [activeDropZone, setActiveDropZone] = useState<"pool" | number | null>(null);
   const [isFetching, setIsFetching] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSyncedOpen, setIsSyncedOpen] = useState(false);
@@ -668,7 +698,9 @@ export default function Home() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sendStates, setSendStates] = useState<Record<string, SendState>>({});
   const [sendMessages, setSendMessages] = useState<Record<string, string>>({});
+  const [metadataMessages, setMetadataMessages] = useState<Record<string, string>>({});
   const [activeMovieKey, setActiveMovieKey] = useState<string | null>(null);
+  const [refreshingMetadataKey, setRefreshingMetadataKey] = useState<string | null>(null);
 
   const [autoSyncSummary, setAutoSyncSummary] = useState<AutoSyncSummary | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
@@ -681,6 +713,8 @@ export default function Home() {
     () => activityLog.filter((entry) => isActivityBadgeWorthy(entry) && entry.at > activitySeenAt).length,
     [activityLog, activitySeenAt],
   );
+  const pendingApprovalCount = pendingApprovals.filter((approval) => approval.status === "pending").length;
+  const hasManualApprovalGroups = reviewerGroups.some((group) => group.requiresManualApproval);
 
   const openActivity = useCallback(() => {
     setActivitySeenAt(Date.now());
@@ -689,18 +723,23 @@ export default function Home() {
 
   // ── localStorage hydration (username + display filter only) ─────────────
   useEffect(() => {
-    const saved = window.localStorage.getItem(STORAGE_KEY);
+    const saved = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
     if (saved) {
       try {
         const parsed = JSON.parse(saved) as Partial<LocalConfig> & {
           minimumRating?: number;
           hideAdded?: boolean;
+          selectedGenres?: unknown;
         };
         setConfig({ username: parsed.username ?? "" });
         if (typeof parsed.minimumRating === "number") setMinimumRating(parsed.minimumRating);
         if (typeof parsed.hideAdded === "boolean") setHideAdded(parsed.hideAdded);
+        if (Array.isArray(parsed.selectedGenres)) {
+          setSelectedGenres(parsed.selectedGenres.filter((genre): genre is string => typeof genre === "string"));
+        }
       } catch {
         window.localStorage.removeItem(STORAGE_KEY);
+        window.localStorage.removeItem(LEGACY_STORAGE_KEY);
       }
     }
     setHasLoadedConfig(true);
@@ -708,8 +747,12 @@ export default function Home() {
 
   useEffect(() => {
     if (!hasLoadedConfig) return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...config, minimumRating, hideAdded }));
-  }, [config, hasLoadedConfig, hideAdded, minimumRating]);
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...config, minimumRating, hideAdded, selectedGenres }),
+    );
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+  }, [config, hasLoadedConfig, hideAdded, minimumRating, selectedGenres]);
 
   const currentScope = useMemo<ReviewerScope>(() => {
     if (scopeSelection.startsWith("reviewer:")) {
@@ -769,6 +812,17 @@ export default function Home() {
       if (!res.ok) return;
       const body = (await res.json()) as { groups?: ReviewerGroupDto[] };
       setReviewerGroups(body.groups ?? []);
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
+  const loadPendingApprovals = useCallback(async () => {
+    try {
+      const res = await fetch("/api/pending-approvals", { cache: "no-store" });
+      if (!res.ok) return;
+      const body = (await res.json()) as { pendingApprovals?: PendingApprovalDto[] };
+      setPendingApprovals(body.pendingApprovals ?? []);
     } catch {
       // non-fatal
     }
@@ -858,11 +912,12 @@ export default function Home() {
       if (body.reviewer) {
         setConfig((current) => (current.username.trim() ? current : { username: body.reviewer }));
       }
-      await Promise.all([loadReviewers(), loadReviewerGroups()]);
+      await Promise.all([loadReviewers(), loadReviewerGroups(), loadPendingApprovals()]);
       setSettingsDraft({
         radarrUrl: body.radarrUrl,
         radarrApiKey: "",
         autoThreshold: body.autoThreshold,
+        autoFetchMetadata: body.autoFetchMetadata,
         qualityProfileId: body.qualityProfileId ?? "",
         rootFolderPath: body.rootFolderPath ?? "",
       });
@@ -871,7 +926,7 @@ export default function Home() {
       setSettingsError(err instanceof Error ? err.message : "Unable to load settings.");
       return null;
     }
-  }, [loadReviewerGroups, loadReviewers]);
+  }, [loadPendingApprovals, loadReviewerGroups, loadReviewers]);
 
   const refreshBootPhase = useCallback(async () => {
     try {
@@ -927,6 +982,10 @@ export default function Home() {
         setIsActivityOpen(false);
         return;
       }
+      if (isGenreFilterOpen) {
+        setIsGenreFilterOpen(false);
+        return;
+      }
       if (isSyncedOpen) {
         setIsSyncedOpen(false);
         return;
@@ -935,7 +994,7 @@ export default function Home() {
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [activeMovieKey, bootPhase, isActivityOpen, isSettingsOpen, isSyncedOpen]);
+  }, [activeMovieKey, bootPhase, isActivityOpen, isGenreFilterOpen, isSettingsOpen, isSyncedOpen]);
 
   useEffect(() => {
     if (!autoSyncSummary) return;
@@ -944,16 +1003,41 @@ export default function Home() {
   }, [autoSyncSummary]);
 
   // ── Derived state ──────────────────────────────────────────────────────
+  const genreOptions = useMemo(() => {
+    const genres = new Set<string>();
+    for (const movie of movies) {
+      for (const genre of movieGenres(movie)) {
+        genres.add(genre);
+      }
+    }
+    return Array.from(genres).sort((a, b) => {
+      if (a === UNKNOWN_GENRE) return 1;
+      if (b === UNKNOWN_GENRE) return -1;
+      return a.localeCompare(b);
+    });
+  }, [movies]);
+
+  const genreFilterLabel =
+    selectedGenres.length === 0
+      ? "All genres"
+      : selectedGenres.length === 1
+        ? selectedGenres[0]
+        : `${selectedGenres.length} genres`;
+
   const filteredMovies = useMemo(
     () =>
       sortMoviesByRating(
         movies.filter((m) => {
           if (minimumRating > 0 && m.averageRating < minimumRating) return false;
           if (hideAdded && isAddedToRadarr(m, sendStates)) return false;
+          if (selectedGenres.length > 0) {
+            const genres = movieGenres(m);
+            if (!selectedGenres.some((genre) => genres.includes(genre))) return false;
+          }
           return true;
         }),
       ),
-    [hideAdded, minimumRating, movies, sendStates],
+    [hideAdded, minimumRating, movies, selectedGenres, sendStates],
   );
 
   const activeMovie = useMemo(
@@ -968,6 +1052,8 @@ export default function Home() {
 
   const activeSendState: SendState = activeMovieKey ? (sendStates[activeMovieKey] ?? "idle") : "idle";
   const activeMessage = activeMovieKey ? sendMessages[activeMovieKey] : undefined;
+  const activeMetadataMessage = activeMovieKey ? metadataMessages[activeMovieKey] : undefined;
+  const activeMetadataRefreshing = activeMovieKey ? refreshingMetadataKey === activeMovieKey : false;
 
   const stats = useMemo(() => {
     const total = movies.length;
@@ -1052,6 +1138,7 @@ export default function Home() {
         radarrUrl: settingsDraft.radarrUrl,
         radarrApiKey: settingsDraft.radarrApiKey,
         autoThreshold: settingsDraft.autoThreshold,
+        autoFetchMetadata: settingsDraft.autoFetchMetadata,
         qualityProfileId,
         qualityProfileName,
         rootFolderPath: settingsDraft.rootFolderPath || null,
@@ -1064,6 +1151,7 @@ export default function Home() {
       radarrUrl: body.radarrUrl,
       radarrApiKey: "",
       autoThreshold: body.autoThreshold,
+      autoFetchMetadata: body.autoFetchMetadata,
       qualityProfileId: body.qualityProfileId ?? "",
       rootFolderPath: body.rootFolderPath ?? "",
     });
@@ -1124,9 +1212,104 @@ export default function Home() {
       setReviewers(body?.reviewers ?? []);
       setNewReviewerInput("");
       await loadReviewerGroups();
+      await loadPendingApprovals();
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : "Unable to add reviewer.");
     }
+  }
+
+  async function removeReviewer(handle: string) {
+    setSettingsError(null);
+    try {
+      const res = await fetch(`/api/reviewers?handle=${encodeURIComponent(handle)}`, { method: "DELETE" });
+      const body = (await res.json().catch(() => null)) as { reviewers?: ReviewerDto[]; message?: string } | null;
+      if (!res.ok) throw new Error(apiMessage(body, "Unable to remove reviewer."));
+      setReviewers(body?.reviewers ?? []);
+      await Promise.all([loadReviewerGroups(), loadPendingApprovals()]);
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : "Unable to remove reviewer.");
+    }
+  }
+
+  async function saveReviewerGroup(
+    group: ReviewerGroupDto,
+    update: Partial<Pick<ReviewerGroupDto, "name" | "ratingThreshold" | "syncInterval" | "requiresManualApproval" | "reviewerHandles">>,
+  ) {
+    const next = {
+      id: group.id,
+      name: update.name ?? group.name,
+      ratingThreshold: update.ratingThreshold ?? group.ratingThreshold ?? group.autoThreshold,
+      syncInterval: update.syncInterval ?? group.syncInterval,
+      requiresManualApproval: update.requiresManualApproval ?? group.requiresManualApproval,
+      reviewerHandles: update.reviewerHandles ?? group.reviewerHandles,
+    };
+    setSettingsError(null);
+    try {
+      const res = await fetch("/api/reviewer-groups", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      const body = (await res.json().catch(() => null)) as { groups?: ReviewerGroupDto[]; message?: string } | null;
+      if (!res.ok) throw new Error(apiMessage(body, "Unable to save reviewer group."));
+      setReviewerGroups(body?.groups ?? []);
+      await loadPendingApprovals();
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : "Unable to save reviewer group.");
+    }
+  }
+
+  async function deleteGroup(group: ReviewerGroupDto) {
+    setSettingsError(null);
+    try {
+      const res = await fetch(`/api/reviewer-groups?id=${group.id}`, { method: "DELETE" });
+      const body = (await res.json().catch(() => null)) as { groups?: ReviewerGroupDto[]; message?: string } | null;
+      if (!res.ok) throw new Error(apiMessage(body, "Unable to delete reviewer group."));
+      setReviewerGroups(body?.groups ?? []);
+      if (scopeSelection === `group:${group.id}`) setScopeSelection("all");
+      await loadPendingApprovals();
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : "Unable to delete reviewer group.");
+    }
+  }
+
+  function startReviewerDrag(event: DragEvent<HTMLElement>, payload: DraggedReviewer) {
+    setDraggedReviewer(payload);
+    event.dataTransfer.effectAllowed = payload.source === "pool" ? "copy" : "move";
+    event.dataTransfer.setData("application/json", JSON.stringify(payload));
+    event.dataTransfer.setData("text/plain", payload.handle);
+  }
+
+  function draggedReviewerFromEvent(event: DragEvent<HTMLElement>): DraggedReviewer | null {
+    if (draggedReviewer) return draggedReviewer;
+    try {
+      const data = event.dataTransfer.getData("application/json");
+      return data ? (JSON.parse(data) as DraggedReviewer) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function dropReviewerOnGroup(event: DragEvent<HTMLElement>, group: ReviewerGroupDto) {
+    event.preventDefault();
+    const payload = draggedReviewerFromEvent(event);
+    setActiveDropZone(null);
+    setDraggedReviewer(null);
+    if (!payload || group.id === 1 || group.reviewerHandles.includes(payload.handle)) return;
+    await saveReviewerGroup(group, { reviewerHandles: [...group.reviewerHandles, payload.handle] });
+  }
+
+  async function dropReviewerOnPool(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    const payload = draggedReviewerFromEvent(event);
+    setActiveDropZone(null);
+    setDraggedReviewer(null);
+    if (!payload || payload.source !== "group" || payload.groupId === 1) return;
+    const group = reviewerGroups.find((candidate) => candidate.id === payload.groupId);
+    if (!group) return;
+    await saveReviewerGroup(group, {
+      reviewerHandles: group.reviewerHandles.filter((handle) => handle !== payload.handle),
+    });
   }
 
   async function createReviewerGroup() {
@@ -1139,8 +1322,10 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
-          autoThreshold: newGroupThreshold,
-          reviewerHandles: reviewers.map((reviewer) => reviewer.handle),
+          ratingThreshold: newGroupThreshold,
+          syncInterval: "1d",
+          requiresManualApproval: false,
+          reviewerHandles: [],
         }),
       });
       const body = (await res.json().catch(() => null)) as { groups?: ReviewerGroupDto[]; message?: string } | null;
@@ -1148,8 +1333,21 @@ export default function Home() {
       setReviewerGroups(body?.groups ?? []);
       setNewGroupName("");
       setNewGroupThreshold(4);
+      await loadPendingApprovals();
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : "Unable to create reviewer group.");
+    }
+  }
+
+  async function resolvePendingApproval(id: number, action: "approve" | "reject") {
+    setSettingsError(null);
+    try {
+      const res = await fetch(`/api/pending-approvals/${id}/${action}`, { method: "POST" });
+      const body = (await res.json().catch(() => null)) as { message?: string } | null;
+      if (!res.ok) throw new Error(apiMessage(body, `Unable to ${action} pending movie.`));
+      await Promise.all([loadPendingApprovals(), loadActivity(), loadSyncedMovies(), loadReviews(false)]);
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : `Unable to ${action} pending movie.`);
     }
   }
 
@@ -1249,6 +1447,7 @@ export default function Home() {
       }
       await loadReviews(false);
       await loadSyncedMovies();
+      await loadPendingApprovals();
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : "Unable to sync.");
     } finally {
@@ -1318,6 +1517,33 @@ export default function Home() {
       setSendStates((c) => ({ ...c, [key]: "error" }));
       setSendMessages((c) => ({ ...c, [key]: message }));
       logActivity(movie, "error", message, false);
+    }
+  }
+
+  async function refreshMetadata(movie: AggregatedMovieDto) {
+    const key = movieKey(movie);
+    const representativeReview = movie.reviews[0];
+    if (!representativeReview) return;
+
+    setRefreshingMetadataKey(key);
+    setMetadataMessages((current) => ({ ...current, [key]: "" }));
+    try {
+      const res = await fetch("/api/metadata/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewId: representativeReview.id }),
+      });
+      const body = (await res.json().catch(() => null)) as { message?: string } | null;
+      if (!res.ok) throw new Error(apiMessage(body, "Unable to refresh metadata."));
+      setMetadataMessages((current) => ({ ...current, [key]: "Metadata refreshed." }));
+      await Promise.all([loadReviews(false), loadSyncedMovies()]);
+    } catch (err) {
+      setMetadataMessages((current) => ({
+        ...current,
+        [key]: err instanceof Error ? err.message : "Unable to refresh metadata.",
+      }));
+    } finally {
+      setRefreshingMetadataKey(null);
     }
   }
 
@@ -1481,7 +1707,7 @@ export default function Home() {
             </div>
             <div>
               <p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-gold">First-run setup</p>
-              <h1 className="text-3xl font-black tracking-tight text-cornsilk">Connect Letterboxd to Radarr</h1>
+              <h1 className="brand-wordmark text-3xl">letterboxdarr</h1>
               <p className="mt-3 max-w-xl text-sm leading-relaxed text-cornsilk/65">
                 Add your Letterboxd handle, verify Radarr, and choose the library destination before the
                 dashboard starts syncing.
@@ -1540,9 +1766,7 @@ export default function Home() {
             <div className={`${brandIconCls} h-9 w-9`}>
               <FilmIcon className="h-5 w-5" />
             </div>
-            <span className="font-black text-base tracking-tight text-cornsilk">
-              LB<span className="text-gold">→</span>Radarr
-            </span>
+            <span className="brand-wordmark text-lg">letterboxdarr</span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -1576,6 +1800,7 @@ export default function Home() {
                   radarrUrl: settings.radarrUrl,
                   radarrApiKey: "",
                   autoThreshold: settings.autoThreshold,
+                  autoFetchMetadata: settings.autoFetchMetadata,
                   qualityProfileId: settings.qualityProfileId ?? "",
                   rootFolderPath: settings.rootFolderPath ?? "",
                 });
@@ -1586,6 +1811,7 @@ export default function Home() {
                 setIsSettingsOpen(true);
                 void loadReviewers();
                 void loadReviewerGroups();
+                void loadPendingApprovals();
                 if (settings.radarrUrl && settings.hasRadarrApiKey) void loadRadarrOptions();
               }}
               type="button"
@@ -1596,6 +1822,11 @@ export default function Home() {
                   aria-label="Radarr setup needed"
                   className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 animate-pulse rounded-full bg-gold ring-2 ring-ink"
                 />
+              )}
+              {isRadarrSetup && pendingApprovalCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gold px-1 text-[9px] font-bold text-ink shadow">
+                  {pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}
+                </span>
               )}
             </button>
           </div>
@@ -1683,7 +1914,11 @@ export default function Home() {
                 />
                 <StatCard
                   detail={`${stats.filtered} shown ${
-                    minimumRating > 0 ? `(≥${minimumRating.toFixed(1)}★)` : "(all ratings)"
+                    minimumRating > 0
+                      ? `(≥${minimumRating.toFixed(1)}★${selectedGenres.length ? ", genre filtered" : ""})`
+                      : selectedGenres.length
+                        ? "(genre filtered)"
+                        : "(all ratings)"
                   }`}
                   icon={<StarIcon className="h-5 w-5" />}
                   label="Average rating"
@@ -1763,6 +1998,70 @@ export default function Home() {
                     ))}
                   </div>
 
+                  <div className="relative">
+                    <button
+                      className="flex h-9 min-w-32 items-center justify-between gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-white/20 hover:text-cornsilk"
+                      onClick={() => setIsGenreFilterOpen((open) => !open)}
+                      type="button"
+                    >
+                      <span className="truncate">{genreFilterLabel}</span>
+                      <span className="text-cornsilk/45">▼</span>
+                    </button>
+                    {isGenreFilterOpen && (
+                      <div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border border-cornsilk/10 bg-ink p-2 shadow-2xl">
+                        <div className="flex items-center justify-between gap-2 border-b border-cornsilk/10 px-2 pb-2">
+                          <span className="text-xs font-extrabold text-cornsilk">Genres</span>
+                          {selectedGenres.length > 0 && (
+                            <button
+                              className="text-xs font-bold text-pine transition hover:text-chartreuse"
+                              onClick={() => setSelectedGenres([])}
+                              type="button"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        <div className="max-h-64 overflow-y-auto py-1">
+                          <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]">
+                            <input
+                              checked={selectedGenres.length === 0}
+                              className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                              onChange={() => setSelectedGenres([])}
+                              type="checkbox"
+                            />
+                            All genres
+                          </label>
+                          {genreOptions.length === 0 ? (
+                            <p className="px-2 py-3 text-xs leading-relaxed text-cornsilk/55">
+                              Cached genres will appear after metadata refresh.
+                            </p>
+                          ) : (
+                            genreOptions.map((genre) => (
+                              <label
+                                key={genre}
+                                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]"
+                              >
+                                <input
+                                  checked={selectedGenres.includes(genre)}
+                                  className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                                  onChange={(e) =>
+                                    setSelectedGenres((current) =>
+                                      e.target.checked
+                                        ? [...new Set([...current, genre])]
+                                        : current.filter((item) => item !== genre),
+                                    )
+                                  }
+                                  type="checkbox"
+                                />
+                                <span className="truncate">{genre}</span>
+                              </label>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   <label className="flex h-9 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3">
                     <input
                       checked={hideAdded}
@@ -1786,7 +2085,9 @@ export default function Home() {
                   <p className="mt-2 max-w-sm text-sm leading-relaxed text-cornsilk/65">
                     {hideAdded
                       ? "All visible movies are already in Radarr, or none meet the current filter. Adjust the filters above."
-                      : minimumRating > 0
+                      : selectedGenres.length > 0
+                        ? "No movies match the selected genre filter. Clear genres or choose a different selection above."
+                        : minimumRating > 0
                         ? `No movies rated ${minimumRating.toFixed(1)}★ or higher. Choose All or lower the minimum rating above.`
                         : "No movies cached yet. Sync your Letterboxd feed to get started."}
                   </p>
@@ -1880,7 +2181,7 @@ export default function Home() {
                   Private media automation
                 </span>
                 <h1 className="text-4xl font-black leading-tight tracking-tight text-cornsilk md:text-5xl">
-                  Turn high-rated <span className="text-gold">Letterboxd reviews</span> into Radarr adds.
+                  <span className="brand-wordmark">letterboxdarr</span> turns high-rated reviews into Radarr adds.
                 </h1>
                 <p className="max-w-xl text-base leading-relaxed text-cornsilk/68 md:text-lg">
                   Configure Radarr once, enter your public Letterboxd handle, then sync. Movies that meet
@@ -2127,9 +2428,6 @@ export default function Home() {
                       <p className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
                         Reviewer notes
                       </p>
-                      <p className="mt-1 text-sm font-semibold text-cornsilk/70">
-                        {activeMovie.reviewerHandles.map((handle) => `@${handle}`).join(", ")}
-                      </p>
                     </div>
 
                     <div className="flex flex-shrink-0 flex-col items-end">
@@ -2143,6 +2441,48 @@ export default function Home() {
                   </div>
 
                   <div className="space-y-4 border-b border-cornsilk/5 px-4 py-5 sm:px-5">
+                    <div className="rounded-xl border border-cornsilk/10 bg-black/15 p-3">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
+                            Genres
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {movieGenres(activeMovie).map((genre) => (
+                              <span
+                                key={genre}
+                                className={`rounded-full border px-2.5 py-1 text-xs font-bold ${
+                                  genre === UNKNOWN_GENRE
+                                    ? "border-cornsilk/10 bg-cornsilk/5 text-cornsilk/60"
+                                    : "border-pine/25 bg-pine/10 text-chartreuse"
+                                }`}
+                              >
+                                {genre}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <button
+                          className="inline-flex h-9 flex-shrink-0 items-center justify-center gap-2 rounded-[var(--radius-control)] border border-cornsilk/10 bg-ink/60 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-gold/30 hover:bg-ink hover:text-cornsilk disabled:cursor-not-allowed disabled:opacity-55"
+                          disabled={activeMetadataRefreshing}
+                          onClick={() => void refreshMetadata(activeMovie)}
+                          type="button"
+                        >
+                          {activeMetadataRefreshing ? (
+                            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-cornsilk/25 border-t-cornsilk" />
+                          ) : (
+                            <ArrowPathIcon className="h-3.5 w-3.5" />
+                          )}
+                          Refresh metadata
+                        </button>
+                      </div>
+                      {activeMetadataMessage && (
+                        <p className="mt-3 text-xs leading-relaxed text-cornsilk/60">
+                          {activeMetadataMessage}
+                        </p>
+                      )}
+                    </div>
+
                     {activeMovie.reviews.map((review) => (
                       <div key={review.id} className="rounded-xl border border-cornsilk/10 bg-black/15 p-3">
                         <div className="mb-2 flex items-center justify-between gap-3">
@@ -2484,11 +2824,11 @@ export default function Home() {
                 <div className="mb-4 space-y-1">
                   <h3 className="text-base font-extrabold tracking-tight text-cornsilk">Letterboxd reviewers</h3>
                   <p className="text-xs leading-relaxed text-cornsilk/65">
-                    Add public Letterboxd handles, then choose one reviewer, a group, or all reviewers from the dashboard.
+                    Add public handles, then drag reviewers from the pool into custom sync groups.
                   </p>
                 </div>
                 <div className="space-y-4">
-                  <div className="flex flex-col gap-2 sm:flex-row">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                     <input
                       className={`${inputCls} w-full`}
                       placeholder="letterboxd-handle"
@@ -2496,26 +2836,66 @@ export default function Home() {
                       onChange={(event) => setNewReviewerInput(event.target.value)}
                     />
                     <button
-                      className={`${primaryBtnCls} h-11 px-4 text-sm`}
+                      className={`${primaryBtnCls} h-11 w-full px-5 text-sm whitespace-nowrap sm:w-auto`}
                       disabled={!newReviewerInput.trim()}
                       onClick={() => void addReviewer()}
                       type="button"
                     >
-                      Add reviewer
+                      Add
                     </button>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div
+                    className={`min-h-20 rounded-[var(--radius-control)] border border-dashed p-3 transition ${
+                      activeDropZone === "pool"
+                        ? "border-pine/70 bg-pine/10"
+                        : "border-cornsilk/10 bg-black/15"
+                    }`}
+                    onDragLeave={() => setActiveDropZone(null)}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      setActiveDropZone("pool");
+                    }}
+                    onDrop={(event) => void dropReviewerOnPool(event)}
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <p className="text-xs font-extrabold uppercase tracking-wider text-cornsilk/55">
+                        Reviewer pool
+                      </p>
+                      {pendingApprovalCount > 0 && (
+                        <span className="rounded-full border border-gold/20 bg-gold/10 px-2 py-0.5 text-[10px] font-bold text-gold">
+                          {pendingApprovalCount} pending approval{pendingApprovalCount === 1 ? "" : "s"}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
                     {reviewers.map((reviewer) => (
-                      <span
+                      <div
                         key={reviewer.handle}
-                        className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 py-1 text-xs font-bold text-cornsilk/75"
+                        className="group flex max-w-full cursor-grab items-center gap-1.5 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/25 px-2.5 py-1.5 text-xs font-bold text-cornsilk/80 active:cursor-grabbing"
+                        draggable
+                        onDragEnd={() => {
+                          setDraggedReviewer(null);
+                          setActiveDropZone(null);
+                        }}
+                        onDragStart={(event) =>
+                          startReviewerDrag(event, { handle: reviewer.handle, source: "pool" })
+                        }
                       >
-                        @{reviewer.handle}
-                      </span>
+                        <span className="truncate">@{reviewer.handle}</span>
+                        <button
+                          aria-label={`Remove @${reviewer.handle}`}
+                          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md text-cornsilk/45 transition hover:bg-rose-500/15 hover:text-rose-300"
+                          onClick={() => void removeReviewer(reviewer.handle)}
+                          type="button"
+                        >
+                          <XIcon className="h-3 w-3" />
+                        </button>
+                      </div>
                     ))}
                     {reviewers.length === 0 && (
                       <span className="text-xs text-cornsilk/55">No reviewers added yet.</span>
                     )}
+                    </div>
                   </div>
                 </div>
               </section>
@@ -2540,46 +2920,264 @@ export default function Home() {
                       value={newGroupThreshold}
                       onChange={(event) => setNewGroupThreshold(Number(event.target.value))}
                     >
-                      <option value={-1}>Autosync off</option>
-                      {ratingOptions.map((rating) => (
+                      {groupRatingOptions.map((rating) => (
                         <option key={rating} value={rating}>
                           Avg ≥ {rating.toFixed(1)} ★
                         </option>
                       ))}
                     </select>
                     <button
-                      className={`${primaryBtnCls} h-11 px-4 text-sm`}
-                      disabled={!newGroupName.trim() || reviewers.length === 0}
+                      className={`${primaryBtnCls} h-11 px-4 text-sm whitespace-nowrap`}
+                      disabled={!newGroupName.trim()}
                       onClick={() => void createReviewerGroup()}
                       type="button"
                     >
                       Create group
                     </button>
                   </div>
-                  <div className="space-y-2">
+                  <div className="grid grid-cols-1 gap-3">
                     {reviewerGroups.map((group) => (
                       <div
                         key={group.id}
-                        className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-2 text-xs text-cornsilk/70"
+                        className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 p-3 text-xs text-cornsilk/70"
                       >
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="font-extrabold text-cornsilk">{group.name}</span>
-                          <span>
-                            {group.autoThreshold === -1
-                              ? "Autosync off"
-                              : `Autosync avg >= ${group.autoThreshold.toFixed(1)} stars`}
-                          </span>
+                        <div className="flex flex-col gap-3">
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                            <input
+                              aria-label={`${group.name} group name`}
+                              className={`${inputCls} h-9 w-full px-3 text-xs font-extrabold`}
+                              defaultValue={group.name}
+                              onBlur={(event) => {
+                                const name = event.target.value.trim();
+                                if (name && name !== group.name) {
+                                  void saveReviewerGroup(group, { name });
+                                } else {
+                                  event.target.value = group.name;
+                                }
+                              }}
+                            />
+                            <button
+                              aria-label={`Delete ${group.name}`}
+                              className="flex h-9 w-full items-center justify-center gap-2 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/65 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto"
+                              disabled={group.id === 1}
+                              onClick={() => void deleteGroup(group)}
+                              type="button"
+                            >
+                              <TrashIcon className="h-3.5 w-3.5" />
+                              Delete
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                            <label className="space-y-1">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
+                                Threshold
+                              </span>
+                              <select
+                                className={`${inputCls} h-9 w-full px-3 text-xs`}
+                                value={group.ratingThreshold ?? group.autoThreshold}
+                                onChange={(event) =>
+                                  void saveReviewerGroup(group, { ratingThreshold: Number(event.target.value) })
+                                }
+                              >
+                                {groupRatingOptions.map((rating) => (
+                                  <option key={rating} value={rating}>
+                                    Avg ≥ {rating.toFixed(1)} stars
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="space-y-1">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
+                                Sync timing
+                              </span>
+                              <select
+                                className={`${inputCls} h-9 w-full px-3 text-xs`}
+                                value={group.syncInterval}
+                                onChange={(event) =>
+                                  void saveReviewerGroup(group, {
+                                    syncInterval: event.target.value as SyncInterval,
+                                  })
+                                }
+                              >
+                                {syncIntervalOptions.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 sm:mt-5">
+                              <input
+                                checked={group.requiresManualApproval}
+                                className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                                onChange={(event) =>
+                                  void saveReviewerGroup(group, {
+                                    requiresManualApproval: event.target.checked,
+                                  })
+                                }
+                                type="checkbox"
+                              />
+                              <span className="text-xs font-bold text-cornsilk/75">Require approval</span>
+                            </label>
+                          </div>
+
+                          <div
+                            className={`min-h-20 rounded-[var(--radius-control)] border border-dashed p-3 transition ${
+                              activeDropZone === group.id
+                                ? "border-pine/70 bg-pine/10"
+                                : "border-cornsilk/10 bg-black/20"
+                            } ${group.id === 1 ? "opacity-85" : ""}`}
+                            onDragLeave={() => setActiveDropZone(null)}
+                            onDragOver={(event) => {
+                              event.preventDefault();
+                              setActiveDropZone(group.id);
+                            }}
+                            onDrop={(event) => void dropReviewerOnGroup(event, group)}
+                          >
+                            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
+                                Reviewers
+                              </p>
+                              {group.id !== 1 && reviewers.length > 0 && (
+                                <select
+                                  aria-label={`Add reviewer to ${group.name}`}
+                                  className={`${inputCls} h-8 w-full px-2 text-xs sm:w-48`}
+                                  value=""
+                                  onChange={(event) => {
+                                    const handle = event.target.value;
+                                    if (handle && !group.reviewerHandles.includes(handle)) {
+                                      void saveReviewerGroup(group, {
+                                        reviewerHandles: [...group.reviewerHandles, handle],
+                                      });
+                                    }
+                                  }}
+                                >
+                                  <option value="">Add reviewer…</option>
+                                  {reviewers
+                                    .filter((reviewer) => !group.reviewerHandles.includes(reviewer.handle))
+                                    .map((reviewer) => (
+                                      <option key={reviewer.handle} value={reviewer.handle}>
+                                        @{reviewer.handle}
+                                      </option>
+                                    ))}
+                                </select>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {group.reviewerHandles.map((handle) => (
+                                <div
+                                  key={handle}
+                                  className="flex max-w-full cursor-grab items-center gap-1.5 rounded-[var(--radius-control)] border border-cornsilk/10 bg-ink/70 px-2.5 py-1.5 text-xs font-bold text-cornsilk/80 active:cursor-grabbing"
+                                  draggable={group.id !== 1}
+                                  onDragEnd={() => {
+                                    setDraggedReviewer(null);
+                                    setActiveDropZone(null);
+                                  }}
+                                  onDragStart={(event) =>
+                                    startReviewerDrag(event, {
+                                      handle,
+                                      source: "group",
+                                      groupId: group.id,
+                                    })
+                                  }
+                                >
+                                  <span className="truncate">@{handle}</span>
+                                  {group.id !== 1 && (
+                                    <button
+                                      aria-label={`Remove @${handle} from ${group.name}`}
+                                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md text-cornsilk/45 transition hover:bg-rose-500/15 hover:text-rose-300"
+                                      onClick={() =>
+                                        void saveReviewerGroup(group, {
+                                          reviewerHandles: group.reviewerHandles.filter(
+                                            (candidate) => candidate !== handle,
+                                          ),
+                                        })
+                                      }
+                                      type="button"
+                                    >
+                                      <XIcon className="h-3 w-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                              {group.reviewerHandles.length === 0 && (
+                                <span className="text-xs font-semibold text-cornsilk/45">
+                                  Drag reviewers here
+                                </span>
+                              )}
+                            </div>
+                            {group.id === 1 && (
+                              <p className="mt-2 text-[11px] text-cornsilk/45">
+                                The default group includes every reviewer automatically.
+                              </p>
+                            )}
+                          </div>
                         </div>
-                        <p className="mt-1 truncate">
-                          {group.reviewerHandles.length > 0
-                            ? group.reviewerHandles.map((handle) => `@${handle}`).join(", ")
-                            : "No reviewers"}
-                        </p>
                       </div>
                     ))}
                   </div>
                 </div>
               </section>
+
+              {(hasManualApprovalGroups || pendingApprovalCount > 0) && (
+                <section className="rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
+                  <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="space-y-1">
+                      <h3 className="text-base font-extrabold tracking-tight text-cornsilk">
+                        Pending approvals
+                      </h3>
+                      <p className="text-xs leading-relaxed text-cornsilk/65">
+                        Review movies held by groups that require approval before Radarr sync.
+                      </p>
+                    </div>
+                    <span className="w-fit rounded-full border border-gold/20 bg-gold/10 px-2.5 py-1 text-xs font-bold text-gold">
+                      {pendingApprovalCount} pending
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {pendingApprovals.map((approval) => (
+                      <div
+                        key={approval.id}
+                        className="flex flex-col gap-3 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 p-3 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-extrabold text-cornsilk">
+                            {approval.title}
+                            {approval.year != null && (
+                              <span className="ml-1 font-medium text-cornsilk/55">{approval.year}</span>
+                            )}
+                          </p>
+                          <p className="mt-1 text-xs text-cornsilk/60">
+                            {approval.groupName} · Avg {approval.averageRating.toFixed(1)} stars
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            className={`${primaryBtnCls} h-9 px-3 text-xs`}
+                            onClick={() => void resolvePendingApproval(approval.id, "approve")}
+                            type="button"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            className="h-9 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/70 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300"
+                            onClick={() => void resolvePendingApproval(approval.id, "reject")}
+                            type="button"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {pendingApprovals.length === 0 && (
+                      <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/55">
+                        No movies are waiting for approval.
+                      </p>
+                    )}
+                  </div>
+                </section>
+              )}
 
               <ControlPanelForm
                 connectionDot={connectionDot}

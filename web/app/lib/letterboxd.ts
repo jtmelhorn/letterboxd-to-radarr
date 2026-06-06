@@ -17,6 +17,10 @@ interface LetterboxdFeedItem {
   "letterboxd:filmTitle"?: string;
   "letterboxd:filmYear"?: string;
   "letterboxd:memberRating"?: string;
+  "tmdb:movieId"?: string;
+  "tmdb:tvId"?: string;
+  tmdbMovieId?: string;
+  tmdbTvId?: string;
 }
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -28,6 +32,8 @@ const parser = new Parser<Record<string, never>, LetterboxdFeedItem>({
       ["letterboxd:filmTitle", "filmTitle"],
       ["letterboxd:filmYear", "filmYear"],
       ["letterboxd:memberRating", "memberRating"],
+      ["tmdb:movieId", "tmdbMovieId"],
+      ["tmdb:tvId", "tmdbTvId"],
     ],
   },
 });
@@ -121,8 +127,12 @@ function mapItems(items: LetterboxdFeedItem[]): MovieReview[] {
       const title = textValue(item.filmTitle ?? item["letterboxd:filmTitle"] ?? item.title);
       const yearValue = textValue(item.filmYear ?? item["letterboxd:filmYear"]);
       const ratingValue = textValue(item.memberRating ?? item["letterboxd:memberRating"]);
+      const tmdbMovieIdValue = textValue(item.tmdbMovieId ?? item["tmdb:movieId"]);
+      const tmdbTvIdValue = textValue(item.tmdbTvId ?? item["tmdb:tvId"]);
       const year = Number.parseInt(yearValue, 10);
       const rating = Number.parseFloat(ratingValue);
+      const tmdbMovieId = Number.parseInt(tmdbMovieIdValue, 10);
+      const tmdbTvId = Number.parseInt(tmdbTvIdValue, 10);
 
       if (!title || Number.isNaN(rating)) return null;
 
@@ -149,6 +159,8 @@ function mapItems(items: LetterboxdFeedItem[]): MovieReview[] {
       if (posterUrl) movie.posterUrl = posterUrl;
       if (reviewText) movie.reviewText = reviewText;
       if (letterboxdUrl) movie.letterboxdUrl = letterboxdUrl;
+      if (Number.isInteger(tmdbMovieId) && tmdbMovieId > 0) movie.tmdbMovieId = tmdbMovieId;
+      if (Number.isInteger(tmdbTvId) && tmdbTvId > 0) movie.tmdbTvId = tmdbTvId;
       return movie;
     })
     .filter((movie): movie is MovieReview => movie !== null);
@@ -166,7 +178,7 @@ export async function fetchLetterboxdReviews(handle: string): Promise<MovieRevie
   const cached = cache.get(key);
 
   const headers: Record<string, string> = {
-    "User-Agent": "letterboxd-to-radarr",
+    "User-Agent": "letterboxdarr",
     Accept: "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
   };
   if (cached?.etag) headers["If-None-Match"] = cached.etag;

@@ -3,8 +3,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Letterboxd to Radarr",
-  description: "Send highly rated Letterboxd reviews to a Radarr instance.",
+  title: "letterboxdarr",
+  description: "Sync highly rated Letterboxd reviews into Radarr with letterboxdarr.",
 };
 
 export default function RootLayout({

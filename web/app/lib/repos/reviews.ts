@@ -4,6 +4,7 @@ import { getDb } from "@/app/lib/db";
 import { reviews, syncResults } from "@/app/lib/db/schema";
 import type { ReviewRow } from "@/app/lib/db/schema";
 import { canonicalFilmGuid } from "@/app/lib/filmIdentity";
+import { metadataForFilmIds } from "@/app/lib/repos/movieMetadata";
 import type { MovieReview, ReviewDto } from "@/app/types/movie";
 
 export function reviewGuid(movie: MovieReview): string {
@@ -25,8 +26,17 @@ function sanitize(movie: MovieReview): MovieReview | null {
     rating,
     reviewedAt: movie.reviewedAt?.trim() || undefined,
     posterUrl: movie.posterUrl?.trim() || undefined,
+    backdropUrl: movie.backdropUrl?.trim() || undefined,
     reviewText: movie.reviewText?.trim() || undefined,
     letterboxdUrl: movie.letterboxdUrl?.trim() || undefined,
+    tmdbMovieId:
+      typeof movie.tmdbMovieId === "number" && Number.isFinite(movie.tmdbMovieId) && movie.tmdbMovieId > 0
+        ? movie.tmdbMovieId
+        : undefined,
+    tmdbTvId:
+      typeof movie.tmdbTvId === "number" && Number.isFinite(movie.tmdbTvId) && movie.tmdbTvId > 0
+        ? movie.tmdbTvId
+        : undefined,
     guid: canonicalFilmGuid({ title, year, letterboxdUrl: movie.letterboxdUrl, guid: movie.guid }),
   };
 }
@@ -131,8 +141,11 @@ export function upsertReviews(userId: number, incoming: MovieReview[]): void {
             rating: movie.rating,
             reviewedAt: movie.reviewedAt ?? existing.reviewedAt,
             posterUrl: movie.posterUrl ?? existing.posterUrl,
+            backdropUrl: movie.backdropUrl ?? existing.backdropUrl,
             reviewText: movie.reviewText ?? existing.reviewText,
             letterboxdUrl: movie.letterboxdUrl ?? existing.letterboxdUrl,
+            tmdbMovieId: movie.tmdbMovieId ?? existing.tmdbMovieId,
+            tmdbTvId: movie.tmdbTvId ?? existing.tmdbTvId,
             updatedAt: now,
           })
           .where(eq(reviews.id, existing.id))
@@ -147,8 +160,11 @@ export function upsertReviews(userId: number, incoming: MovieReview[]): void {
             rating: movie.rating,
             reviewedAt: movie.reviewedAt ?? null,
             posterUrl: movie.posterUrl ?? null,
+            backdropUrl: movie.backdropUrl ?? null,
             reviewText: movie.reviewText ?? null,
             letterboxdUrl: movie.letterboxdUrl ?? null,
+            tmdbMovieId: movie.tmdbMovieId ?? null,
+            tmdbTvId: movie.tmdbTvId ?? null,
             createdAt: now,
             updatedAt: now,
           })
@@ -167,6 +183,12 @@ export function getReviewRows(userId: number): ReviewRow[] {
 export function getReviewById(reviewId: number): ReviewRow | null {
   const db = getDb();
   return db.select().from(reviews).where(eq(reviews.id, reviewId)).get() ?? null;
+}
+
+export function getReviewByFilmId(filmId: string): ReviewRow | null {
+  const db = getDb();
+  const rows = db.select().from(reviews).all();
+  return rows.find((row) => canonicalFilmGuid(row) === filmId) ?? null;
 }
 
 /** Map the latest successful/failed status per review (added/exists win over error). */
@@ -202,19 +224,32 @@ function latestStatusByReview(reviewIds: number[]): Map<number, ReviewDto["statu
 export function getReviewDtos(userId: number): ReviewDto[] {
   const rows = getReviewRows(userId);
   const statusMap = latestStatusByReview(rows.map((r) => r.id));
+  const metadataMap = metadataForFilmIds(rows.map((row) => canonicalFilmGuid(row)));
 
-  return rows.map((row) => ({
-    id: row.id,
-    title: row.title,
-    year: row.year,
-    rating: row.rating,
-    reviewedAt: row.reviewedAt ?? undefined,
-    posterUrl: row.posterUrl ?? undefined,
-    reviewText: row.reviewText ?? undefined,
-    letterboxdUrl: row.letterboxdUrl ?? undefined,
-    guid: row.guid,
-    status: statusMap.get(row.id) ?? null,
-  }));
+  return rows.map((row) => {
+    const metadata = metadataMap.get(canonicalFilmGuid(row));
+    return {
+      id: row.id,
+      title: row.title,
+      year: row.year,
+      rating: row.rating,
+      reviewedAt: row.reviewedAt ?? undefined,
+      posterUrl: row.posterUrl ?? metadata?.posterUrl ?? undefined,
+      backdropUrl: row.backdropUrl ?? metadata?.backdropUrl ?? undefined,
+      reviewText: row.reviewText ?? undefined,
+      letterboxdUrl: row.letterboxdUrl ?? undefined,
+      tmdbMovieId: row.tmdbMovieId ?? undefined,
+      tmdbTvId: row.tmdbTvId ?? undefined,
+      genres: metadata?.genres ?? [],
+      metadataSource: metadata?.metadataSource ?? null,
+      metadataId: metadata?.metadataId ?? null,
+      metadataMediaType: metadata?.metadataMediaType ?? null,
+      metadataLookupStatus: metadata?.metadataLookupStatus ?? "pending",
+      metadataLastFetchedAt: metadata?.metadataLastFetchedAt ?? null,
+      guid: row.guid,
+      status: statusMap.get(row.id) ?? null,
+    };
+  });
 }
 
 /** True when this review already has a successful add/exists result. */

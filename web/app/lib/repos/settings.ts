@@ -44,6 +44,7 @@ export function getRadarrTarget(): ResolvedRadarrTarget {
     minAvailability: row?.minAvailability ?? "announced",
     autoThreshold: defaultGroupThreshold ?? row?.autoThreshold ?? 4,
     monitored: row?.monitored ?? true,
+    autoFetchMetadata: row?.autoFetchMetadata ?? true,
   };
 }
 
@@ -78,6 +79,9 @@ export function saveSettings(update: SettingsUpdate): void {
   if (typeof update.monitored === "boolean") {
     values.monitored = update.monitored;
   }
+  if (typeof update.autoFetchMetadata === "boolean") {
+    values.autoFetchMetadata = update.autoFetchMetadata;
+  }
 
   db.update(radarrTargets).set(values).where(eq(radarrTargets.id, SETTINGS_ID)).run();
 }
@@ -93,6 +97,7 @@ export function toPublicSettings(target: ResolvedRadarrTarget): PublicSettings {
     minAvailability: target.minAvailability,
     autoThreshold: target.autoThreshold,
     monitored: target.monitored,
+    autoFetchMetadata: target.autoFetchMetadata,
     dataDir: getDataDir(),
     authEnabled: isAuthEnabled(),
     setupComplete: isSetupComplete(),

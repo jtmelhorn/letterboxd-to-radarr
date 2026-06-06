@@ -1,7 +1,7 @@
 {
-  "name": "letterboxd-to-radarr",
+  "name": "letterboxdarr",
   "version": "1.0.0",
-  "description": "Next.js dashboard for sending Letterboxd reviews to Radarr",
+  "description": "letterboxdarr dashboard for sending Letterboxd reviews to Radarr",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

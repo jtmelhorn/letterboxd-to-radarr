@@ -16,6 +16,7 @@ interface SettingsRequestBody {
   minAvailability?: unknown;
   autoThreshold?: unknown;
   monitored?: unknown;
+  autoFetchMetadata?: unknown;
 }
 
 function normalizeHttpUrl(value: string): string | null {
@@ -89,6 +90,9 @@ export async function PUT(request: Request) {
   }
   if (typeof body.monitored === "boolean") {
     update.monitored = body.monitored;
+  }
+  if (typeof body.autoFetchMetadata === "boolean") {
+    update.autoFetchMetadata = body.autoFetchMetadata;
   }
 
   try {
