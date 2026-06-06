@@ -14,6 +14,10 @@ WORKDIR /app
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Runtime library needed when Next imports native better-sqlite3 bindings while
+# collecting route data during the production build.
+RUN apk add --no-cache libstdc++
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
@@ -26,7 +30,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 ENV PORT=3000
 
-RUN addgroup -S nodejs \
+RUN apk add --no-cache libstdc++ \
+  && addgroup -S nodejs \
   && adduser -S nextjs -G nodejs \
   && mkdir -p /data \
   && chown nextjs:nodejs /data

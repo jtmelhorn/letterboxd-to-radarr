@@ -1,6 +1,8 @@
 .data
+.smoke-data*
 .next
 node_modules
+tsconfig.tsbuildinfo
 npm-debug.log*
 .env
 .env.*
