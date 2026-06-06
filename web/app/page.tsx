@@ -608,7 +608,7 @@ export default function Home() {
     () =>
       sortMoviesByRating(
         movies.filter((m) => {
-          if (m.rating < minimumRating) return false;
+          if (minimumRating > 0 && m.rating < minimumRating) return false;
           if (hideAdded && isAddedToRadarr(m, sendStates)) return false;
           return true;
         }),
@@ -632,7 +632,9 @@ export default function Home() {
     const failed = values.filter((s) => s === "error").length;
     const syncing = values.filter((s) => s === "loading").length;
     const averageRating =
-      total > 0 ? (movies.reduce((acc, m) => acc + m.rating, 0) / total).toFixed(1) : "0.0";
+      filtered > 0
+        ? (filteredMovies.reduce((acc, m) => acc + m.rating, 0) / filtered).toFixed(1)
+        : "0.0";
     return { total, filtered, synced, failed, syncing, averageRating };
   }, [movies, filteredMovies, sendStates]);
 
@@ -1431,7 +1433,8 @@ export default function Home() {
                     <p className="text-xs font-semibold text-cornsilk/55">Average Rating</p>
                     <h3 className="text-base font-extrabold text-cornsilk">{stats.averageRating} ★</h3>
                     <p className="text-[11px] text-cornsilk/60">
-                      {stats.filtered} shown (≥{minimumRating.toFixed(1)}★)
+                      {stats.filtered} shown
+                      {minimumRating > 0 ? ` (≥${minimumRating.toFixed(1)}★)` : " (all ratings)"}
                     </p>
                   </div>
                 </div>
@@ -1468,6 +1471,15 @@ export default function Home() {
                     </span>
                   </span>
                   <div className="flex h-9 rounded-lg border border-cornsilk/5 bg-ink/60 p-0.5">
+                    <button
+                      className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
+                        minimumRating === 0 ? "bg-gold text-ink shadow" : "text-cornsilk/60 hover:text-cornsilk"
+                      }`}
+                      onClick={() => setMinimumRating(0)}
+                      type="button"
+                    >
+                      All
+                    </button>
                     {[3.0, 3.5, 4.0, 4.5, 5.0].map((val) => (
                       <button
                         key={val}
@@ -1502,8 +1514,10 @@ export default function Home() {
                   <h3 className="text-base font-extrabold text-cornsilk">No movies match this filter</h3>
                   <p className="text-xs text-cornsilk/55 mt-1 max-w-xs">
                     {hideAdded
-                      ? "All visible movies are already in Radarr, or none meet the minimum rating. Adjust the filters above."
-                      : `No movies rated ${minimumRating.toFixed(1)}★ or higher. Lower the minimum rating above to see more.`}
+                      ? "All visible movies are already in Radarr, or none meet the current filter. Adjust the filters above."
+                      : minimumRating > 0
+                        ? `No movies rated ${minimumRating.toFixed(1)}★ or higher. Choose All or lower the minimum rating above.`
+                        : "No movies cached yet. Sync your Letterboxd feed to get started."}
                   </p>
                 </div>
               ) : (
