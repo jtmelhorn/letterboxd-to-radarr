@@ -2066,7 +2066,7 @@ export default function Home() {
           <div
             aria-labelledby="movie-detail-title"
             aria-modal="true"
-            className="glass-modal animate-fade-in flex max-h-[90vh] min-h-0 w-full flex-col overflow-hidden rounded-t-3xl border border-cornsilk/10 shadow-2xl transition-all sm:max-w-2xl sm:rounded-[var(--radius-card)]"
+            className="glass-modal animate-fade-in flex max-h-[90vh] min-h-0 w-full flex-col overflow-hidden rounded-t-3xl border border-cornsilk/10 shadow-2xl transition-all sm:max-w-4xl sm:rounded-[var(--radius-card)]"
             role="dialog"
           >
             {/* Header bar */}
@@ -2095,31 +2095,22 @@ export default function Home() {
             </div>
 
             {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto">
-              {/* Compact image preview */}
-              <div className="px-6 pt-4">
-                <div className="modal-image-preview">
-                  {activeMovie.posterUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      alt=""
-                      className="h-full w-full object-cover"
-                      src={activeMovie.posterUrl}
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-pine to-ink">
-                      <FilmIcon className="h-12 w-12 text-pine/70" />
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Title, year, rating */}
-              <div className="px-6 pb-4 pt-4 border-b border-cornsilk/5">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
+            <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+              <div className="flex flex-col gap-5 md:flex-row md:items-start md:gap-6">
+                <aside className="modal-movie-card md:sticky md:top-0">
+                  <div className="modal-poster-frame">
+                    {activeMovie.posterUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img alt="" src={activeMovie.posterUrl} />
+                    ) : (
+                      <div className="modal-poster-placeholder">
+                        <FilmIcon className="h-12 w-12 text-cornsilk/45" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="px-1 pt-3 text-center">
                     <h2
-                      className="text-xl font-extrabold leading-tight text-cornsilk tracking-tight"
+                      className="text-base font-extrabold leading-tight text-cornsilk tracking-tight"
                       id="movie-detail-title"
                     >
                       {activeMovie.title}
@@ -2128,102 +2119,108 @@ export default function Home() {
                       {activeMovie.year ?? "Unknown year"}
                     </p>
                   </div>
+                </aside>
 
-                  <div className="flex flex-col items-end flex-shrink-0">
-                    <span className="text-xl font-black text-gold flex items-center gap-1">
-                      ★ {activeMovie.averageRating.toFixed(1)}
-                    </span>
-                    <span className="text-[10px] text-cornsilk/55 font-medium">
-                      {activeMovie.reviewerCount} reviewer{activeMovie.reviewerCount === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Reviews */}
-              <div className="px-6 py-5 border-b border-cornsilk/5 bg-ink/20">
-                <div className="space-y-4">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
-                    Reviewer notes
-                  </p>
-                  {activeMovie.reviews.map((review) => (
-                    <div key={review.id} className="rounded-xl border border-cornsilk/10 bg-black/15 p-3">
-                      <div className="mb-2 flex items-center justify-between gap-3">
-                        <span className="truncate text-xs font-extrabold text-cornsilk">
-                          @{review.reviewerHandle}
-                        </span>
-                        <span className="text-sm font-black text-gold">★ {review.rating.toFixed(1)}</span>
-                      </div>
-                      {review.reviewText ? (
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-cornsilk/78 italic">
-                          &quot;{review.reviewText}&quot;
-                        </p>
-                      ) : (
-                        <p className="text-xs italic text-cornsilk/55">No written review for this film.</p>
-                      )}
+                <section className="min-w-0 flex-1 overflow-hidden rounded-2xl border border-cornsilk/10 bg-ink/20">
+                  <div className="flex items-start justify-between gap-4 border-b border-cornsilk/5 px-4 py-4 sm:px-5">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
+                        Reviewer notes
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-cornsilk/70">
+                        {activeMovie.reviewerHandles.map((handle) => `@${handle}`).join(", ")}
+                      </p>
                     </div>
-                  ))}
-                </div>
-              </div>
 
-              {/* Actions */}
-              <div className="px-6 py-5 bg-ink/40">
-                {activeSendState === "added" ? (
-                  <div className="space-y-3 animate-fade-in">
-                    <div className="flex items-center gap-3.5 rounded-xl border border-chartreuse/30 bg-chartreuse/10 p-4">
-                      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-chartreuse">
-                        <CheckIcon className="h-4 w-4 text-ink" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-extrabold text-cornsilk">Sent to Radarr</p>
-                        <p className="mt-0.5 text-xs text-cornsilk/70">
-                          {activeMessage || "Film successfully synchronized."}
-                        </p>
-                      </div>
+                    <div className="flex flex-shrink-0 flex-col items-end">
+                      <span className="flex items-center gap-1 text-xl font-black text-gold">
+                        ★ {activeMovie.averageRating.toFixed(1)}
+                      </span>
+                      <span className="text-[10px] font-medium text-cornsilk/55">
+                        {activeMovie.reviewerCount} reviewer{activeMovie.reviewerCount === 1 ? "" : "s"}
+                      </span>
                     </div>
-                    <button
-                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-cornsilk/10 bg-ink/60 py-3 text-sm font-bold text-cornsilk transition hover:border-gold/30 hover:bg-ink focus:outline-none focus:ring-2 focus:ring-gold/40"
-                      onClick={() => void sendToRadarr(activeMovie)}
-                      type="button"
-                    >
-                      <ArrowPathIcon className="h-4 w-4" />
-                      Resend to Radarr
-                    </button>
                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    <button
-                      className={`${primaryBtnCls} flex w-full items-center justify-center gap-2 py-3.5 text-sm font-extrabold`}
-                      disabled={activeSendState === "loading"}
-                      onClick={() => void sendToRadarr(activeMovie)}
-                      type="button"
-                    >
-                      {activeSendState === "loading" ? (
-                        <>
-                          <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink/30 border-t-ink" />
-                          Sending to Radarr…
-                        </>
-                      ) : activeSendState === "error" ? (
-                        <>
+
+                  <div className="space-y-4 border-b border-cornsilk/5 px-4 py-5 sm:px-5">
+                    {activeMovie.reviews.map((review) => (
+                      <div key={review.id} className="rounded-xl border border-cornsilk/10 bg-black/15 p-3">
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <span className="truncate text-xs font-extrabold text-cornsilk">
+                            @{review.reviewerHandle}
+                          </span>
+                          <span className="text-sm font-black text-gold">★ {review.rating.toFixed(1)}</span>
+                        </div>
+                        {review.reviewText ? (
+                          <p className="whitespace-pre-wrap text-sm leading-relaxed text-cornsilk/78 italic">
+                            &quot;{review.reviewText}&quot;
+                          </p>
+                        ) : (
+                          <p className="text-xs italic text-cornsilk/55">No written review for this film.</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="bg-ink/40 px-4 py-5 sm:px-5">
+                    {activeSendState === "added" ? (
+                      <div className="space-y-3 animate-fade-in">
+                        <div className="flex items-center gap-3.5 rounded-xl border border-chartreuse/30 bg-chartreuse/10 p-4">
+                          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-chartreuse">
+                            <CheckIcon className="h-4 w-4 text-ink" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-extrabold text-cornsilk">Sent to Radarr</p>
+                            <p className="mt-0.5 text-xs text-cornsilk/70">
+                              {activeMessage || "Film successfully synchronized."}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          className="flex w-full items-center justify-center gap-2 rounded-xl border border-cornsilk/10 bg-ink/60 py-3 text-sm font-bold text-cornsilk transition hover:border-gold/30 hover:bg-ink focus:outline-none focus:ring-2 focus:ring-gold/40"
+                          onClick={() => void sendToRadarr(activeMovie)}
+                          type="button"
+                        >
                           <ArrowPathIcon className="h-4 w-4" />
-                          Retry add to Radarr
-                        </>
-                      ) : (
-                        <>
-                          <RadarrIcon className="h-4 w-4" />
-                          Add to Radarr Library
-                        </>
-                      )}
-                    </button>
+                          Resend to Radarr
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <button
+                          className={`${primaryBtnCls} flex w-full items-center justify-center gap-2 py-3.5 text-sm font-extrabold`}
+                          disabled={activeSendState === "loading"}
+                          onClick={() => void sendToRadarr(activeMovie)}
+                          type="button"
+                        >
+                          {activeSendState === "loading" ? (
+                            <>
+                              <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink/30 border-t-ink" />
+                              Sending to Radarr…
+                            </>
+                          ) : activeSendState === "error" ? (
+                            <>
+                              <ArrowPathIcon className="h-4 w-4" />
+                              Retry add to Radarr
+                            </>
+                          ) : (
+                            <>
+                              <RadarrIcon className="h-4 w-4" />
+                              Add to Radarr Library
+                            </>
+                          )}
+                        </button>
 
-                    {activeSendState === "error" && activeMessage && (
-                      <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-3 text-center text-xs text-rose-400 animate-fade-in flex items-start gap-2">
-                        <ExclamationIcon className="h-4 w-4 flex-shrink-0 text-rose-500" />
-                        <span className="text-left leading-relaxed">{activeMessage}</span>
+                        {activeSendState === "error" && activeMessage && (
+                          <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-3 text-center text-xs text-rose-400 animate-fade-in flex items-start gap-2">
+                            <ExclamationIcon className="h-4 w-4 flex-shrink-0 text-rose-500" />
+                            <span className="text-left leading-relaxed">{activeMessage}</span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
-                )}
+                </section>
               </div>
             </div>
           </div>
