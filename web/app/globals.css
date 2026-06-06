@@ -1,20 +1,27 @@
 @import "tailwindcss";
 
 @theme {
-  --color-ink: #0c1618;
-  --color-pine: #004643;
-  --color-cornsilk: #faf4d3;
-  --color-gold: #d1ac00;
-  --color-peach: #f6be9a;
+  --color-ink: #1a2122;
+  --color-granite: #4c5b5c;
+  --color-pine: #2f52e0;
+  --color-cornsilk: #eef0f0;
+  --color-gold: #f9cb40;
+  --color-peach: #ff715b;
+  --color-coral: #ff715b;
+  --color-pollen: #f9cb40;
+  --color-chartreuse: #bced09;
+  --color-azure: #2f52e0;
 }
 
 :root {
   color-scheme: dark;
-  --ink-black: #0c1618;
-  --pine-teal: #004643;
-  --cornsilk: #faf4d3;
-  --metallic-gold: #d1ac00;
-  --peach-glow: #f6be9a;
+  --ink-black: #1a2122;
+  --granite: #4c5b5c;
+  --royal-azure: #2f52e0;
+  --cornsilk: #eef0f0;
+  --golden-pollen: #f9cb40;
+  --vibrant-coral: #ff715b;
+  --chartreuse: #bced09;
 }
 
 * {
@@ -30,9 +37,9 @@ body {
   margin: 0;
   background: var(--ink-black);
   background-image:
-    radial-gradient(at 0% 0%, rgba(0, 70, 67, 0.18) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, rgba(209, 172, 0, 0.06) 0px, transparent 50%),
-    radial-gradient(at 50% 100%, rgba(0, 70, 67, 0.22) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(47, 82, 224, 0.14) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(249, 203, 64, 0.08) 0px, transparent 50%),
+    radial-gradient(at 50% 100%, rgba(76, 91, 92, 0.22) 0px, transparent 50%);
   color: var(--cornsilk);
   font-family:
     -apple-system,
@@ -71,47 +78,58 @@ textarea {
   z-index: 2;
   box-shadow:
     0 12px 30px -10px rgba(0, 0, 0, 0.8),
-    0 0 20px 1px rgba(209, 172, 0, 0.18);
+    0 0 20px 1px rgba(249, 203, 64, 0.2);
+}
+
+.poster-card:hover .poster-hover-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.poster-hover-actions {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
 }
 
 /* ── Poster bottom fade ────────────────────────────────── */
 .poster-gradient {
   background: linear-gradient(
     to top,
-    rgba(12, 22, 24, 0.98) 0%,
-    rgba(12, 22, 24, 0.8) 30%,
-    rgba(0, 70, 67, 0.25) 60%,
+    rgba(26, 33, 34, 0.98) 0%,
+    rgba(26, 33, 34, 0.8) 30%,
+    rgba(47, 82, 224, 0.2) 60%,
     transparent 100%
   );
 }
 
 /* ── Glassmorphism Utilities ───────────────────────────── */
 .glass-container {
-  background: rgba(12, 22, 24, 0.55);
+  background: rgba(26, 33, 34, 0.55);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(250, 244, 211, 0.06);
+  border: 1px solid rgba(238, 240, 240, 0.06);
 }
 
 .glass-card {
-  background: rgba(0, 70, 67, 0.18);
+  background: rgba(76, 91, 92, 0.18);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(250, 244, 211, 0.06);
+  border: 1px solid rgba(238, 240, 240, 0.06);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .glass-card:hover {
-  border-color: rgba(209, 172, 0, 0.25);
-  box-shadow: 0 0 25px rgba(209, 172, 0, 0.08);
+  border-color: rgba(249, 203, 64, 0.25);
+  box-shadow: 0 0 25px rgba(249, 203, 64, 0.08);
   transform: translateY(-2px);
 }
 
 .glass-modal {
-  background: rgba(12, 22, 24, 0.82);
+  background: rgba(26, 33, 34, 0.82);
   backdrop-filter: blur(30px);
   -webkit-backdrop-filter: blur(30px);
-  border: 1px solid rgba(250, 244, 211, 0.1);
+  border: 1px solid rgba(238, 240, 240, 0.1);
 }
 
 /* ── Custom scrollbar ──────────────────────────────────── */
@@ -121,17 +139,17 @@ textarea {
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(12, 22, 24, 0.4);
+  background: rgba(26, 33, 34, 0.4);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(246, 190, 154, 0.15);
+  background: rgba(255, 113, 91, 0.15);
   border-radius: 99px;
   transition: background 0.2s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(209, 172, 0, 0.45);
+  background: rgba(249, 203, 64, 0.45);
 }
 
 /* ── Animations ────────────────────────────────────────── */
@@ -172,8 +190,8 @@ textarea {
   background-image: linear-gradient(
     90deg,
     rgba(255, 255, 255, 0) 0%,
-    rgba(250, 244, 211, 0.03) 20%,
-    rgba(246, 190, 154, 0.08) 60%,
+    rgba(238, 240, 240, 0.03) 20%,
+    rgba(255, 113, 91, 0.08) 60%,
     rgba(255, 255, 255, 0) 100%
   );
   animation: shimmer 2s infinite;

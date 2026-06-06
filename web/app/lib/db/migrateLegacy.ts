@@ -5,6 +5,7 @@ import type Database from "better-sqlite3";
 
 import { getDataDir } from "@/app/lib/config";
 import { encryptSecret } from "@/app/lib/crypto";
+import { canonicalFilmGuid } from "@/app/lib/filmIdentity";
 
 interface LegacySettings {
   radarrUrl?: string;
@@ -82,8 +83,11 @@ export function migrateLegacyJson(sqlite: Database.Database): void {
             if (!title || typeof movie.rating !== "number") continue;
             const year =
               typeof movie.year === "number" && Number.isFinite(movie.year) ? movie.year : null;
-            const guid =
-              movie.letterboxdUrl?.trim() || `${title.toLowerCase()}-${year ?? "unknown"}`;
+            const guid = canonicalFilmGuid({
+              title,
+              year,
+              letterboxdUrl: movie.letterboxdUrl,
+            });
             insertReview.run(
               user.id,
               guid,

@@ -1,15 +1,13 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/app/lib/db";
 import { reviews, syncResults } from "@/app/lib/db/schema";
 import type { ReviewRow } from "@/app/lib/db/schema";
+import { canonicalFilmGuid } from "@/app/lib/filmIdentity";
 import type { MovieReview, ReviewDto } from "@/app/types/movie";
 
 export function reviewGuid(movie: MovieReview): string {
-  if (movie.guid && movie.guid.trim()) {
-    return movie.guid.trim();
-  }
-  return `${movie.title.trim().toLowerCase()}-${movie.year ?? "unknown"}`;
+  return canonicalFilmGuid(movie);
 }
 
 function sanitize(movie: MovieReview): MovieReview | null {
@@ -29,7 +27,7 @@ function sanitize(movie: MovieReview): MovieReview | null {
     posterUrl: movie.posterUrl?.trim() || undefined,
     reviewText: movie.reviewText?.trim() || undefined,
     letterboxdUrl: movie.letterboxdUrl?.trim() || undefined,
-    guid: reviewGuid(movie),
+    guid: canonicalFilmGuid({ title, year, letterboxdUrl: movie.letterboxdUrl, guid: movie.guid }),
   };
 }
 
@@ -51,6 +49,52 @@ function sortRows(rows: ReviewRow[]): ReviewRow[] {
   });
 }
 
+function dedupeIncoming(movies: Array<MovieReview & { guid: string }>): Array<MovieReview & { guid: string }> {
+  const map = new Map<string, MovieReview & { guid: string }>();
+  for (const movie of movies) {
+    const guid = movie.guid;
+    const existing = map.get(guid);
+    if (!existing || reviewTime(movie.reviewedAt) > reviewTime(existing.reviewedAt)) {
+      map.set(guid, movie);
+    }
+  }
+  return Array.from(map.values());
+}
+
+function mergeExistingDuplicates(_userId: number, rows: ReviewRow[]): void {
+  const db = getDb();
+  const groups = new Map<string, ReviewRow[]>();
+
+  for (const row of rows) {
+    const key = canonicalFilmGuid(row);
+    const list = groups.get(key) ?? [];
+    list.push(row);
+    groups.set(key, list);
+  }
+
+  db.transaction((tx) => {
+    for (const group of groups.values()) {
+      if (group.length <= 1) continue;
+
+      const sorted = sortRows(group);
+      const keeper = sorted[0];
+      const canonical = canonicalFilmGuid(keeper);
+
+      if (keeper.guid !== canonical) {
+        tx.update(reviews).set({ guid: canonical }).where(eq(reviews.id, keeper.id)).run();
+      }
+
+      for (const dupe of sorted.slice(1)) {
+        tx.update(syncResults)
+          .set({ reviewId: keeper.id })
+          .where(eq(syncResults.reviewId, dupe.id))
+          .run();
+        tx.delete(reviews).where(eq(reviews.id, dupe.id)).run();
+      }
+    }
+  });
+}
+
 /**
  * Upsert incoming reviews for a user inside a single transaction, merging the
  * best data from existing + incoming rows. Returns nothing; query separately.
@@ -61,21 +105,27 @@ export function upsertReviews(userId: number, incoming: MovieReview[]): void {
     .map(sanitize)
     .filter((m): m is MovieReview & { guid: string } => m !== null && Boolean(m.guid));
 
-  if (sanitized.length === 0) return;
+  const existingRows = db.select().from(reviews).where(eq(reviews.userId, userId)).all();
+  mergeExistingDuplicates(userId, existingRows);
+
+  const deduped = dedupeIncoming(sanitized);
+  if (deduped.length === 0) return;
 
   const now = new Date().toISOString();
+  const refreshedRows = db.select().from(reviews).where(eq(reviews.userId, userId)).all();
+  const byCanonical = new Map<string, ReviewRow>();
+  for (const row of refreshedRows) {
+    byCanonical.set(canonicalFilmGuid(row), row);
+  }
 
   db.transaction((tx) => {
-    for (const movie of sanitized) {
-      const existing = tx
-        .select()
-        .from(reviews)
-        .where(and(eq(reviews.userId, userId), eq(reviews.guid, movie.guid)))
-        .get();
+    for (const movie of deduped) {
+      const existing = byCanonical.get(movie.guid);
 
       if (existing) {
         tx.update(reviews)
           .set({
+            guid: movie.guid,
             title: movie.title,
             year: movie.year ?? existing.year,
             rating: movie.rating,

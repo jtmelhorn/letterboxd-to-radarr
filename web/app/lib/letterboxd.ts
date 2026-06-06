@@ -1,6 +1,7 @@
 import { LRUCache } from "lru-cache";
 import Parser from "rss-parser";
 
+import { canonicalFilmGuid } from "@/app/lib/filmIdentity";
 import type { MovieReview } from "@/app/types/movie";
 
 interface LetterboxdFeedItem {
@@ -95,8 +96,27 @@ function parseFeed(xml: string): Promise<{ items: LetterboxdFeedItem[] }> {
   return parser.parseString(xml) as unknown as Promise<{ items: LetterboxdFeedItem[] }>;
 }
 
+function reviewTime(reviewedAt: string | undefined): number {
+  if (!reviewedAt) return 0;
+  const time = Date.parse(reviewedAt);
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function dedupeMovies(movies: MovieReview[]): MovieReview[] {
+  const map = new Map<string, MovieReview>();
+  for (const movie of movies) {
+    const guid = canonicalFilmGuid(movie);
+    const normalized = { ...movie, guid };
+    const existing = map.get(guid);
+    if (!existing || reviewTime(normalized.reviewedAt) > reviewTime(existing.reviewedAt)) {
+      map.set(guid, normalized);
+    }
+  }
+  return Array.from(map.values());
+}
+
 function mapItems(items: LetterboxdFeedItem[]): MovieReview[] {
-  return items
+  const mapped = items
     .map((item) => {
       const title = textValue(item.filmTitle ?? item["letterboxd:filmTitle"] ?? item.title);
       const yearValue = textValue(item.filmYear ?? item["letterboxd:filmYear"]);
@@ -111,10 +131,13 @@ function mapItems(items: LetterboxdFeedItem[]): MovieReview[] {
       );
       const letterboxdUrl = typeof item.link === "string" && item.link ? item.link : undefined;
       const reviewedAt = normalizeDateString(item.isoDate ?? item.pubDate);
-      const guid =
-        (typeof item.guid === "string" && item.guid.trim()) ||
-        letterboxdUrl ||
-        `${title.toLowerCase()}-${Number.isNaN(year) ? "unknown" : year}`;
+      const rawGuid = typeof item.guid === "string" ? item.guid.trim() : undefined;
+      const guid = canonicalFilmGuid({
+        title,
+        year: Number.isNaN(year) ? null : year,
+        letterboxdUrl,
+        guid: rawGuid,
+      });
 
       const movie: MovieReview = {
         title,
@@ -129,6 +152,8 @@ function mapItems(items: LetterboxdFeedItem[]): MovieReview[] {
       return movie;
     })
     .filter((movie): movie is MovieReview => movie !== null);
+
+  return dedupeMovies(mapped);
 }
 
 /**
