@@ -1033,13 +1033,13 @@ export default function Home() {
 
   // ── CSS Style presets ──────────────────────────────────────────────────
   const inputCls =
-    "h-11 rounded-xl border border-cornsilk/10 bg-ink/60 px-4 text-sm text-cornsilk placeholder-cornsilk/40 focus:outline-none focus:ring-1 focus:ring-gold focus:border-gold/40 transition-all duration-200";
+    "h-11 rounded-md border border-white/10 bg-ink/60 px-4 text-sm text-cornsilk placeholder-cornsilk/40 focus:outline-none focus:ring-1 focus:ring-pine focus:border-pine/40 transition-all duration-200";
 
   const primaryBtnCls =
-    "rounded-xl bg-pine text-cornsilk font-bold transition hover:bg-pine/90 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-pine/40 disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md bg-pine text-ink font-bold transition hover:bg-pine/85 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-pine/40 disabled:cursor-not-allowed disabled:opacity-50";
 
   const brandIconCls =
-    "flex items-center justify-center rounded-xl bg-pine text-cornsilk";
+    "flex items-center justify-center rounded-md bg-pine text-ink";
 
   const isRadarrSetup = settings.radarrUrl && settings.hasRadarrApiKey;
   const isUserSetup = config.username.trim().length > 0;
@@ -1208,7 +1208,7 @@ export default function Home() {
   return (
     <>
       {/* ── Fixed glassmorphic navigation bar ──────────────────────────────── */}
-      <nav className="fixed inset-x-0 top-0 z-40 h-16 border-b border-cornsilk/5 bg-ink/70 backdrop-blur-xl transition-all duration-200">
+      <nav className="fixed inset-x-0 top-0 z-40 h-16 border-b border-white/8 bg-ink/95 backdrop-blur-md transition-all duration-200">
         <div className="content-shell flex h-full items-center justify-between gap-4">
           <div className="flex flex-shrink-0 items-center gap-3">
             <div className={`${brandIconCls} h-9 w-9 shadow-sm`}>
@@ -1277,8 +1277,8 @@ export default function Home() {
       {/* ── Main Dashboard Layout ────────────────────────────────────────── */}
       <main className="flex h-[100dvh] flex-col overflow-hidden pt-16">
         {movies.length > 0 ? (
-          <div className="flex h-full min-h-0 flex-col overflow-hidden py-3">
-            <div className="dashboard-header-band shrink-0 flex flex-col gap-3">
+          <div className="content-shell flex h-full min-h-0 flex-col gap-3 overflow-hidden py-3">
+            <div className="shrink-0 flex flex-col gap-3">
               {autoSyncSummary && (
                 <div className="animate-fade-in flex items-center gap-3 rounded-xl border border-pine/30 bg-pine/10 px-4 py-3">
                   <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-pine shadow-sm">
@@ -1310,8 +1310,8 @@ export default function Home() {
               )}
 
               <div className="grid shrink-0 grid-cols-2 gap-2 lg:grid-cols-4 xl:gap-3">
-                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold/10 text-gold">
+                <div className="glass-card p-3 sm:p-4 rounded-md flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-md bg-gold/15 text-gold">
                     <UserIcon className="h-6 w-6" />
                   </div>
                   <div>
@@ -1326,8 +1326,8 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold/10 text-gold">
+                <div className="glass-card p-3 sm:p-4 rounded-md flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-md bg-pine/15 text-pine">
                     <ServerIcon className="h-5 w-5" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -1345,8 +1345,8 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pine/15 text-pine">
+                <div className="glass-card p-3 sm:p-4 rounded-md flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-md bg-chartreuse/15 text-chartreuse">
                     <CheckIcon className="h-6 w-6" />
                   </div>
                   <div>
@@ -1360,8 +1360,8 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold/10 text-gold">
+                <div className="glass-card p-3 sm:p-4 rounded-md flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-md bg-gold/15 text-gold">
                     <StarIcon className="h-5 w-5" />
                   </div>
                   <div>
@@ -1375,7 +1375,7 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="flex shrink-0 flex-col gap-3 rounded-xl border border-cornsilk/5 bg-ink/30 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+              <div className="flex shrink-0 flex-col gap-3 rounded-md border border-white/10 bg-ink/50 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-4">
                 <div className="flex items-center gap-2 text-sm text-cornsilk/60">
                   <span>Displaying</span>
                   <strong className="text-cornsilk font-extrabold">{stats.filtered}</strong>
@@ -1408,7 +1408,7 @@ export default function Home() {
                   <div className="flex h-9 rounded-lg border border-cornsilk/5 bg-ink/60 p-0.5">
                     <button
                       className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
-                        minimumRating === 0 ? "bg-gold text-ink shadow" : "text-cornsilk/60 hover:text-cornsilk"
+                        minimumRating === 0 ? "bg-pine text-ink shadow" : "text-cornsilk/60 hover:text-cornsilk"
                       }`}
                       onClick={() => setMinimumRating(0)}
                       type="button"
@@ -1419,7 +1419,7 @@ export default function Home() {
                       <button
                         key={val}
                         className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
-                          minimumRating === val ? "bg-gold text-ink shadow" : "text-cornsilk/60 hover:text-cornsilk"
+                          minimumRating === val ? "bg-pine text-ink shadow" : "text-cornsilk/60 hover:text-cornsilk"
                         }`}
                         onClick={() => setMinimumRating(val)}
                         type="button"
@@ -1443,8 +1443,8 @@ export default function Home() {
             </div>
 
             {filteredMovies.length === 0 ? (
-              <div className="content-shell flex flex-1 flex-col items-center justify-center py-12 text-center">
-                <div className="glass-card w-full flex flex-col items-center justify-center py-12 rounded-xl">
+              <div className="flex flex-1 flex-col items-center justify-center py-12 text-center">
+                <div className="glass-card w-full flex flex-col items-center justify-center py-12 rounded-md">
                   <div className="h-12 w-12 rounded-full bg-ink flex items-center justify-center text-cornsilk/55 mb-3">
                     <FilmIcon className="h-6 w-6" />
                   </div>
@@ -1459,7 +1459,7 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <div className="content-shell min-h-0 flex-1 overflow-y-auto">
+              <div className="min-h-0 flex-1 overflow-y-auto">
                 <div className="poster-grid animate-fade-in">
                   {filteredMovies.map((movie) => {
                     const key = movieKey(movie);
@@ -1468,7 +1468,7 @@ export default function Home() {
                     return (
                       <div
                         key={key}
-                        className={`poster-card group w-full min-h-0 aspect-[2/3] overflow-hidden rounded-xl bg-ink/60 text-left ${posterRingClass(sendState)}`}
+                        className={`poster-card group w-full min-h-0 aspect-[2/3] overflow-hidden rounded-md bg-ink/60 text-left ${posterRingClass(sendState)}`}
                       >
                         <button
                           aria-label={`${movie.title} (${movie.year ?? "unknown"}) — ${movie.rating.toFixed(1)} stars`}
@@ -1689,7 +1689,7 @@ export default function Home() {
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <div className="poster-grid">
                   {Array.from({ length: 14 }).map((_, i) => (
-                    <div key={i} className="glass-card aspect-[2/3] rounded-xl overflow-hidden shimmer-wrapper">
+                    <div key={i} className="glass-card aspect-[2/3] rounded-md overflow-hidden shimmer-wrapper">
                       <div className="h-full w-full bg-ink/40 flex flex-col justify-between p-3.5">
                         <div className="h-6 w-11 rounded bg-cornsilk/5 animate-pulse" />
                         <div className="space-y-2">
