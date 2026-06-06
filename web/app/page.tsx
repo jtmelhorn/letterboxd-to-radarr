@@ -2066,12 +2066,12 @@ export default function Home() {
           <div
             aria-labelledby="movie-detail-title"
             aria-modal="true"
-            className="glass-modal animate-fade-in flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-3xl border border-cornsilk/10 shadow-2xl transition-all sm:max-w-2xl sm:rounded-[var(--radius-card)]"
+            className="glass-modal animate-fade-in flex max-h-[90vh] min-h-[min(90vh,560px)] w-full flex-col overflow-hidden rounded-t-3xl border border-cornsilk/10 shadow-2xl transition-all sm:max-w-2xl sm:rounded-[var(--radius-card)]"
             role="dialog"
           >
             {isDesktop ? (
               <div className="flex flex-1 overflow-hidden">
-                <div className="relative w-64 flex-shrink-0 overflow-hidden bg-ink">
+                <div className="relative aspect-[2/3] w-56 flex-shrink-0 overflow-hidden bg-ink sm:w-64">
                   {activeMovie.posterUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
