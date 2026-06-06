@@ -72,14 +72,13 @@ textarea {
     box-shadow 0.25s ease,
     border-color 0.25s ease;
   position: relative;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 .poster-card:hover {
-  transform: scale(1.02);
+  transform: scale(1.015);
   z-index: 2;
-  box-shadow:
-    0 12px 30px -10px rgba(0, 0, 0, 0.8),
-    0 0 20px 1px rgba(249, 203, 64, 0.2);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
 }
 
 /* ── Poster bottom fade ────────────────────────────────── */
@@ -91,6 +90,45 @@ textarea {
     rgba(47, 82, 224, 0.2) 60%,
     transparent 100%
   );
+  transition: background 0.25s ease;
+}
+
+.poster-card:hover .poster-gradient {
+  background: linear-gradient(
+    to top,
+    rgba(26, 33, 34, 0.98) 0%,
+    rgba(76, 91, 92, 0.55) 45%,
+    rgba(76, 91, 92, 0.25) 70%,
+    transparent 100%
+  );
+}
+
+.poster-action-btn {
+  pointer-events: auto;
+  display: flex;
+  height: 1.5rem;
+  width: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.375rem;
+  border: 1px solid rgba(238, 240, 240, 0.1);
+  background: rgba(26, 33, 34, 0.85);
+  color: var(--cornsilk);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.poster-action-btn:hover {
+  border-color: rgba(47, 82, 224, 0.4);
+  background: var(--royal-azure);
+}
+
+.poster-action-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(47, 82, 224, 0.4);
 }
 
 /* ── Glassmorphism Utilities ───────────────────────────── */
@@ -203,11 +241,24 @@ textarea {
   }
 }
 
+/* ── Full-width dashboard header band (stats + filters) ── */
+.dashboard-header-band {
+  box-sizing: border-box;
+  width: 100%;
+  padding-inline: 5vw;
+}
+
+@media (min-width: 640px) {
+  .dashboard-header-band {
+    padding-inline: 8vw;
+  }
+}
+
 /* ── Full-viewport dashboard grid ─────────────────────────── */
 .poster-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 9.5rem), 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 12.5rem), 1fr));
+  gap: 1rem;
   align-content: start;
   padding-block: 0.375rem 0.75rem;
   min-height: 0;
@@ -215,13 +266,13 @@ textarea {
 
 @media (min-width: 640px) {
   .poster-grid {
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 10.5rem), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 13.5rem), 1fr));
     gap: 1rem;
   }
 }
 
 @media (min-width: 1280px) {
   .poster-grid {
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 11.5rem), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
   }
 }

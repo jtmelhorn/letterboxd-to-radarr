@@ -19,15 +19,22 @@ interface LocalConfig {
 
 type SendState = "idle" | "loading" | "added" | "error";
 
+type ActivityStatus = "added" | "exists" | "error";
+
 interface ActivityEntry {
   id: string;
   reviewId: number | null;
   title: string;
   year: number | null;
+  status: ActivityStatus;
   outcome: "added" | "error";
   message: string;
   at: number;
   auto: boolean;
+}
+
+function isActivityBadgeWorthy(entry: ActivityEntry): boolean {
+  return entry.status === "error";
 }
 
 interface AutoSyncSummary {
@@ -119,12 +126,15 @@ function statusToSendState(status: ReviewDto["status"]): SendState {
 }
 
 function syncResultToActivity(item: SyncResultItem): ActivityEntry {
+  const status: ActivityStatus =
+    item.status === "error" ? "error" : item.status === "exists" ? "exists" : "added";
   return {
     id: String(item.id),
     reviewId: item.reviewId,
     title: item.title,
     year: item.year,
-    outcome: item.status === "error" ? "error" : "added",
+    status,
+    outcome: status === "error" ? "error" : "added",
     message: item.message,
     at: item.at,
     auto: item.auto,
@@ -396,6 +406,73 @@ function posterRingClass(state: SendState): string {
   return "ring-1 ring-inset ring-cornsilk/5";
 }
 
+function PosterRadarrAction({
+  movie,
+  sendState,
+  onSend,
+}: {
+  movie: ReviewDto;
+  sendState: SendState;
+  onSend: (movie: ReviewDto) => void;
+}) {
+  if (sendState === "loading") {
+    return (
+      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-ink/85 backdrop-blur-sm border border-cornsilk/10">
+        <span className="h-3 w-3 animate-spin rounded-full border-2 border-cornsilk/30 border-t-cornsilk" />
+      </span>
+    );
+  }
+
+  if (sendState === "idle") {
+    return (
+      <div className="opacity-0 transition-opacity duration-200 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto">
+        <button
+          aria-label="Send to Radarr"
+          className="poster-action-btn"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onSend(movie);
+          }}
+          type="button"
+        >
+          <RadarrIcon className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <div className="transition-opacity duration-200 group-hover:opacity-0 group-hover:pointer-events-none">
+        {sendState === "added" ? (
+          <div className="flex h-5 w-5 items-center justify-center rounded-full bg-chartreuse/90 border border-chartreuse/40">
+            <CheckIcon className="h-3 w-3 text-ink" />
+          </div>
+        ) : (
+          <div className="flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 border border-rose-400/20">
+            <XIcon className="h-2.5 w-2.5 text-cornsilk" />
+          </div>
+        )}
+      </div>
+      <div className="absolute right-0 top-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto">
+        <button
+          aria-label={sendState === "added" ? "Resend to Radarr" : "Retry send to Radarr"}
+          className="poster-action-btn"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onSend(movie);
+          }}
+          type="button"
+        >
+          <ArrowPathIcon className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ──────────────────────────────────────────────────────────
 
 export default function Home() {
@@ -448,7 +525,18 @@ export default function Home() {
 
   const [autoSyncSummary, setAutoSyncSummary] = useState<AutoSyncSummary | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
+  const [activitySeenAt, setActivitySeenAt] = useState(() => Date.now());
   const [isActivityOpen, setIsActivityOpen] = useState(false);
+
+  const activityUnreadCount = useMemo(
+    () => activityLog.filter((entry) => isActivityBadgeWorthy(entry) && entry.at > activitySeenAt).length,
+    [activityLog, activitySeenAt],
+  );
+
+  const openActivity = useCallback(() => {
+    setActivitySeenAt(Date.now());
+    setIsActivityOpen(true);
+  }, []);
 
   // ── localStorage hydration (username + display filter only) ─────────────
   useEffect(() => {
@@ -881,22 +969,20 @@ export default function Home() {
     }
   }
 
-  function logActivity(movie: ReviewDto, outcome: "added" | "error", message: string, auto: boolean) {
-    setActivityLog((log) =>
-      [
-        {
-          id: `${movieKey(movie)}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          reviewId: movie.id,
-          title: movie.title,
-          year: movie.year,
-          outcome,
-          message,
-          at: Date.now(),
-          auto,
-        },
-        ...log,
-      ].slice(0, 100),
-    );
+  function logActivity(movie: ReviewDto, status: ActivityStatus, message: string, auto: boolean) {
+    const outcome: ActivityEntry["outcome"] = status === "error" ? "error" : "added";
+    const entry: ActivityEntry = {
+      id: `${movieKey(movie)}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      reviewId: movie.id,
+      title: movie.title,
+      year: movie.year,
+      status,
+      outcome,
+      message,
+      at: Date.now(),
+      auto,
+    };
+    setActivityLog((log) => [entry, ...log].slice(0, 100));
   }
 
   async function retryFromActivity(reviewId: number | null) {
@@ -926,9 +1012,17 @@ export default function Home() {
       const body = (await res.json().catch(() => null)) as Partial<RadarrAddResponse> | null;
       if (!res.ok) throw new Error(apiMessage(body, "Unable to add this movie to Radarr."));
       const message = body?.message ?? "Movie successfully added.";
+      const status: ActivityStatus =
+        body?.status === "error" ? "error" : body?.status === "exists" ? "exists" : "added";
+      if (status === "error") {
+        setSendStates((c) => ({ ...c, [key]: "error" }));
+        setSendMessages((c) => ({ ...c, [key]: message }));
+        logActivity(movie, status, message, false);
+        return;
+      }
       setSendStates((c) => ({ ...c, [key]: "added" }));
       setSendMessages((c) => ({ ...c, [key]: message }));
-      logActivity(movie, "added", message, false);
+      logActivity(movie, status, message, false);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unable to add this movie to Radarr.";
       setSendStates((c) => ({ ...c, [key]: "error" }));
@@ -1138,13 +1232,13 @@ export default function Home() {
             <button
               aria-label="Open sync activity"
               className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-cornsilk/10 bg-ink/40 text-cornsilk/60 transition-all duration-200 hover:bg-cornsilk/5 hover:text-cornsilk focus:outline-none focus:ring-1 focus:ring-cornsilk/20"
-              onClick={() => setIsActivityOpen(true)}
+              onClick={openActivity}
               type="button"
             >
               <ClockIcon className="h-5 w-5" />
-              {activityLog.length > 0 && (
+              {activityUnreadCount > 0 && (
                 <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gold px-1 text-[9px] font-bold text-ink shadow">
-                  {activityLog.length > 99 ? "99+" : activityLog.length}
+                  {activityUnreadCount > 99 ? "99+" : activityUnreadCount}
                 </span>
               )}
             </button>
@@ -1182,6 +1276,262 @@ export default function Home() {
 
       {/* ── Main Dashboard Layout ────────────────────────────────────────── */}
       <main className="flex h-[100dvh] flex-col overflow-hidden pt-16">
+        {movies.length > 0 ? (
+          <div className="flex h-full min-h-0 flex-col overflow-hidden py-3">
+            <div className="dashboard-header-band shrink-0 flex flex-col gap-3">
+              {autoSyncSummary && (
+                <div className="animate-fade-in flex items-center gap-3 rounded-xl border border-pine/30 bg-pine/10 px-4 py-3">
+                  <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-pine shadow-sm">
+                    <SparklesIcon className="h-4 w-4 text-cornsilk" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-extrabold text-cornsilk">
+                      {autoSyncSummary.count} {autoSyncSummary.count === 1 ? "film" : "films"} rated ≥
+                      {autoSyncSummary.threshold.toFixed(1)}★ sent to Radarr automatically
+                    </p>
+                    <p className="text-[11px] text-cornsilk/55">Track each result in the activity panel.</p>
+                  </div>
+                  <button
+                    className="text-xs font-semibold text-cornsilk/65 hover:text-cornsilk transition-colors"
+                    onClick={openActivity}
+                    type="button"
+                  >
+                    View activity
+                  </button>
+                  <button
+                    aria-label="Dismiss auto-sync summary"
+                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-cornsilk/55 transition hover:bg-cornsilk/5 hover:text-cornsilk"
+                    onClick={() => setAutoSyncSummary(null)}
+                    type="button"
+                  >
+                    <XIcon className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+
+              <div className="grid shrink-0 grid-cols-2 gap-2 lg:grid-cols-4 xl:gap-3">
+                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold/10 text-gold">
+                    <UserIcon className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-cornsilk/55">Letterboxd User</p>
+                    <h3
+                      className="text-base font-extrabold text-cornsilk truncate max-w-[160px]"
+                      title={config.username || settings.reviewer}
+                    >
+                      {config.username || settings.reviewer}
+                    </h3>
+                    <p className="text-[11px] text-cornsilk/60">{stats.total} total films found</p>
+                  </div>
+                </div>
+
+                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold/10 text-gold">
+                    <ServerIcon className="h-5 w-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-cornsilk/55">Auto-Download</p>
+                    <h3 className="text-base font-extrabold text-cornsilk flex items-center gap-1.5">
+                      {settings.autoThreshold === -1 ? (
+                        <span className="text-cornsilk/55 text-sm">Disabled</span>
+                      ) : (
+                        <span className="text-gold text-sm">
+                          Active (≥{settings.autoThreshold.toFixed(1)}★)
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-[11px] text-cornsilk/60">Runs on a schedule + on sync</p>
+                  </div>
+                </div>
+
+                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pine/15 text-pine">
+                    <CheckIcon className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-cornsilk/55">Synchronization</p>
+                    <h3 className="text-base font-extrabold text-cornsilk flex items-center gap-2">
+                      <span>{stats.synced} Synced</span>
+                    </h3>
+                    <p className="text-[11px] text-cornsilk/60">
+                      {stats.failed} failed, {stats.syncing} active
+                    </p>
+                  </div>
+                </div>
+
+                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold/10 text-gold">
+                    <StarIcon className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-cornsilk/55">Average Rating</p>
+                    <h3 className="text-base font-extrabold text-cornsilk">{stats.averageRating} ★</h3>
+                    <p className="text-[11px] text-cornsilk/60">
+                      {stats.filtered} shown
+                      {minimumRating > 0 ? ` (≥${minimumRating.toFixed(1)}★)` : " (all ratings)"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex shrink-0 flex-col gap-3 rounded-xl border border-cornsilk/5 bg-ink/30 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                <div className="flex items-center gap-2 text-sm text-cornsilk/60">
+                  <span>Displaying</span>
+                  <strong className="text-cornsilk font-extrabold">{stats.filtered}</strong>
+                  <span>of</span>
+                  <strong className="text-cornsilk/80">{stats.total}</strong>
+                  <span>cached movies.</span>
+                  {fetchError && (
+                    <span className="ml-2 inline-flex items-center gap-1 text-xs text-red-400 bg-red-500/10 border border-red-500/10 px-2 py-0.5 rounded">
+                      <ExclamationIcon className="h-3 w-3" /> {fetchError}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="group relative flex items-center gap-1.5">
+                    <label className="text-xs font-bold uppercase tracking-wider text-cornsilk/55">
+                      Min. rating ≥
+                    </label>
+                    <span className="text-cornsilk/45 transition-colors hover:text-cornsilk/80" tabIndex={0}>
+                      <InfoIcon className="h-3.5 w-3.5" />
+                    </span>
+                    <span
+                      className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-60 rounded-lg border border-cornsilk/10 bg-ink px-3 py-2 text-[11px] font-medium leading-relaxed text-cornsilk/80 opacity-0 shadow-xl transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
+                      role="tooltip"
+                    >
+                      Filter which movies appear in the grid. Auto-download to Radarr uses the separate
+                      threshold in Settings.
+                    </span>
+                  </span>
+                  <div className="flex h-9 rounded-lg border border-cornsilk/5 bg-ink/60 p-0.5">
+                    <button
+                      className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
+                        minimumRating === 0 ? "bg-gold text-ink shadow" : "text-cornsilk/60 hover:text-cornsilk"
+                      }`}
+                      onClick={() => setMinimumRating(0)}
+                      type="button"
+                    >
+                      All
+                    </button>
+                    {[3.0, 3.5, 4.0, 4.5, 5.0].map((val) => (
+                      <button
+                        key={val}
+                        className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
+                          minimumRating === val ? "bg-gold text-ink shadow" : "text-cornsilk/60 hover:text-cornsilk"
+                        }`}
+                        onClick={() => setMinimumRating(val)}
+                        type="button"
+                      >
+                        {val.toFixed(1)}★
+                      </button>
+                    ))}
+                  </div>
+
+                  <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-cornsilk/5 bg-ink/60 px-3 h-9">
+                    <input
+                      checked={hideAdded}
+                      className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                      onChange={(e) => setHideAdded(e.target.checked)}
+                      type="checkbox"
+                    />
+                    <span className="text-xs font-bold text-cornsilk/70 whitespace-nowrap">Hide in Radarr</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {filteredMovies.length === 0 ? (
+              <div className="content-shell flex flex-1 flex-col items-center justify-center py-12 text-center">
+                <div className="glass-card w-full flex flex-col items-center justify-center py-12 rounded-xl">
+                  <div className="h-12 w-12 rounded-full bg-ink flex items-center justify-center text-cornsilk/55 mb-3">
+                    <FilmIcon className="h-6 w-6" />
+                  </div>
+                  <h3 className="text-base font-extrabold text-cornsilk">No movies match this filter</h3>
+                  <p className="text-xs text-cornsilk/55 mt-1 max-w-xs">
+                    {hideAdded
+                      ? "All visible movies are already in Radarr, or none meet the current filter. Adjust the filters above."
+                      : minimumRating > 0
+                        ? `No movies rated ${minimumRating.toFixed(1)}★ or higher. Choose All or lower the minimum rating above.`
+                        : "No movies cached yet. Sync your Letterboxd feed to get started."}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="content-shell min-h-0 flex-1 overflow-y-auto">
+                <div className="poster-grid animate-fade-in">
+                  {filteredMovies.map((movie) => {
+                    const key = movieKey(movie);
+                    const sendState = sendStates[key] ?? "idle";
+
+                    return (
+                      <div
+                        key={key}
+                        className={`poster-card group w-full min-h-0 aspect-[2/3] overflow-hidden rounded-xl bg-ink/60 text-left ${posterRingClass(sendState)}`}
+                      >
+                        <button
+                          aria-label={`${movie.title} (${movie.year ?? "unknown"}) — ${movie.rating.toFixed(1)} stars`}
+                          className="absolute inset-0 h-full w-full focus:outline-none"
+                          onClick={() => setActiveMovieKey(key)}
+                          type="button"
+                        >
+                          {movie.posterUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              alt=""
+                              className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                              loading="lazy"
+                              src={movie.posterUrl}
+                            />
+                          ) : (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-pine to-ink p-4">
+                              <FilmIcon className="h-9 w-9 text-granite/70" />
+                              <span className="line-clamp-3 text-center text-[10px] font-bold leading-tight text-cornsilk/55">
+                                {movie.title}
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="poster-gradient absolute inset-0 pointer-events-none" />
+
+                          <div className="absolute inset-x-2 top-2 flex justify-start pointer-events-none">
+                            <div className="rounded-lg bg-black/60 px-2 py-0.5 backdrop-blur-md border border-cornsilk/5">
+                              <span className="text-[10px] font-bold text-gold flex items-center gap-0.5">
+                                ★ {movie.rating.toFixed(1)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-3">
+                            <span className="text-center text-[10px] font-extrabold uppercase tracking-wide text-transparent transition-colors duration-200 group-hover:text-gold">
+                              Click for review
+                            </span>
+                          </div>
+
+                          <div className="absolute inset-x-0 bottom-0 p-3.5 pointer-events-none">
+                            <p className="mb-0.5 text-[10px] font-bold text-cornsilk/60">{movie.year ?? "—"}</p>
+                            <h3 className="line-clamp-2 text-xs font-extrabold leading-snug text-cornsilk group-hover:text-gold transition-colors">
+                              {movie.title}
+                            </h3>
+                          </div>
+                        </button>
+
+                        <div className="absolute top-2 right-2 z-10">
+                          <PosterRadarrAction
+                            movie={movie}
+                            onSend={(m) => void sendToRadarr(m)}
+                            sendState={sendState}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
         <div className="content-shell flex h-full min-h-0 flex-col py-3">
           {movies.length === 0 && !busy && (
             <div className="animate-fade-in flex flex-1 flex-col justify-center overflow-y-auto lg:grid lg:grid-cols-12 lg:items-center lg:gap-8">
@@ -1353,305 +1703,8 @@ export default function Home() {
               </div>
             </div>
           )}
-
-          {movies.length > 0 && (
-            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-              {autoSyncSummary && (
-                <div className="animate-fade-in flex items-center gap-3 rounded-xl border border-pine/30 bg-pine/10 px-4 py-3">
-                  <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-pine shadow-md shadow-pine/20">
-                    <SparklesIcon className="h-4 w-4 text-cornsilk" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-extrabold text-cornsilk">
-                      {autoSyncSummary.count} {autoSyncSummary.count === 1 ? "film" : "films"} rated ≥
-                      {autoSyncSummary.threshold.toFixed(1)}★ sent to Radarr automatically
-                    </p>
-                    <p className="text-[11px] text-cornsilk/55">Track each result in the activity panel.</p>
-                  </div>
-                  <button
-                    className="text-xs font-semibold text-cornsilk/65 hover:text-cornsilk transition-colors"
-                    onClick={() => setIsActivityOpen(true)}
-                    type="button"
-                  >
-                    View activity
-                  </button>
-                  <button
-                    aria-label="Dismiss auto-sync summary"
-                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-cornsilk/55 transition hover:bg-cornsilk/5 hover:text-cornsilk"
-                    onClick={() => setAutoSyncSummary(null)}
-                    type="button"
-                  >
-                    <XIcon className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )}
-
-              <div className="grid shrink-0 grid-cols-2 gap-2 lg:grid-cols-4 xl:gap-3">
-                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold/10 text-gold">
-                    <UserIcon className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-cornsilk/55">Letterboxd User</p>
-                    <h3
-                      className="text-base font-extrabold text-cornsilk truncate max-w-[160px]"
-                      title={config.username || settings.reviewer}
-                    >
-                      {config.username || settings.reviewer}
-                    </h3>
-                    <p className="text-[11px] text-cornsilk/60">{stats.total} total films found</p>
-                  </div>
-                </div>
-
-                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold/10 text-gold">
-                    <ServerIcon className="h-5 w-5" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-cornsilk/55">Auto-Download</p>
-                    <h3 className="text-base font-extrabold text-cornsilk flex items-center gap-1.5">
-                      {settings.autoThreshold === -1 ? (
-                        <span className="text-cornsilk/55 text-sm">Disabled</span>
-                      ) : (
-                        <span className="text-gold text-sm">
-                          Active (≥{settings.autoThreshold.toFixed(1)}★)
-                        </span>
-                      )}
-                    </h3>
-                    <p className="text-[11px] text-cornsilk/60">Runs on a schedule + on sync</p>
-                  </div>
-                </div>
-
-                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pine/15 text-pine">
-                    <CheckIcon className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-cornsilk/55">Synchronization</p>
-                    <h3 className="text-base font-extrabold text-cornsilk flex items-center gap-2">
-                      <span>{stats.synced} Synced</span>
-                    </h3>
-                    <p className="text-[11px] text-cornsilk/60">
-                      {stats.failed} failed, {stats.syncing} active
-                    </p>
-                  </div>
-                </div>
-
-                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold/10 text-gold">
-                    <StarIcon className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-cornsilk/55">Average Rating</p>
-                    <h3 className="text-base font-extrabold text-cornsilk">{stats.averageRating} ★</h3>
-                    <p className="text-[11px] text-cornsilk/60">
-                      {stats.filtered} shown
-                      {minimumRating > 0 ? ` (≥${minimumRating.toFixed(1)}★)` : " (all ratings)"}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex shrink-0 flex-col gap-3 rounded-xl border border-cornsilk/5 bg-ink/30 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-4">
-                <div className="flex items-center gap-2 text-sm text-cornsilk/60">
-                  <span>Displaying</span>
-                  <strong className="text-cornsilk font-extrabold">{stats.filtered}</strong>
-                  <span>of</span>
-                  <strong className="text-cornsilk/80">{stats.total}</strong>
-                  <span>cached movies.</span>
-                  {fetchError && (
-                    <span className="ml-2 inline-flex items-center gap-1 text-xs text-red-400 bg-red-500/10 border border-red-500/10 px-2 py-0.5 rounded">
-                      <ExclamationIcon className="h-3 w-3" /> {fetchError}
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="group relative flex items-center gap-1.5">
-                    <label className="text-xs font-bold uppercase tracking-wider text-cornsilk/55">
-                      Min. rating ≥
-                    </label>
-                    <span className="text-cornsilk/45 transition-colors hover:text-cornsilk/80" tabIndex={0}>
-                      <InfoIcon className="h-3.5 w-3.5" />
-                    </span>
-                    <span
-                      className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-60 rounded-lg border border-cornsilk/10 bg-ink px-3 py-2 text-[11px] font-medium leading-relaxed text-cornsilk/80 opacity-0 shadow-xl transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
-                      role="tooltip"
-                    >
-                      Filter which movies appear in the grid. Auto-download to Radarr uses the separate
-                      threshold in Settings.
-                    </span>
-                  </span>
-                  <div className="flex h-9 rounded-lg border border-cornsilk/5 bg-ink/60 p-0.5">
-                    <button
-                      className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
-                        minimumRating === 0 ? "bg-gold text-ink shadow" : "text-cornsilk/60 hover:text-cornsilk"
-                      }`}
-                      onClick={() => setMinimumRating(0)}
-                      type="button"
-                    >
-                      All
-                    </button>
-                    {[3.0, 3.5, 4.0, 4.5, 5.0].map((val) => (
-                      <button
-                        key={val}
-                        className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
-                          minimumRating === val ? "bg-gold text-ink shadow" : "text-cornsilk/60 hover:text-cornsilk"
-                        }`}
-                        onClick={() => setMinimumRating(val)}
-                        type="button"
-                      >
-                        {val.toFixed(1)}★
-                      </button>
-                    ))}
-                  </div>
-
-                  <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-cornsilk/5 bg-ink/60 px-3 h-9">
-                    <input
-                      checked={hideAdded}
-                      className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                      onChange={(e) => setHideAdded(e.target.checked)}
-                      type="checkbox"
-                    />
-                    <span className="text-xs font-bold text-cornsilk/70 whitespace-nowrap">Hide in Radarr</span>
-                  </label>
-                </div>
-              </div>
-
-              {filteredMovies.length === 0 ? (
-                <div className="glass-card flex flex-1 flex-col items-center justify-center py-12 text-center rounded-xl">
-                  <div className="h-12 w-12 rounded-full bg-ink flex items-center justify-center text-cornsilk/55 mb-3">
-                    <FilmIcon className="h-6 w-6" />
-                  </div>
-                  <h3 className="text-base font-extrabold text-cornsilk">No movies match this filter</h3>
-                  <p className="text-xs text-cornsilk/55 mt-1 max-w-xs">
-                    {hideAdded
-                      ? "All visible movies are already in Radarr, or none meet the current filter. Adjust the filters above."
-                      : minimumRating > 0
-                        ? `No movies rated ${minimumRating.toFixed(1)}★ or higher. Choose All or lower the minimum rating above.`
-                        : "No movies cached yet. Sync your Letterboxd feed to get started."}
-                  </p>
-                </div>
-              ) : (
-                <div className="min-h-0 flex-1 overflow-y-auto">
-                  <div className="poster-grid animate-fade-in">
-                  {filteredMovies.map((movie) => {
-                    const key = movieKey(movie);
-                    const sendState = sendStates[key] ?? "idle";
-
-                    return (
-                      <div
-                        key={key}
-                        className={`poster-card group w-full min-h-0 aspect-[2/3] overflow-hidden rounded-xl bg-ink/60 text-left ${posterRingClass(sendState)}`}
-                      >
-                        <button
-                          aria-label={`${movie.title} (${movie.year ?? "unknown"}) — ${movie.rating.toFixed(1)} stars`}
-                          className="absolute inset-0 h-full w-full focus:outline-none"
-                          onClick={() => setActiveMovieKey(key)}
-                          type="button"
-                        >
-                          {movie.posterUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              alt=""
-                              className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                              loading="lazy"
-                              src={movie.posterUrl}
-                            />
-                          ) : (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-pine to-ink p-4">
-                              <FilmIcon className="h-9 w-9 text-granite/70" />
-                              <span className="line-clamp-3 text-center text-[10px] font-bold leading-tight text-cornsilk/55">
-                                {movie.title}
-                              </span>
-                            </div>
-                          )}
-
-                          <div className="poster-gradient absolute inset-0 pointer-events-none" />
-
-                          <div className="absolute inset-x-2 top-2 flex justify-start pointer-events-none">
-                            <div className="rounded-lg bg-black/60 px-2 py-0.5 backdrop-blur-md border border-cornsilk/5">
-                              <span className="text-[10px] font-bold text-gold flex items-center gap-0.5">
-                                ★ {movie.rating.toFixed(1)}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-3">
-                            <span className="text-center text-[10px] font-extrabold uppercase tracking-wide text-transparent transition-colors duration-200 group-hover:text-gold drop-shadow-[0_2px_12px_rgba(0,0,0,0.85)]">
-                              Click for review
-                            </span>
-                          </div>
-
-                          <div className="absolute inset-x-0 bottom-0 p-3.5 pointer-events-none">
-                            <p className="mb-0.5 text-[10px] font-bold text-cornsilk/60">{movie.year ?? "—"}</p>
-                            <h3 className="line-clamp-2 text-xs font-extrabold leading-snug text-cornsilk group-hover:text-gold transition-colors">
-                              {movie.title}
-                            </h3>
-                          </div>
-                        </button>
-
-                        <div className="absolute top-2 right-2 z-10">
-                          {sendState === "loading" ? (
-                            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-ink/85 backdrop-blur-sm border border-cornsilk/10">
-                              <span className="h-3 w-3 animate-spin rounded-full border-2 border-cornsilk/30 border-t-cornsilk" />
-                            </span>
-                          ) : sendState === "idle" ? (
-                            <div className="opacity-0 transition-opacity duration-200 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto">
-                              <button
-                                aria-label="Send to Radarr"
-                                className="pointer-events-auto flex items-center gap-1 rounded-md border border-cornsilk/10 bg-ink/85 px-2 py-1 text-[9px] font-bold text-cornsilk backdrop-blur-sm transition hover:border-pine/40 hover:bg-pine hover:text-cornsilk focus:outline-none focus:ring-1 focus:ring-pine/40"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  void sendToRadarr(movie);
-                                }}
-                                type="button"
-                              >
-                                <RadarrIcon className="h-3 w-3" />
-                                Radarr
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="relative">
-                              <div className="transition-opacity duration-200 group-hover:opacity-0 group-hover:pointer-events-none">
-                                {sendState === "added" ? (
-                                  <div className="flex h-5 w-5 items-center justify-center rounded-full bg-chartreuse/90 shadow-md shadow-chartreuse/30 border border-chartreuse/40">
-                                    <CheckIcon className="h-3 w-3 text-ink" />
-                                  </div>
-                                ) : (
-                                  <div className="flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 shadow-md shadow-rose-500/30 border border-rose-400/20">
-                                    <XIcon className="h-2.5 w-2.5 text-cornsilk" />
-                                  </div>
-                                )}
-                              </div>
-                              <div className="absolute right-0 top-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto">
-                                <button
-                                  aria-label={sendState === "added" ? "Resend to Radarr" : "Send to Radarr"}
-                                  className="pointer-events-auto flex items-center gap-1 rounded-md border border-cornsilk/10 bg-ink/85 px-2 py-1 text-[9px] font-bold text-cornsilk backdrop-blur-sm transition hover:border-pine/40 hover:bg-pine hover:text-cornsilk focus:outline-none focus:ring-1 focus:ring-pine/40"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    void sendToRadarr(movie);
-                                  }}
-                                  type="button"
-                                >
-                                  <RadarrIcon className="h-3 w-3" />
-                                  {sendState === "added" ? "Resend" : "Radarr"}
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
+        )}
       </main>
 
       {/* ── Movie Detail Modal ─────────────────────────────────────────────── */}
@@ -1755,7 +1808,7 @@ export default function Home() {
                 {activeSendState === "added" ? (
                   <div className="space-y-3 animate-fade-in">
                     <div className="flex items-center gap-3.5 rounded-xl border border-chartreuse/30 bg-chartreuse/10 p-4">
-                      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-chartreuse shadow-md shadow-chartreuse/20">
+                      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-chartreuse">
                         <CheckIcon className="h-4 w-4 text-ink" />
                       </div>
                       <div>
@@ -1868,7 +1921,7 @@ export default function Home() {
                   </div>
                   <h3 className="text-base font-extrabold text-cornsilk">No sync activity yet</h3>
                   <p className="mt-1 max-w-xs text-xs text-cornsilk/55">
-                    Films added to Radarr—automatically or manually—will appear here with their outcome.
+                    Sync results appear here. The badge only highlights new failures that need attention.
                   </p>
                 </div>
               ) : (
