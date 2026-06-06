@@ -36,12 +36,16 @@ const emptyReviewCache: ReviewCacheFile = {
 function envValue(names: string[]): string {
   for (const name of names) {
     const value = process.env[name]?.trim();
-    if (value) {
+    if (value && !isPlaceholderValue(value)) {
       return value;
     }
   }
 
   return "";
+}
+
+function isPlaceholderValue(value: string): boolean {
+  return ["CHANGE_ME", "CHANGEME", "CHANGME"].includes(value.trim().toUpperCase());
 }
 
 function configuredRadarrUrl(): string {
@@ -57,11 +61,11 @@ export function getConfiguredReviewer(): string {
 }
 
 export function getDataDir(): string {
-  return (
-    process.env.LETTERBOXD_RADARR_DATA_DIR ??
-    process.env.APP_DATA_DIR ??
-    path.join(process.cwd(), ".data")
-  );
+  if (process.env.NODE_ENV === "production") {
+    return "/data";
+  }
+
+  return path.join(process.cwd(), ".data");
 }
 
 function settingsPath(): string {

@@ -2,21 +2,19 @@ services:
   letterboxd-to-radarr:
     image: ghcr.io/jtmelhorn/letterboxd-to-radarr:latest
     # Uncomment to build from this repo instead of pulling the published image.
-    # build: .
+    # build: ./web
     container_name: letterboxd-to-radarr
     restart: unless-stopped
     ports:
-      # HOST_PORT is the port on your machine. Default 3080 avoids common *arr ports:
+      # Change the left side if 3080 conflicts with another service.
       # Radarr 7878, Lidarr 8686, Readarr 8787, Prowlarr 9696, Bazarr 6767.
-      - "${HOST_PORT:-3080}:3000"
+      - "3080:3000"
     environment:
-      REVIEWER: ${REVIEWER:-}
-      # Radarr base URL.
-      RADARR: ${RADARR:-}
-      API_KEY: ${API_KEY:-}
-      LETTERBOXD_RADARR_DATA_DIR: /data
-      PORT: 3000
+      # Letterboxd username, for example: jtmel
+      REVIEWER: "CHANGE_ME"
+      # Radarr base URL format: http://radarr.example.com:7878
+      RADARR: "CHANGE_ME"
+      # Radarr API key from Settings > General > Security.
+      API_KEY: "CHANGE_ME"
     volumes:
-      # Host path (left) : container path (right). Set DATA_DIR in .env.
-      # On RHEL with SELinux, append :Z -> ${DATA_DIR:-./data}:/data:Z
-      - ${DATA_DIR:-./data}:/data
+      #- CHANGEME:/data

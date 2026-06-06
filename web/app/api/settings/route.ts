@@ -65,7 +65,15 @@ export async function PUT(request: Request) {
     radarrApiKey,
   };
 
-  await saveSettings(settings);
+  try {
+    await saveSettings(settings);
+  } catch (error) {
+    console.error("Unable to save settings.", error);
+    return NextResponse.json(
+      { message: "Unable to save settings. Check that the container can write to /data." },
+      { status: 500 },
+    );
+  }
 
   return NextResponse.json(toPublicSettings(settings));
 }
