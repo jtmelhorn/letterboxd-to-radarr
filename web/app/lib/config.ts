@@ -44,15 +44,17 @@ export function getDataDir(): string {
   return path.join(process.cwd(), ".data");
 }
 
+import { hasStoredAdminPassword } from "@/app/lib/repos/appState";
+
 /**
- * Optional single-password gate. When unset, the app stays open (zero-config
- * self-host) but logs a warning; when set, every API route and page requires a
- * signed session cookie.
+ * Optional single-password gate via APP_PASSWORD env or a password set in the UI
+ * (stored hashed in SQLite). When no password is configured, bootstrap routes
+ * are open until the admin password is set.
  */
 export function configuredAppPassword(): string {
   return process.env.APP_PASSWORD?.trim() ?? "";
 }
 
 export function isAuthEnabled(): boolean {
-  return configuredAppPassword().length > 0;
+  return configuredAppPassword().length > 0 || hasStoredAdminPassword();
 }

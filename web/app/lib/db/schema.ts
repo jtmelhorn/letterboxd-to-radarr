@@ -83,6 +83,17 @@ export const syncResults = sqliteTable(
   (table) => [index("sync_results_review_idx").on(table.reviewId)],
 );
 
+/** Singleton (id = 1) for admin auth and first-launch setup tracking. */
+export const appState = sqliteTable("app_state", {
+  id: integer("id").primaryKey(),
+  adminPasswordHash: text("admin_password_hash").notNull().default(""),
+  setupCompletedAt: text("setup_completed_at"),
+  updatedAt: text("updated_at")
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+});
+
 export type ReviewRow = typeof reviews.$inferSelect;
 export type SyncResultRow = typeof syncResults.$inferSelect;
 export type RadarrTargetRow = typeof radarrTargets.$inferSelect;
+export type AppStateRow = typeof appState.$inferSelect;

@@ -73,6 +73,14 @@ export interface PublicSettings {
   monitored: boolean;
   dataDir: string;
   authEnabled: boolean;
+  setupComplete: boolean;
+}
+
+export interface AuthStatusResponse {
+  needsPasswordSetup: boolean;
+  needsLogin: boolean;
+  setupComplete: boolean;
+  authEnabled: boolean;
 }
 
 export interface RadarrQualityProfileOption {

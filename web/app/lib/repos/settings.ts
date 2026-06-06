@@ -10,6 +10,7 @@ import {
 import { decryptSecret, encryptSecret } from "@/app/lib/crypto";
 import { getDb } from "@/app/lib/db";
 import { radarrTargets } from "@/app/lib/db/schema";
+import { isSetupComplete } from "@/app/lib/repos/appState";
 import type {
   PublicSettings,
   ResolvedRadarrTarget,
@@ -91,5 +92,6 @@ export function toPublicSettings(target: ResolvedRadarrTarget): PublicSettings {
     monitored: target.monitored,
     dataDir: getDataDir(),
     authEnabled: isAuthEnabled(),
+    setupComplete: isSetupComplete(),
   };
 }

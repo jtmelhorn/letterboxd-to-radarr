@@ -11,7 +11,7 @@ function resolveSchedule(): string | null {
   if (raw.toLowerCase() === "off" || process.env.AUTO_SYNC?.toLowerCase() === "false") {
     return null;
   }
-  return raw || "*/30 * * * *";
+  return raw || "0 0 * * *";
 }
 
 /** Collect handles to sync: every known DB user, plus the env-configured one. */

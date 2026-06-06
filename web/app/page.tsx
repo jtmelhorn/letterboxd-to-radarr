@@ -2,7 +2,9 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { canCompleteSetup, ControlPanelForm } from "@/app/components/ControlPanelForm";
 import type {
+  AuthStatusResponse,
   PublicSettings,
   RadarrAddResponse,
   RadarrOptionsResponse,
@@ -36,6 +38,8 @@ interface AutoSyncSummary {
 const STORAGE_KEY = "letterboxd-to-radarr-local-config";
 const ratingOptions = Array.from({ length: 9 }, (_, i) => 1 + i * 0.5);
 
+type BootPhase = "loading" | "needsPasswordSetup" | "needsLogin" | "needsSetup" | "ready";
+
 const defaultConfig: LocalConfig = { username: "" };
 
 const defaultSettings: PublicSettings = {
@@ -50,7 +54,15 @@ const defaultSettings: PublicSettings = {
   monitored: true,
   dataDir: "",
   authEnabled: false,
+  setupComplete: false,
 };
+
+function resolveBootPhase(status: AuthStatusResponse): BootPhase {
+  if (status.needsPasswordSetup) return "needsPasswordSetup";
+  if (status.needsLogin) return "needsLogin";
+  if (!status.setupComplete) return "needsSetup";
+  return "ready";
+}
 
 function movieKey(movie: ReviewDto): string {
   return String(movie.id);
@@ -80,19 +92,24 @@ function reviewTime(movie: ReviewDto): number {
   return Number.isNaN(time) ? 0 : time;
 }
 
-function sortMoviesByRecencyAndStars(movies: ReviewDto[]): ReviewDto[] {
+function sortMoviesByRating(movies: ReviewDto[]): ReviewDto[] {
   return [...movies].sort((a, b) => {
-    const recencyDifference = reviewTime(b) - reviewTime(a);
-    if (recencyDifference !== 0) return recencyDifference;
-
     const ratingDifference = b.rating - a.rating;
     if (ratingDifference !== 0) return ratingDifference;
+
+    const recencyDifference = reviewTime(b) - reviewTime(a);
+    if (recencyDifference !== 0) return recencyDifference;
 
     const titleDifference = a.title.localeCompare(b.title);
     if (titleDifference !== 0) return titleDifference;
 
     return (b.year ?? 0) - (a.year ?? 0);
   });
+}
+
+function isAddedToRadarr(movie: ReviewDto, sendStates: Record<string, SendState>): boolean {
+  const state = sendStates[movieKey(movie)] ?? statusToSendState(movie.status);
+  return state === "added";
 }
 
 function statusToSendState(status: ReviewDto["status"]): SendState {
@@ -378,12 +395,13 @@ export default function Home() {
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
 
-  // Auth gate
-  const [authRequired, setAuthRequired] = useState(false);
-  const [isAuthed, setIsAuthed] = useState(true);
+  // Auth / boot gate
+  const [bootPhase, setBootPhase] = useState<BootPhase>("loading");
   const [passwordInput, setPasswordInput] = useState("");
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isSettingPassword, setIsSettingPassword] = useState(false);
 
   // Connection Test States
   const [isTestingConnection, setIsTestingConnection] = useState(false);
@@ -399,6 +417,7 @@ export default function Home() {
   const lastAutoTestRef = useRef<string | null>(null);
 
   const [minimumRating, setMinimumRating] = useState(4);
+  const [hideAdded, setHideAdded] = useState(false);
   const [movies, setMovies] = useState<ReviewDto[]>([]);
   const [isFetching, setIsFetching] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -417,9 +436,13 @@ export default function Home() {
     const saved = window.localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
-        const parsed = JSON.parse(saved) as Partial<LocalConfig> & { minimumRating?: number };
+        const parsed = JSON.parse(saved) as Partial<LocalConfig> & {
+          minimumRating?: number;
+          hideAdded?: boolean;
+        };
         setConfig({ username: parsed.username ?? "" });
         if (typeof parsed.minimumRating === "number") setMinimumRating(parsed.minimumRating);
+        if (typeof parsed.hideAdded === "boolean") setHideAdded(parsed.hideAdded);
       } catch {
         window.localStorage.removeItem(STORAGE_KEY);
       }
@@ -429,8 +452,8 @@ export default function Home() {
 
   useEffect(() => {
     if (!hasLoadedConfig) return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...config, minimumRating }));
-  }, [config, hasLoadedConfig, minimumRating]);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...config, minimumRating, hideAdded }));
+  }, [config, hasLoadedConfig, hideAdded, minimumRating]);
 
   const loadActivity = useCallback(async (handle: string) => {
     if (!handle) return;
@@ -461,14 +484,13 @@ export default function Home() {
           | { reviews?: ReviewDto[]; stale?: boolean; message?: string }
           | null;
         if (res.status === 401) {
-          setAuthRequired(true);
-          setIsAuthed(false);
+          setBootPhase("needsLogin");
           return;
         }
         if (!res.ok || !body?.reviews) {
           throw new Error(apiMessage(body, "Unable to fetch Letterboxd reviews."));
         }
-        const sorted = sortMoviesByRecencyAndStars(body.reviews);
+        const sorted = sortMoviesByRating(body.reviews);
         setMovies(sorted);
         const states: Record<string, SendState> = {};
         for (const review of sorted) {
@@ -490,14 +512,11 @@ export default function Home() {
     try {
       const res = await fetch("/api/settings", { cache: "no-store" });
       if (res.status === 401) {
-        setAuthRequired(true);
-        setIsAuthed(false);
+        setBootPhase("needsLogin");
         return;
       }
       const body = (await res.json().catch(() => null)) as PublicSettings | null;
       if (!res.ok || !body) throw new Error(apiMessage(body, "Unable to load settings."));
-      setAuthRequired(body.authEnabled);
-      setIsAuthed(true);
       setSettings(body);
       if (body.reviewer) {
         setConfig((current) => (current.username.trim() ? current : { username: body.reviewer }));
@@ -509,23 +528,56 @@ export default function Home() {
         qualityProfileId: body.qualityProfileId ?? "",
         rootFolderPath: body.rootFolderPath ?? "",
       });
+      return body;
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : "Unable to load settings.");
+      return null;
     }
   }, []);
 
-  useEffect(() => {
-    void loadSettings();
+  const refreshBootPhase = useCallback(async () => {
+    try {
+      const res = await fetch("/api/auth/status", { cache: "no-store" });
+      const status = (await res.json()) as AuthStatusResponse;
+      const phase = resolveBootPhase(status);
+      setBootPhase(phase);
+      if (phase === "needsSetup" || phase === "ready") {
+        await loadSettings();
+      }
+      return phase;
+    } catch {
+      setBootPhase("needsPasswordSetup");
+      return "needsPasswordSetup" as BootPhase;
+    }
   }, [loadSettings]);
+
+  useEffect(() => {
+    void refreshBootPhase();
+  }, [refreshBootPhase]);
+
+  useEffect(() => {
+    if (bootPhase !== "needsSetup" && bootPhase !== "ready") return;
+    if (settings.radarrUrl && settings.hasRadarrApiKey) {
+      void loadRadarrOptions();
+    }
+  }, [bootPhase, settings.hasRadarrApiKey, settings.radarrUrl]);
 
   // ── Auto-load reviews once settings + username are known ────────────────
   useEffect(() => {
-    if (!hasLoadedConfig || !isAuthed || hasAutoFetched || isFetching) return;
+    if (bootPhase !== "ready" || !hasLoadedConfig || hasAutoFetched || isFetching) return;
     const username = config.username.trim() || settings.reviewer.trim();
     if (!username) return;
     setHasAutoFetched(true);
     void loadReviews(username, true);
-  }, [config.username, hasAutoFetched, hasLoadedConfig, isAuthed, isFetching, loadReviews, settings.reviewer]);
+  }, [
+    bootPhase,
+    config.username,
+    hasAutoFetched,
+    hasLoadedConfig,
+    isFetching,
+    loadReviews,
+    settings.reviewer,
+  ]);
 
   // ── Close modals on ESC ────────────────────────────────────────────────
   useEffect(() => {
@@ -539,11 +591,11 @@ export default function Home() {
         setIsActivityOpen(false);
         return;
       }
-      if (isSettingsOpen) setIsSettingsOpen(false);
+      if (bootPhase === "ready" && isSettingsOpen) setIsSettingsOpen(false);
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [activeMovieKey, isActivityOpen, isSettingsOpen]);
+  }, [activeMovieKey, bootPhase, isActivityOpen, isSettingsOpen]);
 
   useEffect(() => {
     if (!autoSyncSummary) return;
@@ -553,8 +605,15 @@ export default function Home() {
 
   // ── Derived state ──────────────────────────────────────────────────────
   const filteredMovies = useMemo(
-    () => sortMoviesByRecencyAndStars(movies.filter((m) => m.rating >= minimumRating)),
-    [movies, minimumRating],
+    () =>
+      sortMoviesByRating(
+        movies.filter((m) => {
+          if (m.rating < minimumRating) return false;
+          if (hideAdded && isAddedToRadarr(m, sendStates)) return false;
+          return true;
+        }),
+      ),
+    [hideAdded, minimumRating, movies, sendStates],
   );
 
   const activeMovie = useMemo(
@@ -583,6 +642,31 @@ export default function Home() {
   }
 
   // ── Auth ───────────────────────────────────────────────────────────────
+  async function submitSetupPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSettingPassword(true);
+    setLoginError(null);
+    try {
+      const res = await fetch("/api/auth/setup-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: passwordInput, confirmPassword: confirmPasswordInput }),
+      });
+      const body = (await res.json().catch(() => null)) as { success?: boolean; message?: string } | null;
+      if (!res.ok || !body?.success) {
+        throw new Error(apiMessage(body, "Unable to set admin password."));
+      }
+      setPasswordInput("");
+      setConfirmPasswordInput("");
+      setHasAutoFetched(false);
+      await refreshBootPhase();
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : "Unable to set admin password.");
+    } finally {
+      setIsSettingPassword(false);
+    }
+  }
+
   async function submitLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsLoggingIn(true);
@@ -598,14 +682,45 @@ export default function Home() {
         throw new Error(apiMessage(body, "Incorrect password."));
       }
       setPasswordInput("");
-      setIsAuthed(true);
       setHasAutoFetched(false);
-      await loadSettings();
+      await refreshBootPhase();
     } catch (err) {
       setLoginError(err instanceof Error ? err.message : "Login failed.");
     } finally {
       setIsLoggingIn(false);
     }
+  }
+
+  async function persistSettings(): Promise<PublicSettings> {
+    const qualityProfileId =
+      settingsDraft.qualityProfileId === "" ? null : Number(settingsDraft.qualityProfileId);
+    const qualityProfileName =
+      qualityProfileId != null
+        ? (radarrOptions?.qualityProfiles.find((p) => p.id === qualityProfileId)?.name ?? null)
+        : null;
+    const res = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        radarrUrl: settingsDraft.radarrUrl,
+        radarrApiKey: settingsDraft.radarrApiKey,
+        autoThreshold: settingsDraft.autoThreshold,
+        qualityProfileId,
+        qualityProfileName,
+        rootFolderPath: settingsDraft.rootFolderPath || null,
+      }),
+    });
+    const body = (await res.json().catch(() => null)) as PublicSettings | null;
+    if (!res.ok || !body) throw new Error(apiMessage(body, "Unable to save settings."));
+    setSettings(body);
+    setSettingsDraft({
+      radarrUrl: body.radarrUrl,
+      radarrApiKey: "",
+      autoThreshold: body.autoThreshold,
+      qualityProfileId: body.qualityProfileId ?? "",
+      rootFolderPath: body.rootFolderPath ?? "",
+    });
+    return body;
   }
 
   // ── Settings ─────────────────────────────────────────────────────────────
@@ -632,37 +747,32 @@ export default function Home() {
     setSettingsMessage(null);
     setSettingsError(null);
     try {
-      const qualityProfileId =
-        settingsDraft.qualityProfileId === "" ? null : Number(settingsDraft.qualityProfileId);
-      const qualityProfileName =
-        qualityProfileId != null
-          ? (radarrOptions?.qualityProfiles.find((p) => p.id === qualityProfileId)?.name ?? null)
-          : null;
-      const res = await fetch("/api/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          radarrUrl: settingsDraft.radarrUrl,
-          radarrApiKey: settingsDraft.radarrApiKey,
-          autoThreshold: settingsDraft.autoThreshold,
-          qualityProfileId,
-          qualityProfileName,
-          rootFolderPath: settingsDraft.rootFolderPath || null,
-        }),
-      });
-      const body = (await res.json().catch(() => null)) as PublicSettings | null;
-      if (!res.ok || !body) throw new Error(apiMessage(body, "Unable to save settings."));
-      setSettings(body);
-      setSettingsDraft({
-        radarrUrl: body.radarrUrl,
-        radarrApiKey: "",
-        autoThreshold: body.autoThreshold,
-        qualityProfileId: body.qualityProfileId ?? "",
-        rootFolderPath: body.rootFolderPath ?? "",
-      });
+      await persistSettings();
       setSettingsMessage("Settings successfully saved.");
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : "Unable to save settings.");
+    } finally {
+      setIsSavingSettings(false);
+    }
+  }
+
+  async function completeSetup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSavingSettings(true);
+    setSettingsMessage(null);
+    setSettingsError(null);
+    try {
+      await persistSettings();
+      const res = await fetch("/api/setup/complete", { method: "POST" });
+      const body = (await res.json().catch(() => null)) as { message?: string; success?: boolean } | null;
+      if (!res.ok || !body?.success) {
+        throw new Error(apiMessage(body, "Unable to complete setup."));
+      }
+      setHasAutoFetched(false);
+      setBootPhase("ready");
+      await loadSettings();
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : "Unable to complete setup.");
     } finally {
       setIsSavingSettings(false);
     }
@@ -722,8 +832,7 @@ export default function Home() {
       });
       const body = (await res.json().catch(() => null)) as Partial<SyncRunSummary> | null;
       if (res.status === 401) {
-        setAuthRequired(true);
-        setIsAuthed(false);
+        setBootPhase("needsLogin");
         return;
       }
       if (!res.ok || !body) throw new Error(apiMessage(body, "Unable to sync."));
@@ -798,9 +907,7 @@ export default function Home() {
 
   // ── CSS Style presets ──────────────────────────────────────────────────
   const inputCls =
-    "h-11 rounded-xl border border-cornsilk/10 bg-ink/60 px-4 text-sm text-cornsilk placeholder-peach/50 focus:outline-none focus:ring-1 focus:ring-gold focus:border-gold/40 transition-all duration-200";
-
-  const labelCls = "text-xs font-bold uppercase tracking-wider text-cornsilk/60";
+    "h-11 rounded-xl border border-cornsilk/10 bg-ink/60 px-4 text-sm text-cornsilk placeholder-cornsilk/40 focus:outline-none focus:ring-1 focus:ring-gold focus:border-gold/40 transition-all duration-200";
 
   const primaryBtnCls =
     "rounded-xl bg-pine text-cornsilk font-bold transition hover:bg-pine/90 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-pine/40 disabled:cursor-not-allowed disabled:opacity-50";
@@ -815,13 +922,79 @@ export default function Home() {
   const connectionDot = isTestingConnection
     ? { dotClass: "bg-gold animate-pulse", textClass: "text-gold", label: "Testing…" }
     : connectionTestResult?.success
-      ? { dotClass: "bg-pine", textClass: "text-peach", label: "Connected" }
+      ? { dotClass: "bg-pine", textClass: "text-chartreuse", label: "Connected" }
       : connectionTestResult
         ? { dotClass: "bg-rose-500", textClass: "text-rose-400", label: "Failed" }
-        : { dotClass: "bg-pine/50", textClass: "text-peach/70", label: "Not tested" };
+        : { dotClass: "bg-pine/50", textClass: "text-cornsilk/55", label: "Not tested" };
 
-  // ── Login gate ─────────────────────────────────────────────────────────
-  if (authRequired && !isAuthed) {
+  const setupReady = canCompleteSetup(settings, settingsDraft, config.username);
+
+  // ── Boot gates ─────────────────────────────────────────────────────────
+  if (bootPhase === "loading") {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <div className="flex flex-col items-center gap-3 text-cornsilk/60">
+          <span className="h-8 w-8 animate-spin rounded-full border-2 border-cornsilk/20 border-t-cornsilk" />
+          <p className="text-sm font-semibold">Loading…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (bootPhase === "needsPasswordSetup") {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <div className="glass-card w-full max-w-sm rounded-2xl p-8 space-y-6">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <div className={`${brandIconCls} h-12 w-12`}>
+              <LockIcon className="h-6 w-6" />
+            </div>
+            <div>
+              <h1 className="text-lg font-extrabold text-cornsilk">Set admin password</h1>
+              <p className="text-xs text-cornsilk/55 mt-1">
+                Create a password to protect this instance. It will be stored in your data volume.
+              </p>
+            </div>
+          </div>
+          <form className="space-y-3" onSubmit={submitSetupPassword}>
+            <input
+              autoFocus
+              className={`${inputCls} w-full`}
+              placeholder="Password (min. 8 characters)"
+              type="password"
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
+            />
+            <input
+              className={`${inputCls} w-full`}
+              placeholder="Confirm password"
+              type="password"
+              value={confirmPasswordInput}
+              onChange={(e) => setConfirmPasswordInput(e.target.value)}
+            />
+            {loginError && (
+              <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-xs text-rose-400">
+                {loginError}
+              </div>
+            )}
+            <button
+              className={`${primaryBtnCls} h-11 w-full text-sm`}
+              disabled={
+                isSettingPassword ||
+                passwordInput.length < 8 ||
+                passwordInput !== confirmPasswordInput
+              }
+              type="submit"
+            >
+              {isSettingPassword ? "Saving…" : "Continue"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  if (bootPhase === "needsLogin") {
     return (
       <div className="flex min-h-screen items-center justify-center px-4">
         <div className="glass-card w-full max-w-sm rounded-2xl p-8 space-y-6">
@@ -831,7 +1004,7 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-lg font-extrabold text-cornsilk">Sign in</h1>
-              <p className="text-xs text-peach/70 mt-1">This instance is password protected.</p>
+              <p className="text-xs text-cornsilk/55 mt-1">This instance is password protected.</p>
             </div>
           </div>
           <form className="space-y-3" onSubmit={submitLogin}>
@@ -861,6 +1034,51 @@ export default function Home() {
     );
   }
 
+  if (bootPhase === "needsSetup") {
+    return (
+      <div className="min-h-screen px-4 py-8 sm:px-6">
+        <div className="mx-auto max-w-2xl space-y-6">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <div className={`${brandIconCls} h-12 w-12`}>
+              <GearIcon className="h-6 w-6" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-extrabold text-cornsilk">Welcome — let&apos;s set up</h1>
+              <p className="text-sm text-cornsilk/55 mt-1 max-w-md">
+                Confirm your Letterboxd account, Radarr connection, quality profile, and auto-download
+                preferences before using the dashboard.
+              </p>
+            </div>
+          </div>
+          <div className="glass-card rounded-2xl p-6 sm:p-8">
+            <ControlPanelForm
+              canSubmit={setupReady}
+              connectionDot={connectionDot}
+              connectionTestResult={connectionTestResult}
+              isLoadingOptions={isLoadingOptions}
+              isSaving={isSavingSettings}
+              isTestingConnection={isTestingConnection}
+              letterboxdUsername={config.username}
+              mode="setup"
+              onAutoTestConnection={maybeAutoTestConnection}
+              onDraftChange={(updater) => setSettingsDraft(updater)}
+              onLetterboxdUsernameChange={(value) => updateConfig("username", value)}
+              onSubmit={completeSetup}
+              onTestConnection={testConnection}
+              radarrOptions={radarrOptions}
+              ratingOptions={ratingOptions}
+              settings={settings}
+              settingsDraft={settingsDraft}
+              settingsError={settingsError}
+              settingsMessage={settingsMessage}
+              submitLabel="Complete setup"
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* ── Fixed glassmorphic navigation bar ──────────────────────────────── */}
@@ -877,11 +1095,11 @@ export default function Home() {
 
           <form className="flex min-w-0 max-w-xl flex-1 items-center gap-2" onSubmit={syncFeed}>
             <div className="relative flex-1">
-              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-peach/70">
+              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-cornsilk/55">
                 <UserIcon className="h-4 w-4" />
               </span>
               <input
-                className="h-10 w-full rounded-xl border border-cornsilk/10 bg-ink/40 pl-10 pr-4 text-sm text-cornsilk placeholder-peach/50 transition-all duration-200 focus:border-gold/40 focus:outline-none focus:ring-1 focus:ring-gold"
+                className="h-10 w-full rounded-xl border border-cornsilk/10 bg-ink/40 pl-10 pr-4 text-sm text-cornsilk placeholder-cornsilk/40 transition-all duration-200 focus:border-gold/40 focus:outline-none focus:ring-1 focus:ring-gold"
                 placeholder="Letterboxd username"
                 value={config.username}
                 onChange={(e) => updateConfig("username", e.target.value)}
@@ -962,7 +1180,7 @@ export default function Home() {
                 </span>
                 <h1 className="text-4xl md:text-5xl font-black tracking-tight leading-tight text-cornsilk">
                   Seamlessly Sync Your <br />
-                  <span className="bg-gradient-to-r from-gold to-peach bg-clip-text text-transparent">
+                  <span className="text-gold">
                     Letterboxd Reviews
                   </span>{" "}
                   to Radarr
@@ -980,7 +1198,7 @@ export default function Home() {
                     </div>
                     <div>
                       <h4 className="text-sm font-bold text-cornsilk">Background Syncing</h4>
-                      <p className="text-xs text-peach/70 mt-1">
+                      <p className="text-xs text-cornsilk/55 mt-1">
                         A server scheduler keeps Radarr in sync even when this tab is closed.
                       </p>
                     </div>
@@ -991,7 +1209,7 @@ export default function Home() {
                     </div>
                     <div>
                       <h4 className="text-sm font-bold text-cornsilk">Configurable Automation</h4>
-                      <p className="text-xs text-peach/70 mt-1">
+                      <p className="text-xs text-cornsilk/55 mt-1">
                         Set thresholds, quality profile, and root folder for hands-off downloads.
                       </p>
                     </div>
@@ -1011,7 +1229,7 @@ export default function Home() {
                       <div
                         className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border font-bold transition-all duration-300 ${
                           isRadarrSetup
-                            ? "border-pine/30 bg-pine/15 text-peach"
+                            ? "border-pine/30 bg-pine/15 text-cornsilk"
                             : "border-cornsilk/10 bg-ink/60 text-cornsilk/60"
                         }`}
                       >
@@ -1031,7 +1249,7 @@ export default function Home() {
                         </p>
                         {!isRadarrSetup && (
                           <button
-                            className="mt-2 text-xs font-semibold text-gold hover:text-peach inline-flex items-center gap-1 transition-colors"
+                            className="mt-2 text-xs font-semibold text-gold hover:text-cornsilk inline-flex items-center gap-1 transition-colors"
                             onClick={() => setIsSettingsOpen(true)}
                           >
                             Configure Connection ↗
@@ -1045,7 +1263,7 @@ export default function Home() {
                       <div
                         className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border font-bold transition-all duration-300 ${
                           isUserSetup
-                            ? "border-pine/30 bg-pine/15 text-peach"
+                            ? "border-pine/30 bg-pine/15 text-cornsilk"
                             : "border-cornsilk/10 bg-ink/60 text-cornsilk/60"
                         }`}
                       >
@@ -1059,7 +1277,7 @@ export default function Home() {
                         {!isUserSetup && (
                           <div className="mt-2.5 flex max-w-xs gap-1.5">
                             <input
-                              className="h-8 rounded-lg border border-cornsilk/5 bg-ink/40 px-2.5 text-xs text-cornsilk placeholder-peach/40 focus:outline-none focus:ring-1 focus:ring-gold"
+                              className="h-8 rounded-lg border border-cornsilk/5 bg-ink/40 px-2.5 text-xs text-cornsilk placeholder-cornsilk/40 focus:outline-none focus:ring-1 focus:ring-gold"
                               placeholder="e.g. username"
                               value={config.username}
                               onChange={(e) => updateConfig("username", e.target.value)}
@@ -1130,14 +1348,14 @@ export default function Home() {
                     <SparklesIcon className="h-4 w-4 text-cornsilk" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-extrabold text-peach">
+                    <p className="text-sm font-extrabold text-cornsilk">
                       {autoSyncSummary.count} {autoSyncSummary.count === 1 ? "film" : "films"} rated ≥
                       {autoSyncSummary.threshold.toFixed(1)}★ sent to Radarr automatically
                     </p>
-                    <p className="text-[11px] text-peach/70">Track each result in the activity panel.</p>
+                    <p className="text-[11px] text-cornsilk/55">Track each result in the activity panel.</p>
                   </div>
                   <button
-                    className="text-xs font-semibold text-peach/80 hover:text-peach transition-colors"
+                    className="text-xs font-semibold text-cornsilk/65 hover:text-cornsilk transition-colors"
                     onClick={() => setIsActivityOpen(true)}
                     type="button"
                   >
@@ -1145,7 +1363,7 @@ export default function Home() {
                   </button>
                   <button
                     aria-label="Dismiss auto-sync summary"
-                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-peach/70 transition hover:bg-cornsilk/5 hover:text-cornsilk"
+                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-cornsilk/55 transition hover:bg-cornsilk/5 hover:text-cornsilk"
                     onClick={() => setAutoSyncSummary(null)}
                     type="button"
                   >
@@ -1160,7 +1378,7 @@ export default function Home() {
                     <UserIcon className="h-6 w-6" />
                   </div>
                   <div>
-                    <p className="text-xs font-semibold text-peach/70">Letterboxd User</p>
+                    <p className="text-xs font-semibold text-cornsilk/55">Letterboxd User</p>
                     <h3
                       className="text-base font-extrabold text-cornsilk truncate max-w-[160px]"
                       title={config.username || settings.reviewer}
@@ -1172,16 +1390,16 @@ export default function Home() {
                 </div>
 
                 <div className="glass-card p-5 rounded-2xl flex items-center gap-4">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-peach/10 text-peach">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold/10 text-gold">
                     <ServerIcon className="h-5 w-5" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-peach/70">Auto-Download</p>
+                    <p className="text-xs font-semibold text-cornsilk/55">Auto-Download</p>
                     <h3 className="text-base font-extrabold text-cornsilk flex items-center gap-1.5">
                       {settings.autoThreshold === -1 ? (
-                        <span className="text-peach/70 text-sm">Disabled</span>
+                        <span className="text-cornsilk/55 text-sm">Disabled</span>
                       ) : (
-                        <span className="text-peach text-sm">
+                        <span className="text-gold text-sm">
                           Active (≥{settings.autoThreshold.toFixed(1)}★)
                         </span>
                       )}
@@ -1191,11 +1409,11 @@ export default function Home() {
                 </div>
 
                 <div className="glass-card p-5 rounded-2xl flex items-center gap-4">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pine/15 text-peach">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pine/15 text-pine">
                     <CheckIcon className="h-6 w-6" />
                   </div>
                   <div>
-                    <p className="text-xs font-semibold text-peach/70">Synchronization</p>
+                    <p className="text-xs font-semibold text-cornsilk/55">Synchronization</p>
                     <h3 className="text-base font-extrabold text-cornsilk flex items-center gap-2">
                       <span>{stats.synced} Synced</span>
                     </h3>
@@ -1210,10 +1428,10 @@ export default function Home() {
                     <StarIcon className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-xs font-semibold text-peach/70">Average Rating</p>
+                    <p className="text-xs font-semibold text-cornsilk/55">Average Rating</p>
                     <h3 className="text-base font-extrabold text-cornsilk">{stats.averageRating} ★</h3>
                     <p className="text-[11px] text-cornsilk/60">
-                      {stats.filtered} syncable (≥{minimumRating.toFixed(1)}★)
+                      {stats.filtered} shown (≥{minimumRating.toFixed(1)}★)
                     </p>
                   </div>
                 </div>
@@ -1235,18 +1453,18 @@ export default function Home() {
 
                 <div className="flex flex-wrap items-center gap-3">
                   <span className="group relative flex items-center gap-1.5">
-                    <label className="text-xs font-bold uppercase tracking-wider text-peach/70">
-                      Show Rated ≥
+                    <label className="text-xs font-bold uppercase tracking-wider text-cornsilk/55">
+                      Min. rating ≥
                     </label>
-                    <span className="text-peach/50 transition-colors hover:text-cornsilk/80" tabIndex={0}>
+                    <span className="text-cornsilk/45 transition-colors hover:text-cornsilk/80" tabIndex={0}>
                       <InfoIcon className="h-3.5 w-3.5" />
                     </span>
                     <span
                       className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-60 rounded-lg border border-cornsilk/10 bg-ink px-3 py-2 text-[11px] font-medium leading-relaxed text-cornsilk/80 opacity-0 shadow-xl transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
                       role="tooltip"
                     >
-                      This only changes which films are shown here. What gets downloaded is controlled
-                      by the Auto-Download threshold in Settings.
+                      Filter which movies appear in the grid. Auto-download to Radarr uses the separate
+                      threshold in Settings.
                     </span>
                   </span>
                   <div className="flex h-9 rounded-lg border border-cornsilk/5 bg-ink/60 p-0.5">
@@ -1263,18 +1481,29 @@ export default function Home() {
                       </button>
                     ))}
                   </div>
+
+                  <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-cornsilk/5 bg-ink/60 px-3 h-9">
+                    <input
+                      checked={hideAdded}
+                      className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                      onChange={(e) => setHideAdded(e.target.checked)}
+                      type="checkbox"
+                    />
+                    <span className="text-xs font-bold text-cornsilk/70 whitespace-nowrap">Hide in Radarr</span>
+                  </label>
                 </div>
               </div>
 
               {filteredMovies.length === 0 ? (
                 <div className="glass-card flex flex-col items-center justify-center py-20 text-center rounded-2xl">
-                  <div className="h-12 w-12 rounded-full bg-ink flex items-center justify-center text-peach/70 mb-3">
+                  <div className="h-12 w-12 rounded-full bg-ink flex items-center justify-center text-cornsilk/55 mb-3">
                     <FilmIcon className="h-6 w-6" />
                   </div>
-                  <h3 className="text-base font-extrabold text-cornsilk">No reviews found matching filter</h3>
-                  <p className="text-xs text-peach/70 mt-1 max-w-xs">
-                    There are no reviews rated {minimumRating.toFixed(1)}★ or higher. Adjust your filter
-                    controls above to view more.
+                  <h3 className="text-base font-extrabold text-cornsilk">No movies match this filter</h3>
+                  <p className="text-xs text-cornsilk/55 mt-1 max-w-xs">
+                    {hideAdded
+                      ? "All visible movies are already in Radarr, or none meet the minimum rating. Adjust the filters above."
+                      : `No movies rated ${minimumRating.toFixed(1)}★ or higher. Lower the minimum rating above to see more.`}
                   </p>
                 </div>
               ) : (
@@ -1305,7 +1534,7 @@ export default function Home() {
                           ) : (
                             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-pine to-ink p-4">
                               <FilmIcon className="h-9 w-9 text-granite/70" />
-                              <span className="line-clamp-3 text-center text-[10px] font-bold leading-tight text-peach/70">
+                              <span className="line-clamp-3 text-center text-[10px] font-bold leading-tight text-cornsilk/55">
                                 {movie.title}
                               </span>
                             </div>
@@ -1345,23 +1574,24 @@ export default function Home() {
                           </div>
                         </button>
 
-                        <div className="poster-hover-actions absolute inset-0 z-10 flex items-center justify-center bg-ink/70 backdrop-blur-[2px] p-3">
+                        <div className="absolute bottom-2 right-2 z-10 opacity-0 transition-opacity duration-200 group-hover:opacity-100 pointer-events-none">
                           {sendState === "loading" ? (
-                            <span className="flex items-center gap-2 rounded-xl bg-ink/80 px-4 py-2 text-xs font-bold text-cornsilk">
-                              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-cornsilk/30 border-t-cornsilk" />
-                              Sending…
+                            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-ink/85 backdrop-blur-sm border border-cornsilk/10">
+                              <span className="h-3 w-3 animate-spin rounded-full border-2 border-cornsilk/30 border-t-cornsilk" />
                             </span>
                           ) : (
                             <button
-                              className={`${primaryBtnCls} flex items-center gap-2 px-4 py-2 text-xs font-extrabold`}
+                              aria-label={sendState === "added" ? "Resend to Radarr" : "Send to Radarr"}
+                              className="pointer-events-auto flex items-center gap-1 rounded-md border border-cornsilk/10 bg-ink/85 px-2 py-1 text-[9px] font-bold text-cornsilk backdrop-blur-sm transition hover:border-pine/40 hover:bg-pine hover:text-cornsilk focus:outline-none focus:ring-1 focus:ring-pine/40"
                               onClick={(e) => {
+                                e.preventDefault();
                                 e.stopPropagation();
                                 void sendToRadarr(movie);
                               }}
                               type="button"
                             >
-                              <RadarrIcon className="h-3.5 w-3.5" />
-                              {sendState === "added" ? "Resend to Radarr" : "Send to Radarr"}
+                              <RadarrIcon className="h-3 w-3" />
+                              {sendState === "added" ? "Resend" : "Radarr"}
                             </button>
                           )}
                         </div>
@@ -1450,7 +1680,7 @@ export default function Home() {
                     <span className="text-xl font-black text-gold flex items-center gap-1">
                       ★ {activeMovie.rating.toFixed(1)}
                     </span>
-                    <span className="text-[10px] text-peach/70 font-medium">Review Score</span>
+                    <span className="text-[10px] text-cornsilk/55 font-medium">Review Score</span>
                   </div>
                 </div>
               </div>
@@ -1458,7 +1688,7 @@ export default function Home() {
               <div className="px-6 py-5 border-b border-cornsilk/5 bg-ink/20">
                 {activeMovie.reviewText ? (
                   <div className="space-y-2">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-peach/70">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
                       My Written Review
                     </p>
                     <div className="relative pl-4 border-l-2 border-gold/50">
@@ -1468,7 +1698,7 @@ export default function Home() {
                     </div>
                   </div>
                 ) : (
-                  <p className="text-xs italic text-peach/70">No review text written for this film.</p>
+                  <p className="text-xs italic text-cornsilk/55">No review text written for this film.</p>
                 )}
               </div>
 
@@ -1546,7 +1776,7 @@ export default function Home() {
           <aside className="glass-modal animate-fade-in flex h-full w-full max-w-md flex-col border-l border-cornsilk/10 shadow-2xl">
             <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-cornsilk/5 px-6 pb-4 pt-5">
               <div>
-                <p className="mb-0.5 text-[10px] font-bold uppercase tracking-widest text-peach/70">
+                <p className="mb-0.5 text-[10px] font-bold uppercase tracking-widest text-cornsilk/55">
                   Recent Syncs
                 </p>
                 <h2 className="text-lg font-extrabold text-cornsilk">Sync Activity</h2>
@@ -1574,11 +1804,11 @@ export default function Home() {
             <div className="flex-1 overflow-y-auto px-4 py-4">
               {activityLog.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-ink text-peach/70">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-ink text-cornsilk/55">
                     <ClockIcon className="h-6 w-6" />
                   </div>
                   <h3 className="text-base font-extrabold text-cornsilk">No sync activity yet</h3>
-                  <p className="mt-1 max-w-xs text-xs text-peach/70">
+                  <p className="mt-1 max-w-xs text-xs text-cornsilk/55">
                     Films added to Radarr—automatically or manually—will appear here with their outcome.
                   </p>
                 </div>
@@ -1592,7 +1822,7 @@ export default function Home() {
                       <div
                         className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${
                           entry.outcome === "added"
-                            ? "bg-pine/20 text-peach"
+                            ? "bg-pine/20 text-cornsilk"
                             : "bg-rose-500/15 text-rose-400"
                         }`}
                       >
@@ -1607,7 +1837,7 @@ export default function Home() {
                           <h4 className="truncate text-sm font-bold text-cornsilk">
                             {entry.title}
                             {entry.year != null && (
-                              <span className="ml-1 font-medium text-peach/70">{entry.year}</span>
+                              <span className="ml-1 font-medium text-cornsilk/55">{entry.year}</span>
                             )}
                           </h4>
                         </div>
@@ -1622,13 +1852,13 @@ export default function Home() {
                           <span
                             className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
                               entry.auto
-                                ? "bg-peach/10 text-peach border border-peach/20"
+                                ? "bg-granite/20 text-cornsilk/70 border border-granite/30"
                                 : "bg-cornsilk/5 text-cornsilk/60 border border-cornsilk/5"
                             }`}
                           >
                             {entry.auto ? "Auto" : "Manual"}
                           </span>
-                          <span className="text-[10px] text-peach/70">{formatRelativeTime(entry.at)}</span>
+                          <span className="text-[10px] text-cornsilk/55">{formatRelativeTime(entry.at)}</span>
                           {entry.reviewId != null && (
                             <button
                               className="ml-auto rounded-md border border-cornsilk/10 bg-ink/60 px-2 py-0.5 text-[10px] font-bold text-cornsilk/80 transition hover:border-gold/30 hover:text-cornsilk disabled:opacity-50"
@@ -1661,7 +1891,7 @@ export default function Home() {
           <div className="glass-modal flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-3xl shadow-2xl sm:max-w-xl sm:rounded-2xl border border-cornsilk/10">
             <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-cornsilk/5 px-6 pb-4 pt-5">
               <div>
-                <p className="mb-0.5 text-[10px] font-bold uppercase tracking-widest text-peach/70">
+                <p className="mb-0.5 text-[10px] font-bold uppercase tracking-widest text-cornsilk/55">
                   Control Panel
                 </p>
                 <h2 className="text-lg font-extrabold text-cornsilk">Application Settings</h2>
@@ -1677,201 +1907,25 @@ export default function Home() {
             </div>
 
             <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
-              <form className="space-y-4" onSubmit={saveSettings}>
-                <h4 className="text-[10px] font-bold uppercase tracking-wider text-gold flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-gold" />
-                  Radarr Endpoint Configuration
-                </h4>
-
-                <div className="grid grid-cols-1 gap-4">
-                  <label className="flex flex-col gap-1.5">
-                    <span className="flex items-center gap-2">
-                      <span className={labelCls}>Radarr Base URL</span>
-                      <span className={`flex items-center gap-1 text-[10px] font-bold ${connectionDot.textClass}`}>
-                        <span className={`h-2 w-2 rounded-full ${connectionDot.dotClass}`} />
-                        {connectionDot.label}
-                      </span>
-                    </span>
-                    <input
-                      className={inputCls}
-                      placeholder="e.g. http://192.168.1.100:7878"
-                      value={settingsDraft.radarrUrl}
-                      onBlur={maybeAutoTestConnection}
-                      onChange={(e) => setSettingsDraft((c) => ({ ...c, radarrUrl: e.target.value }))}
-                    />
-                  </label>
-
-                  <label className="flex flex-col gap-1.5">
-                    <span className={labelCls}>API Token Key</span>
-                    <input
-                      className={inputCls}
-                      placeholder={
-                        settings.hasRadarrApiKey ? "Saved — leave blank to keep unchanged" : "Paste Radarr API Key"
-                      }
-                      type="password"
-                      value={settingsDraft.radarrApiKey}
-                      onBlur={maybeAutoTestConnection}
-                      onChange={(e) => setSettingsDraft((c) => ({ ...c, radarrApiKey: e.target.value }))}
-                    />
-                  </label>
-                </div>
-
-                <h4 className="text-[10px] font-bold uppercase tracking-wider text-gold flex items-center gap-1.5 pt-2">
-                  <span className="h-1.5 w-1.5 rounded-full bg-gold" />
-                  Radarr Library Targets
-                </h4>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <label className="flex flex-col gap-1.5">
-                    <span className={labelCls}>Quality Profile</span>
-                    <div className="relative">
-                      <select
-                        className="h-11 w-full rounded-xl border border-cornsilk/10 bg-ink/60 px-4 pr-10 text-sm text-cornsilk appearance-none focus:outline-none focus:ring-1 focus:ring-gold cursor-pointer disabled:opacity-50"
-                        disabled={!radarrOptions}
-                        value={settingsDraft.qualityProfileId === "" ? "" : String(settingsDraft.qualityProfileId)}
-                        onChange={(e) =>
-                          setSettingsDraft((c) => ({
-                            ...c,
-                            qualityProfileId: e.target.value === "" ? "" : Number(e.target.value),
-                          }))
-                        }
-                      >
-                        <option value="">{isLoadingOptions ? "Loading…" : "Auto (first available)"}</option>
-                        {radarrOptions?.qualityProfiles.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-peach/70 text-xs">
-                        ▼
-                      </span>
-                    </div>
-                  </label>
-
-                  <label className="flex flex-col gap-1.5">
-                    <span className={labelCls}>Root Folder</span>
-                    <div className="relative">
-                      <select
-                        className="h-11 w-full rounded-xl border border-cornsilk/10 bg-ink/60 px-4 pr-10 text-sm text-cornsilk appearance-none focus:outline-none focus:ring-1 focus:ring-gold cursor-pointer disabled:opacity-50"
-                        disabled={!radarrOptions}
-                        value={settingsDraft.rootFolderPath}
-                        onChange={(e) => setSettingsDraft((c) => ({ ...c, rootFolderPath: e.target.value }))}
-                      >
-                        <option value="">{isLoadingOptions ? "Loading…" : "Auto (first available)"}</option>
-                        {radarrOptions?.rootFolders.map((f) => (
-                          <option key={f.path} value={f.path}>
-                            {f.path}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-peach/70 text-xs">
-                        ▼
-                      </span>
-                    </div>
-                  </label>
-                </div>
-                {!radarrOptions && (
-                  <p className="text-[11px] text-peach/70 leading-normal">
-                    Test the connection to load available quality profiles and root folders.
-                  </p>
-                )}
-
-                <h4 className="text-[10px] font-bold uppercase tracking-wider text-gold flex items-center gap-1.5 pt-2">
-                  <span className="h-1.5 w-1.5 rounded-full bg-gold" />
-                  Auto-Sync Preferences
-                </h4>
-
-                <div className="flex flex-col gap-1.5">
-                  <span className={labelCls}>Trigger Auto-Download Threshold</span>
-                  <div className="relative">
-                    <select
-                      className="h-11 w-full rounded-xl border border-cornsilk/10 bg-ink/60 px-4 pr-10 text-sm text-cornsilk appearance-none focus:outline-none focus:ring-1 focus:ring-gold cursor-pointer"
-                      value={settingsDraft.autoThreshold}
-                      onChange={(e) =>
-                        setSettingsDraft((c) => ({ ...c, autoThreshold: Number(e.target.value) }))
-                      }
-                    >
-                      <option value={-1}>Disable Automatic Syncing</option>
-                      {ratingOptions.map((r) => (
-                        <option key={r} value={r}>
-                          Sync Rated ≥ {r.toFixed(1)} ★
-                        </option>
-                      ))}
-                    </select>
-                    <span className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-peach/70 text-xs">
-                      ▼
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-peach/70 leading-normal">
-                    The background scheduler and the Sync Feed button add movies rated at or above this
-                    threshold to your Radarr library automatically.
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-cornsilk/5 bg-ink/20 p-4 space-y-1.5 text-xs text-peach/70">
-                  <p>
-                    <span className="font-semibold text-cornsilk/60">Server Path: </span>
-                    {settings.dataDir || "Fetching data path..."}
-                  </p>
-                  <p className="text-[11px] leading-relaxed">
-                    Settings and cached reviews are stored in a SQLite database in this directory. Your
-                    Radarr API key is encrypted at rest.
-                  </p>
-                </div>
-
-                {connectionTestResult && (
-                  <div
-                    className={`rounded-xl border p-3.5 flex items-start gap-2.5 text-xs animate-fade-in ${
-                      connectionTestResult.success
-                        ? "border-pine/30 bg-pine/10 text-peach"
-                        : "border-rose-500/20 bg-rose-500/5 text-rose-400"
-                    }`}
-                  >
-                    {connectionTestResult.success ? (
-                      <CheckIcon className="h-4 w-4 flex-shrink-0 text-peach" />
-                    ) : (
-                      <ExclamationIcon className="h-4 w-4 flex-shrink-0 text-rose-400" />
-                    )}
-                    <div className="space-y-1">
-                      <p className="font-extrabold">
-                        {connectionTestResult.success ? "Success" : "Connection Failed"}
-                      </p>
-                      <p className="leading-relaxed text-cornsilk/60">{connectionTestResult.message}</p>
-                    </div>
-                  </div>
-                )}
-
-                {settingsMessage && (
-                  <div className="rounded-xl border border-pine/30 bg-pine/10 px-4 py-3 text-xs font-semibold text-peach">
-                    {settingsMessage}
-                  </div>
-                )}
-                {settingsError && (
-                  <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 px-4 py-3 text-xs font-semibold text-rose-400">
-                    {settingsError}
-                  </div>
-                )}
-
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                  <button
-                    className="h-10 rounded-xl border border-cornsilk/10 bg-ink/60 px-5 text-xs font-bold text-cornsilk/80 transition hover:bg-cornsilk/5 hover:text-cornsilk disabled:opacity-50"
-                    disabled={isTestingConnection || !settingsDraft.radarrUrl}
-                    onClick={testConnection}
-                    type="button"
-                  >
-                    {isTestingConnection ? "Testing Connection..." : "Test Connection"}
-                  </button>
-
-                  <button
-                    className={`${primaryBtnCls} h-10 px-6 text-xs`}
-                    disabled={isSavingSettings}
-                    type="submit"
-                  >
-                    {isSavingSettings ? "Saving..." : "Save Settings"}
-                  </button>
-                </div>
-              </form>
+              <ControlPanelForm
+                connectionDot={connectionDot}
+                connectionTestResult={connectionTestResult}
+                isLoadingOptions={isLoadingOptions}
+                isSaving={isSavingSettings}
+                isTestingConnection={isTestingConnection}
+                mode="modal"
+                onAutoTestConnection={maybeAutoTestConnection}
+                onDraftChange={(updater) => setSettingsDraft(updater)}
+                onSubmit={saveSettings}
+                onTestConnection={testConnection}
+                radarrOptions={radarrOptions}
+                ratingOptions={ratingOptions}
+                settings={settings}
+                settingsDraft={settingsDraft}
+                settingsError={settingsError}
+                settingsMessage={settingsMessage}
+                submitLabel="Save Settings"
+              />
             </div>
           </div>
         </div>

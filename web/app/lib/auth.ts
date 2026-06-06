@@ -1,10 +1,18 @@
 import { timingSafeEqual } from "node:crypto";
 
-import { configuredAppPassword, isAuthEnabled } from "@/app/lib/config";
-import { sign, verifySignature } from "@/app/lib/crypto";
+import { configuredAppPassword } from "@/app/lib/config";
+import { sign, verifyPasswordHash, verifySignature } from "@/app/lib/crypto";
+import { getAppState, hasStoredAdminPassword, isSetupComplete } from "@/app/lib/repos/appState";
 
 export const SESSION_COOKIE = "lb_session";
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
+
+export interface AuthStatus {
+  needsPasswordSetup: boolean;
+  needsLogin: boolean;
+  setupComplete: boolean;
+  authEnabled: boolean;
+}
 
 export function buildSessionToken(): string {
   const payload = String(Date.now());
@@ -39,14 +47,22 @@ export function isHttpsRequest(request: Request): boolean {
   }
 }
 
-export function verifyPassword(input: string): boolean {
-  const expected = configuredAppPassword();
-  if (!expected) return false;
+export function isPasswordConfigured(): boolean {
+  return configuredAppPassword().length > 0 || hasStoredAdminPassword();
+}
 
-  const a = Buffer.from(input);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
+export function verifyPassword(input: string): boolean {
+  const fromEnv = configuredAppPassword();
+  if (fromEnv) {
+    const a = Buffer.from(input);
+    const b = Buffer.from(fromEnv);
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
+  }
+
+  const storedHash = getAppState().adminPasswordHash;
+  if (!storedHash) return false;
+  return verifyPasswordHash(input, storedHash);
 }
 
 function readCookie(request: Request, name: string): string | null {
@@ -61,11 +77,34 @@ function readCookie(request: Request, name: string): string | null {
   return null;
 }
 
+export function hasValidSession(request: Request): boolean {
+  return verifySessionToken(readCookie(request, SESSION_COOKIE));
+}
+
+export function getAuthStatus(request: Request): AuthStatus {
+  const envPassword = configuredAppPassword().length > 0;
+  const storedPassword = hasStoredAdminPassword();
+  const passwordConfigured = envPassword || storedPassword;
+  const sessionValid = hasValidSession(request);
+  const setupComplete = isSetupComplete();
+
+  const needsPasswordSetup = !passwordConfigured;
+  const authEnabled = passwordConfigured;
+  const needsLogin = passwordConfigured && !sessionValid;
+
+  return {
+    needsPasswordSetup,
+    needsLogin,
+    setupComplete,
+    authEnabled,
+  };
+}
+
 /**
- * True when the request is allowed. When no APP_PASSWORD is set, the app stays
- * open (zero-config self-host).
+ * True when the request is allowed. Requires a configured password and valid
+ * session cookie once bootstrap is complete.
  */
 export function isRequestAuthorized(request: Request): boolean {
-  if (!isAuthEnabled()) return true;
-  return verifySessionToken(readCookie(request, SESSION_COOKIE));
+  if (!isPasswordConfigured()) return false;
+  return hasValidSession(request);
 }

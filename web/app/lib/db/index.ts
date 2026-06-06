@@ -63,6 +63,13 @@ CREATE TABLE IF NOT EXISTS sync_results (
 );
 
 CREATE INDEX IF NOT EXISTS sync_results_review_idx ON sync_results(review_id);
+
+CREATE TABLE IF NOT EXISTS app_state (
+  id INTEGER PRIMARY KEY,
+  admin_password_hash TEXT NOT NULL DEFAULT '',
+  setup_completed_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
 `;
 
 function init(): { sqlite: Database.Database; db: DrizzleDb } {
@@ -80,6 +87,10 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
     .prepare(
       `INSERT INTO radarr_targets (id) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM radarr_targets WHERE id = 1)`,
     )
+    .run();
+
+  sqlite
+    .prepare(`INSERT INTO app_state (id) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM app_state WHERE id = 1)`)
     .run();
 
   migrateLegacyJson(sqlite);

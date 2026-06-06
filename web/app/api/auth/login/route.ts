@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { buildSessionToken, isHttpsRequest, SESSION_COOKIE, SESSION_MAX_AGE, verifyPassword } from "@/app/lib/auth";
-import { isAuthEnabled } from "@/app/lib/config";
+import { buildSessionToken, isHttpsRequest, isPasswordConfigured, SESSION_COOKIE, SESSION_MAX_AGE, verifyPassword } from "@/app/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -10,8 +9,11 @@ interface LoginBody {
 }
 
 export async function POST(request: Request) {
-  if (!isAuthEnabled()) {
-    return NextResponse.json({ success: true, authEnabled: false });
+  if (!isPasswordConfigured()) {
+    return NextResponse.json(
+      { success: false, message: "Set an admin password before signing in." },
+      { status: 403 },
+    );
   }
 
   let body: LoginBody;

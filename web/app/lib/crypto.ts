@@ -3,6 +3,7 @@ import {
   createDecipheriv,
   createHmac,
   randomBytes,
+  scryptSync,
   timingSafeEqual,
 } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -134,4 +135,32 @@ export function verifySignature(payload: string, signature: string): boolean {
   const b = Buffer.from(signature);
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
+}
+
+const PASSWORD_SCRYPT_PREFIX = "scrypt:v1:";
+const PASSWORD_SALT_LENGTH = 16;
+const PASSWORD_KEY_LENGTH = 32;
+
+/** Hash a plaintext password for storage in app_state.admin_password_hash. */
+export function hashPassword(plaintext: string): string {
+  const salt = randomBytes(PASSWORD_SALT_LENGTH);
+  const derived = scryptSync(plaintext, salt, PASSWORD_KEY_LENGTH);
+  return `${PASSWORD_SCRYPT_PREFIX}${salt.toString("base64")}:${derived.toString("base64")}`;
+}
+
+/** Verify a plaintext password against a stored scrypt hash. */
+export function verifyPasswordHash(plaintext: string, storedHash: string): boolean {
+  if (!storedHash.startsWith(PASSWORD_SCRYPT_PREFIX)) return false;
+
+  const payload = storedHash.slice(PASSWORD_SCRYPT_PREFIX.length);
+  const sep = payload.indexOf(":");
+  if (sep <= 0) return false;
+
+  const salt = Buffer.from(payload.slice(0, sep), "base64");
+  const expected = Buffer.from(payload.slice(sep + 1), "base64");
+  if (expected.length !== PASSWORD_KEY_LENGTH) return false;
+
+  const derived = scryptSync(plaintext, salt, PASSWORD_KEY_LENGTH);
+  if (derived.length !== expected.length) return false;
+  return timingSafeEqual(derived, expected);
 }

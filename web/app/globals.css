@@ -81,17 +81,6 @@ textarea {
     0 0 20px 1px rgba(249, 203, 64, 0.2);
 }
 
-.poster-card:hover .poster-hover-actions {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.poster-hover-actions {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s ease;
-}
-
 /* ── Poster bottom fade ────────────────────────────────── */
 .poster-gradient {
   background: linear-gradient(
