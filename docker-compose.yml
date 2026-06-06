@@ -16,5 +16,17 @@ services:
       RADARR: "CHANGE_ME"
       # Radarr API key from Settings > General > Security.
       API_KEY: "CHANGE_ME"
+      # --- Optional ---
+      # Require a password to use the app (recommended if exposed beyond LAN).
+      # APP_PASSWORD: "change-me"
+      # 32-byte base64/hex key used to encrypt the stored Radarr API key.
+      # If omitted, a random key is generated and persisted in the data volume.
+      # APP_ENCRYPTION_KEY: ""
+      # Background sync schedule (cron). Default "*/30 * * * *". Use "off" to disable.
+      # SYNC_CRON: "*/30 * * * *"
     volumes:
-      #- CHANGEME:/data
+      # SQLite database, encryption key, and migration flag live here.
+      - letterboxd-radarr-data:/data
+
+volumes:
+  letterboxd-radarr-data:

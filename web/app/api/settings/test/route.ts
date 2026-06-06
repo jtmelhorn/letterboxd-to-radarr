@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 
+import { isRequestAuthorized } from "@/app/lib/auth";
+import { normalizeRadarrUrl, testConnection } from "@/app/lib/radarr";
+import { getRadarrTarget } from "@/app/lib/repos/settings";
+
 export const runtime = "nodejs";
 
 interface TestRequestBody {
@@ -7,23 +11,12 @@ interface TestRequestBody {
   radarrApiKey?: unknown;
 }
 
-function normalizeRadarrUrl(radarrUrl: string): string | null {
-  try {
-    const url = new URL(radarrUrl.trim());
-
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return null;
-    }
-
-    return url.toString().replace(/\/$/, "");
-  } catch {
-    return null;
-  }
-}
-
 export async function POST(request: Request) {
-  let body: TestRequestBody;
+  if (!isRequestAuthorized(request)) {
+    return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 401 });
+  }
 
+  let body: TestRequestBody;
   try {
     body = (await request.json()) as TestRequestBody;
   } catch {
@@ -33,8 +26,16 @@ export async function POST(request: Request) {
     );
   }
 
-  const radarrUrlValue = typeof body.radarrUrl === "string" ? body.radarrUrl.trim() : "";
-  const radarrApiKey = typeof body.radarrApiKey === "string" ? body.radarrApiKey.trim() : "";
+  const stored = getRadarrTarget();
+  const radarrUrlValue =
+    typeof body.radarrUrl === "string" && body.radarrUrl.trim()
+      ? body.radarrUrl.trim()
+      : stored.baseUrl;
+  // Fall back to the stored (encrypted) key when the form leaves it blank.
+  const radarrApiKey =
+    typeof body.radarrApiKey === "string" && body.radarrApiKey.trim()
+      ? body.radarrApiKey.trim()
+      : stored.apiKey;
 
   if (!radarrUrlValue) {
     return NextResponse.json(
@@ -51,62 +52,6 @@ export async function POST(request: Request) {
     );
   }
 
-  const apiHeaders = {
-    Accept: "application/json",
-    "X-Api-Key": radarrApiKey,
-  };
-
-  try {
-    // We fetch system status to check if Radarr is up and the API key is correct
-    const response = await fetch(`${baseUrl}/api/v3/system/status`, {
-      headers: apiHeaders,
-      cache: "no-store",
-      // Set a short timeout for the connection test (5 seconds)
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (response.status === 401) {
-      return NextResponse.json({
-        success: false,
-        message: "Unauthorized. Please verify your Radarr API key.",
-      });
-    }
-
-    if (!response.ok) {
-      return NextResponse.json({
-        success: false,
-        message: `Radarr responded with status ${response.status}: ${response.statusText}`,
-      });
-    }
-
-    // Try to parse the response body to extract version info
-    const data = await response.json().catch(() => null) as Record<string, unknown> | null;
-    const version = data && typeof data === "object" && typeof data.version === "string" ? data.version : "";
-
-    let successMessage = "Successfully connected to Radarr!";
-    if (version) {
-      successMessage += ` (Version: ${version})`;
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: successMessage,
-    });
-  } catch (error) {
-    console.error("Connection test failed", error);
-
-    let message = "Unable to connect to Radarr. Ensure the URL is correct, Radarr is running, and accessible.";
-    if (error instanceof Error) {
-      if (error.name === "TimeoutError" || error.message.includes("timeout")) {
-        message = "Connection timed out. Check that Radarr is running and is reachable at the specified URL.";
-      } else {
-        message = `Connection failed: ${error.message}`;
-      }
-    }
-
-    return NextResponse.json({
-      success: false,
-      message,
-    });
-  }
+  const result = await testConnection(baseUrl, radarrApiKey);
+  return NextResponse.json(result);
 }
