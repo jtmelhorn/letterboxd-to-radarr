@@ -1085,7 +1085,7 @@ export default function Home() {
     <>
       {/* ── Fixed glassmorphic navigation bar ──────────────────────────────── */}
       <nav className="fixed inset-x-0 top-0 z-40 h-16 border-b border-cornsilk/5 bg-ink/70 backdrop-blur-xl transition-all duration-200">
-        <div className="mx-auto flex h-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
+        <div className="mx-auto flex h-full w-full items-center justify-between gap-4 px-3 sm:px-4 lg:px-6">
           <div className="flex flex-shrink-0 items-center gap-3">
             <div className={`${brandIconCls} h-9 w-9 shadow-sm`}>
               <FilmIcon className="h-5 w-5" />
@@ -1171,10 +1171,10 @@ export default function Home() {
       </nav>
 
       {/* ── Main Dashboard Layout ────────────────────────────────────────── */}
-      <main className="min-h-screen pt-16 px-4 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-7xl py-6">
+      <main className="flex h-[100dvh] flex-col overflow-hidden pt-16">
+        <div className="mx-auto flex h-full w-full flex-col px-3 py-3 sm:px-4 lg:px-6">
           {movies.length === 0 && !busy && (
-            <div className="animate-fade-in grid grid-cols-1 lg:grid-cols-12 gap-8 items-center py-10 md:py-16">
+            <div className="animate-fade-in flex flex-1 flex-col justify-center overflow-y-auto lg:grid lg:grid-cols-12 lg:items-center lg:gap-8">
               <div className="lg:col-span-7 space-y-6 text-left">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-gold/10 px-3 py-1 text-xs font-semibold text-gold border border-gold/10">
                   <SparklesIcon className="h-3.5 w-3.5" />
@@ -1324,9 +1324,9 @@ export default function Home() {
           )}
 
           {busy && movies.length === 0 && (
-            <div className="space-y-6 py-6">
-              <div className="h-6 w-48 rounded bg-cornsilk/5 animate-pulse" />
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
+            <div className="flex flex-1 flex-col gap-3 overflow-hidden">
+              <div className="h-5 w-48 rounded bg-cornsilk/5 animate-pulse" />
+              <div className="poster-grid flex-1 overflow-y-auto content-start">
                 {Array.from({ length: 14 }).map((_, i) => (
                   <div key={i} className="glass-card aspect-[2/3] rounded-xl overflow-hidden shimmer-wrapper">
                     <div className="h-full w-full bg-ink/40 flex flex-col justify-between p-3.5">
@@ -1343,7 +1343,7 @@ export default function Home() {
           )}
 
           {movies.length > 0 && (
-            <div className="space-y-6">
+            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
               {autoSyncSummary && (
                 <div className="animate-fade-in flex items-center gap-3 rounded-xl border border-pine/30 bg-pine/10 px-4 py-3">
                   <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-pine shadow-md shadow-pine/20">
@@ -1374,8 +1374,8 @@ export default function Home() {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="glass-card p-5 rounded-2xl flex items-center gap-4">
+              <div className="grid shrink-0 grid-cols-2 gap-2 lg:grid-cols-4 xl:gap-3">
+                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold/10 text-gold">
                     <UserIcon className="h-6 w-6" />
                   </div>
@@ -1391,7 +1391,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="glass-card p-5 rounded-2xl flex items-center gap-4">
+                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold/10 text-gold">
                     <ServerIcon className="h-5 w-5" />
                   </div>
@@ -1410,7 +1410,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="glass-card p-5 rounded-2xl flex items-center gap-4">
+                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pine/15 text-pine">
                     <CheckIcon className="h-6 w-6" />
                   </div>
@@ -1425,7 +1425,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="glass-card p-5 rounded-2xl flex items-center gap-4">
+                <div className="glass-card p-3 sm:p-4 rounded-xl flex items-center gap-3">
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold/10 text-gold">
                     <StarIcon className="h-5 w-5" />
                   </div>
@@ -1440,7 +1440,7 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl border border-cornsilk/5 bg-ink/30 px-5 py-4">
+              <div className="flex shrink-0 flex-col gap-3 rounded-xl border border-cornsilk/5 bg-ink/30 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-4">
                 <div className="flex items-center gap-2 text-sm text-cornsilk/60">
                   <span>Displaying</span>
                   <strong className="text-cornsilk font-extrabold">{stats.filtered}</strong>
@@ -1507,7 +1507,7 @@ export default function Home() {
               </div>
 
               {filteredMovies.length === 0 ? (
-                <div className="glass-card flex flex-col items-center justify-center py-20 text-center rounded-2xl">
+                <div className="glass-card flex flex-1 flex-col items-center justify-center py-12 text-center rounded-xl">
                   <div className="h-12 w-12 rounded-full bg-ink flex items-center justify-center text-cornsilk/55 mb-3">
                     <FilmIcon className="h-6 w-6" />
                   </div>
@@ -1521,7 +1521,7 @@ export default function Home() {
                   </p>
                 </div>
               ) : (
-                <div className="animate-fade-in grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 py-2">
+                <div className="poster-grid min-h-0 flex-1 overflow-y-auto content-start pb-1 animate-fade-in">
                   {filteredMovies.map((movie) => {
                     const key = movieKey(movie);
                     const sendState = sendStates[key] ?? "idle";
