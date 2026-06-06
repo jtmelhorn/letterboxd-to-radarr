@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { isRequestAuthorized } from "@/app/lib/auth";
 import { isValidHandle } from "@/app/lib/letterboxd";
-import { getRecentSyncResults } from "@/app/lib/repos/syncResults";
+import { clearSyncResultsForUser, getRecentSyncResults } from "@/app/lib/repos/syncResults";
 import { findUser } from "@/app/lib/repos/users";
 import { runSync } from "@/app/lib/sync";
 
@@ -27,6 +27,22 @@ export async function GET(request: Request) {
 
   const user = findUser(handle);
   return NextResponse.json({ results: user ? getRecentSyncResults(user.id, 100) : [] });
+}
+
+export async function DELETE(request: Request) {
+  if (!isRequestAuthorized(request)) {
+    return NextResponse.json({ message: "Unauthorized." }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const handle = searchParams.get("handle")?.trim() ?? searchParams.get("username")?.trim();
+  if (!handle || !isValidHandle(handle)) {
+    return NextResponse.json({ message: "A valid Letterboxd handle is required." }, { status: 400 });
+  }
+
+  const user = findUser(handle);
+  const cleared = user ? clearSyncResultsForUser(user.id) : 0;
+  return NextResponse.json({ cleared });
 }
 
 export async function POST(request: Request) {

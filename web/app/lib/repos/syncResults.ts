@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/app/lib/db";
 import { reviews, syncResults } from "@/app/lib/db/schema";
@@ -56,4 +56,22 @@ export function getRecentSyncResults(userId: number, limit = 100): SyncResultIte
     auto: row.auto,
     at: Date.parse(row.createdAt) || Date.now(),
   }));
+}
+
+export function clearSyncResultsForUser(userId: number): number {
+  const db = getDb();
+  const reviewRows = db.select({ id: reviews.id }).from(reviews).where(eq(reviews.userId, userId)).all();
+  if (reviewRows.length === 0) return 0;
+
+  const result = db
+    .delete(syncResults)
+    .where(
+      inArray(
+        syncResults.reviewId,
+        reviewRows.map((row) => row.id),
+      ),
+    )
+    .run();
+
+  return result.changes ?? 0;
 }

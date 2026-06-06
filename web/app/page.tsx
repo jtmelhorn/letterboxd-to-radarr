@@ -351,6 +351,25 @@ function InfoIcon({ className }: { className?: string }) {
   );
 }
 
+function TrashIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.75}
+      viewBox="0 0 24 24"
+    >
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+    </svg>
+  );
+}
+
 function LockIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -371,10 +390,10 @@ function LockIcon({ className }: { className?: string }) {
 // ── Status badge ring class ─────────────────────────────────────────────────
 
 function posterRingClass(state: SendState): string {
-  if (state === "added") return "ring-2 ring-chartreuse/80 ring-offset-2 ring-offset-ink";
-  if (state === "error") return "ring-2 ring-rose-500/70 ring-offset-2 ring-offset-ink";
-  if (state === "loading") return "ring-2 ring-gold/50 ring-offset-2 ring-offset-ink animate-pulse";
-  return "ring-1 ring-cornsilk/5";
+  if (state === "added") return "ring-2 ring-inset ring-chartreuse/80";
+  if (state === "error") return "ring-2 ring-inset ring-rose-500/70";
+  if (state === "loading") return "ring-2 ring-inset ring-gold/50 animate-pulse";
+  return "ring-1 ring-inset ring-cornsilk/5";
 }
 
 // ── Main component ──────────────────────────────────────────────────────────
@@ -466,6 +485,17 @@ export default function Home() {
       // non-fatal
     }
   }, []);
+
+  const clearActivity = useCallback(async () => {
+    const handle = config.username.trim() || settings.reviewer.trim();
+    if (!handle) return;
+    try {
+      const res = await fetch(`/api/sync?handle=${encodeURIComponent(handle)}`, { method: "DELETE" });
+      if (res.ok) setActivityLog([]);
+    } catch {
+      // non-fatal
+    }
+  }, [config.username, settings.reviewer]);
 
   const loadReviews = useCallback(
     async (handle: string, refresh: boolean) => {
@@ -1085,7 +1115,7 @@ export default function Home() {
     <>
       {/* ── Fixed glassmorphic navigation bar ──────────────────────────────── */}
       <nav className="fixed inset-x-0 top-0 z-40 h-16 border-b border-cornsilk/5 bg-ink/70 backdrop-blur-xl transition-all duration-200">
-        <div className="mx-auto flex h-full w-full items-center justify-between gap-4 px-3 sm:px-4 lg:px-6">
+        <div className="content-shell flex h-full items-center justify-between gap-4">
           <div className="flex flex-shrink-0 items-center gap-3">
             <div className={`${brandIconCls} h-9 w-9 shadow-sm`}>
               <FilmIcon className="h-5 w-5" />
@@ -1095,36 +1125,16 @@ export default function Home() {
             </span>
           </div>
 
-          <form className="flex min-w-0 max-w-xl flex-1 items-center gap-2" onSubmit={syncFeed}>
-            <div className="relative flex-1">
-              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-cornsilk/55">
-                <UserIcon className="h-4 w-4" />
-              </span>
-              <input
-                className="h-10 w-full rounded-xl border border-cornsilk/10 bg-ink/40 pl-10 pr-4 text-sm text-cornsilk placeholder-cornsilk/40 transition-all duration-200 focus:border-gold/40 focus:outline-none focus:ring-1 focus:ring-gold"
-                placeholder="Letterboxd username"
-                value={config.username}
-                onChange={(e) => updateConfig("username", e.target.value)}
-              />
-            </div>
-
-            <button
-              className={`${primaryBtnCls} h-10 flex-shrink-0 px-5 text-sm`}
-              disabled={busy}
-              type="submit"
-            >
-              {busy ? (
-                <span className="flex items-center gap-2">
-                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-cornsilk/30 border-t-cornsilk" />
-                  {isSyncing ? "Syncing" : "Fetching"}
-                </span>
-              ) : (
-                "Sync Feed"
-              )}
-            </button>
-          </form>
-
           <div className="flex items-center gap-2">
+            <button
+              aria-label="Sync Letterboxd feed"
+              className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-cornsilk/10 bg-ink/40 text-cornsilk/60 transition-all duration-200 hover:bg-cornsilk/5 hover:text-cornsilk focus:outline-none focus:ring-1 focus:ring-cornsilk/20 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={busy}
+              onClick={() => void syncFeed()}
+              type="button"
+            >
+              <ArrowPathIcon className={`h-5 w-5 ${busy ? "animate-spin" : ""}`} />
+            </button>
             <button
               aria-label="Open sync activity"
               className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-cornsilk/10 bg-ink/40 text-cornsilk/60 transition-all duration-200 hover:bg-cornsilk/5 hover:text-cornsilk focus:outline-none focus:ring-1 focus:ring-cornsilk/20"
@@ -1172,7 +1182,7 @@ export default function Home() {
 
       {/* ── Main Dashboard Layout ────────────────────────────────────────── */}
       <main className="flex h-[100dvh] flex-col overflow-hidden pt-16">
-        <div className="mx-auto flex h-full w-full flex-col px-3 py-3 sm:px-4 lg:px-6">
+        <div className="content-shell flex h-full min-h-0 flex-col py-3">
           {movies.length === 0 && !busy && (
             <div className="animate-fade-in flex flex-1 flex-col justify-center overflow-y-auto lg:grid lg:grid-cols-12 lg:items-center lg:gap-8">
               <div className="lg:col-span-7 space-y-6 text-left">
@@ -1274,7 +1284,7 @@ export default function Home() {
                       <div className="space-y-1">
                         <h4 className="text-sm font-bold text-cornsilk">Enter Letterboxd Handle</h4>
                         <p className="text-xs text-cornsilk/60">
-                          Provide your Letterboxd username in the navigation bar to parse reviews.
+                          Set your Letterboxd username in Settings, then use the refresh button to sync.
                         </p>
                         {!isUserSetup && (
                           <div className="mt-2.5 flex max-w-xs gap-1.5">
@@ -1326,18 +1336,20 @@ export default function Home() {
           {busy && movies.length === 0 && (
             <div className="flex flex-1 flex-col gap-3 overflow-hidden">
               <div className="h-5 w-48 rounded bg-cornsilk/5 animate-pulse" />
-              <div className="poster-grid flex-1 overflow-y-auto content-start">
-                {Array.from({ length: 14 }).map((_, i) => (
-                  <div key={i} className="glass-card aspect-[2/3] rounded-xl overflow-hidden shimmer-wrapper">
-                    <div className="h-full w-full bg-ink/40 flex flex-col justify-between p-3.5">
-                      <div className="h-6 w-11 rounded bg-cornsilk/5 animate-pulse" />
-                      <div className="space-y-2">
-                        <div className="h-3 w-10 rounded bg-cornsilk/5 animate-pulse" />
-                        <div className="h-4 w-3/4 rounded bg-cornsilk/5 animate-pulse" />
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <div className="poster-grid">
+                  {Array.from({ length: 14 }).map((_, i) => (
+                    <div key={i} className="glass-card aspect-[2/3] rounded-xl overflow-hidden shimmer-wrapper">
+                      <div className="h-full w-full bg-ink/40 flex flex-col justify-between p-3.5">
+                        <div className="h-6 w-11 rounded bg-cornsilk/5 animate-pulse" />
+                        <div className="space-y-2">
+                          <div className="h-3 w-10 rounded bg-cornsilk/5 animate-pulse" />
+                          <div className="h-4 w-3/4 rounded bg-cornsilk/5 animate-pulse" />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -1521,7 +1533,8 @@ export default function Home() {
                   </p>
                 </div>
               ) : (
-                <div className="poster-grid min-h-0 flex-1 overflow-y-auto content-start pb-1 animate-fade-in">
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  <div className="poster-grid animate-fade-in">
                   {filteredMovies.map((movie) => {
                     const key = movieKey(movie);
                     const sendState = sendStates[key] ?? "idle";
@@ -1529,7 +1542,7 @@ export default function Home() {
                     return (
                       <div
                         key={key}
-                        className={`poster-card group aspect-[2/3] overflow-hidden rounded-xl bg-ink/60 text-left ${posterRingClass(sendState)}`}
+                        className={`poster-card group w-full min-h-0 aspect-[2/3] overflow-hidden rounded-xl bg-ink/60 text-left ${posterRingClass(sendState)}`}
                       >
                         <button
                           aria-label={`${movie.title} (${movie.year ?? "unknown"}) — ${movie.rating.toFixed(1)} stars`}
@@ -1556,28 +1569,18 @@ export default function Home() {
 
                           <div className="poster-gradient absolute inset-0 pointer-events-none" />
 
-                          <div className="absolute inset-x-2 top-2 flex justify-between pointer-events-none">
+                          <div className="absolute inset-x-2 top-2 flex justify-start pointer-events-none">
                             <div className="rounded-lg bg-black/60 px-2 py-0.5 backdrop-blur-md border border-cornsilk/5">
                               <span className="text-[10px] font-bold text-gold flex items-center gap-0.5">
                                 ★ {movie.rating.toFixed(1)}
                               </span>
                             </div>
+                          </div>
 
-                            {sendState === "added" && (
-                              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-chartreuse/90 shadow-md shadow-chartreuse/30 border border-chartreuse/40">
-                                <CheckIcon className="h-3 w-3 text-ink" />
-                              </div>
-                            )}
-                            {sendState === "error" && (
-                              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 shadow-md shadow-rose-500/30 border border-rose-400/20">
-                                <XIcon className="h-2.5 w-2.5 text-cornsilk" />
-                              </div>
-                            )}
-                            {sendState === "loading" && (
-                              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-gold shadow-md shadow-gold/30 border border-gold/20 animate-spin">
-                                <span className="h-2 w-2 rounded-full border-b border-ink" />
-                              </div>
-                            )}
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-3">
+                            <span className="text-center text-[10px] font-extrabold uppercase tracking-wide text-transparent transition-colors duration-200 group-hover:text-gold drop-shadow-[0_2px_12px_rgba(0,0,0,0.85)]">
+                              Click for review
+                            </span>
                           </div>
 
                           <div className="absolute inset-x-0 bottom-0 p-3.5 pointer-events-none">
@@ -1588,30 +1591,62 @@ export default function Home() {
                           </div>
                         </button>
 
-                        <div className="absolute bottom-2 right-2 z-10 opacity-0 transition-opacity duration-200 group-hover:opacity-100 pointer-events-none">
+                        <div className="absolute top-2 right-2 z-10">
                           {sendState === "loading" ? (
                             <span className="flex h-6 w-6 items-center justify-center rounded-md bg-ink/85 backdrop-blur-sm border border-cornsilk/10">
                               <span className="h-3 w-3 animate-spin rounded-full border-2 border-cornsilk/30 border-t-cornsilk" />
                             </span>
+                          ) : sendState === "idle" ? (
+                            <div className="opacity-0 transition-opacity duration-200 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto">
+                              <button
+                                aria-label="Send to Radarr"
+                                className="pointer-events-auto flex items-center gap-1 rounded-md border border-cornsilk/10 bg-ink/85 px-2 py-1 text-[9px] font-bold text-cornsilk backdrop-blur-sm transition hover:border-pine/40 hover:bg-pine hover:text-cornsilk focus:outline-none focus:ring-1 focus:ring-pine/40"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  void sendToRadarr(movie);
+                                }}
+                                type="button"
+                              >
+                                <RadarrIcon className="h-3 w-3" />
+                                Radarr
+                              </button>
+                            </div>
                           ) : (
-                            <button
-                              aria-label={sendState === "added" ? "Resend to Radarr" : "Send to Radarr"}
-                              className="pointer-events-auto flex items-center gap-1 rounded-md border border-cornsilk/10 bg-ink/85 px-2 py-1 text-[9px] font-bold text-cornsilk backdrop-blur-sm transition hover:border-pine/40 hover:bg-pine hover:text-cornsilk focus:outline-none focus:ring-1 focus:ring-pine/40"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                void sendToRadarr(movie);
-                              }}
-                              type="button"
-                            >
-                              <RadarrIcon className="h-3 w-3" />
-                              {sendState === "added" ? "Resend" : "Radarr"}
-                            </button>
+                            <div className="relative">
+                              <div className="transition-opacity duration-200 group-hover:opacity-0 group-hover:pointer-events-none">
+                                {sendState === "added" ? (
+                                  <div className="flex h-5 w-5 items-center justify-center rounded-full bg-chartreuse/90 shadow-md shadow-chartreuse/30 border border-chartreuse/40">
+                                    <CheckIcon className="h-3 w-3 text-ink" />
+                                  </div>
+                                ) : (
+                                  <div className="flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 shadow-md shadow-rose-500/30 border border-rose-400/20">
+                                    <XIcon className="h-2.5 w-2.5 text-cornsilk" />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="absolute right-0 top-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto">
+                                <button
+                                  aria-label={sendState === "added" ? "Resend to Radarr" : "Send to Radarr"}
+                                  className="pointer-events-auto flex items-center gap-1 rounded-md border border-cornsilk/10 bg-ink/85 px-2 py-1 text-[9px] font-bold text-cornsilk backdrop-blur-sm transition hover:border-pine/40 hover:bg-pine hover:text-cornsilk focus:outline-none focus:ring-1 focus:ring-pine/40"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    void sendToRadarr(movie);
+                                  }}
+                                  type="button"
+                                >
+                                  <RadarrIcon className="h-3 w-3" />
+                                  {sendState === "added" ? "Resend" : "Radarr"}
+                                </button>
+                              </div>
+                            </div>
                           )}
                         </div>
                       </div>
                     );
                   })}
+                  </div>
                 </div>
               )}
             </div>
@@ -1796,13 +1831,23 @@ export default function Home() {
                 <h2 className="text-lg font-extrabold text-cornsilk">Sync Activity</h2>
               </div>
               <div className="flex items-center gap-2">
+                {activityLog.length > 0 && (
+                  <button
+                    aria-label="Clear activity"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-cornsilk/10 bg-ink/60 text-cornsilk/60 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300"
+                    onClick={() => void clearActivity()}
+                    type="button"
+                  >
+                    <TrashIcon className="h-4 w-4" />
+                  </button>
+                )}
                 <button
                   aria-label="Refresh activity"
-                  className="h-8 rounded-lg border border-cornsilk/10 bg-ink/60 px-3 text-xs font-bold text-cornsilk/80 transition hover:bg-cornsilk/5 hover:text-cornsilk"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-cornsilk/10 bg-ink/60 text-cornsilk/60 transition hover:bg-cornsilk/5 hover:text-cornsilk"
                   onClick={() => void loadActivity(config.username.trim() || settings.reviewer.trim())}
                   type="button"
                 >
-                  Refresh
+                  <ArrowPathIcon className="h-4 w-4" />
                 </button>
                 <button
                   aria-label="Close activity"
