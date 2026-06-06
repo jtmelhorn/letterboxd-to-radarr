@@ -10,8 +10,8 @@ services:
       # Radarr 7878, Lidarr 8686, Readarr 8787, Prowlarr 9696, Bazarr 6767.
       - "3080:3000"
     environment:
-      # Letterboxd username, for example: jtmel
-      REVIEWER: "CHANGE_ME"
+      # Letterboxd username, for example: moremoviesmike
+      REVIEWER: "moremoviesmike"
       # Radarr base URL format: http://radarr.example.com:7878
       RADARR: "CHANGE_ME"
       # Radarr API key from Settings > General > Security.
