@@ -2071,22 +2071,20 @@ export default function Home() {
           >
             {isDesktop ? (
               <div className="grid grid-cols-[auto_1fr] flex-1 overflow-hidden">
-                <div className="relative w-56 self-start sm:w-64">
-                  <div className="aspect-[2/3] w-full overflow-hidden bg-ink">
-                    {activeMovie.posterUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        alt=""
-                        className="h-full w-full object-cover"
-                        src={activeMovie.posterUrl}
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-pine to-ink">
-                        <FilmIcon className="h-12 w-12 text-pine/70" />
-                      </div>
-                    )}
-                    <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-ink/80 to-transparent" />
-                  </div>
+                <div className="relative aspect-[2/3] w-56 self-start overflow-hidden bg-ink sm:w-64">
+                  {activeMovie.posterUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      alt=""
+                      className="absolute inset-0 h-full w-full object-cover"
+                      src={activeMovie.posterUrl}
+                    />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-pine to-ink">
+                      <FilmIcon className="h-12 w-12 text-pine/70" />
+                    </div>
+                  )}
+                  <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-ink/80 to-transparent" />
                 </div>
 
                 <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
