@@ -84,6 +84,19 @@ docker push registry.example.com/your-name/letterboxd-to-radarr:latest
 
 Pass secrets like `API_KEY` at runtime instead of baking them into the image.
 
+### Docker Compose
+
+Copy `.env.example` to `.env`, set your values, then start the app:
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+Open http://localhost:3080 by default, or whatever you set for `HOST_PORT`. The default host port `3080` is chosen to avoid common *arr suite ports such as Radarr (`7878`), Sonarr (`8989`), and Prowlarr (`9696`).
+
+To build the image locally instead of pulling from GitHub Container Registry, uncomment `build: .` in `docker-compose.yml`.
+
 ## Verification
 
 ```bash
