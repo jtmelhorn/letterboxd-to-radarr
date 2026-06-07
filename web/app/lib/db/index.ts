@@ -192,8 +192,8 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
 
   sqlite
     .prepare(
-      `INSERT INTO reviewer_groups (id, name, auto_threshold)
-       SELECT 1, 'All reviewers', COALESCE((SELECT auto_threshold FROM radarr_targets WHERE id = 1), 4)
+      `INSERT INTO reviewer_groups (id, name, auto_threshold, filters_json)
+       SELECT 1, 'All reviewers', 4, '{"year":{"mode":"any"},"genres":{"include":[],"exclude":[]}}'
        WHERE NOT EXISTS (SELECT 1 FROM reviewer_groups WHERE id = 1)`,
     )
     .run();

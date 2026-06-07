@@ -100,10 +100,12 @@ describe("SyncConfigurationPanel", () => {
     await user.selectOptions(scope.getByLabelText("Release year filter"), "between");
     await user.type(scope.getByLabelText("Minimum year"), "1990");
     await user.type(scope.getByLabelText("Maximum year"), "2010");
-    await user.type(scope.getByLabelText("Included genres"), "Horror");
-    await user.click(scope.getAllByRole("button", { name: "Add" })[0]);
-    await user.type(scope.getByLabelText("Excluded genres"), "Documentary");
-    await user.click(scope.getAllByRole("button", { name: "Add" })[1]);
+    await user.click(scope.getByLabelText("Included genres"));
+    await user.click(scope.getByLabelText("Horror"));
+    await user.click(scope.getByRole("button", { name: "Done" }));
+    await user.click(scope.getByLabelText("Excluded genres"));
+    await user.click(scope.getByLabelText("Documentary"));
+    await user.click(scope.getByRole("button", { name: "Done" }));
     await user.click(scope.getByRole("button", { name: "Save group" }));
 
     expect(props.onSaveGroup).toHaveBeenCalledWith(
@@ -128,6 +130,7 @@ describe("SyncConfigurationPanel", () => {
 
     await user.selectOptions(scope.getByLabelText("Release year filter"), "exact");
     expect(scope.getByLabelText("Exact year")).toBeInTheDocument();
+    expect(scope.getByLabelText("Exact year")).toHaveValue(String(new Date().getFullYear()));
 
     await user.selectOptions(scope.getByLabelText("Release year filter"), "between");
     expect(scope.getByLabelText("Minimum year")).toBeInTheDocument();
@@ -149,20 +152,24 @@ describe("SyncConfigurationPanel", () => {
     expect(props.onSaveGroup).not.toHaveBeenCalled();
   });
 
-  it("can add and remove included and excluded genres", async () => {
+  it("can select and remove included and excluded genres from multi-select dropdowns", async () => {
     const user = userEvent.setup();
     renderPanel();
     const favorites = screen.getByLabelText("Favorites group name").closest("article");
     const scope = within(favorites as HTMLElement);
 
-    await user.type(scope.getByLabelText("Included genres"), "Horror");
-    await user.click(scope.getAllByRole("button", { name: "Add" })[0]);
+    await user.click(scope.getByLabelText("Included genres"));
+    await user.click(scope.getByLabelText("Horror"));
+    await user.click(scope.getByLabelText("Thriller"));
+    await user.click(scope.getByRole("button", { name: "Done" }));
     expect(scope.getByText("Horror")).toBeInTheDocument();
+    expect(scope.getByText("Thriller")).toBeInTheDocument();
     await user.click(scope.getByRole("button", { name: "Remove Horror from included genres" }));
     expect(scope.queryByText("Horror")).not.toBeInTheDocument();
 
-    await user.type(scope.getByLabelText("Excluded genres"), "Documentary");
-    await user.click(scope.getAllByRole("button", { name: "Add" })[1]);
+    await user.click(scope.getByLabelText("Excluded genres"));
+    await user.click(scope.getByLabelText("Documentary"));
+    await user.click(scope.getByRole("button", { name: "Done" }));
     expect(scope.getByText("Documentary")).toBeInTheDocument();
     await user.click(scope.getByRole("button", { name: "Remove Documentary from excluded genres" }));
     expect(scope.queryByText("Documentary")).not.toBeInTheDocument();
@@ -181,5 +188,17 @@ describe("SyncConfigurationPanel", () => {
 
     const legacy = screen.getByLabelText("Legacy empty group name").closest("article");
     expect(within(legacy as HTMLElement).getByLabelText("Release year filter")).toHaveValue("any");
+  });
+
+  it("shows the All reviewers defaults as any year, four stars, and no genre filters", () => {
+    renderPanel();
+
+    const allReviewers = screen.getByLabelText("All reviewers group name").closest("article");
+    const scope = within(allReviewers as HTMLElement);
+
+    expect(scope.getByLabelText("Release year filter")).toHaveValue("any");
+    expect(scope.getByDisplayValue("Avg >= 4.0 stars")).toBeInTheDocument();
+    expect(scope.getByLabelText("Included genres")).toHaveTextContent("Select included genres");
+    expect(scope.getByLabelText("Excluded genres")).toHaveTextContent("Select excluded genres");
   });
 });

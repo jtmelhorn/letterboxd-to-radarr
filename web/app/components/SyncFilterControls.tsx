@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   MAX_SYNC_YEAR,
@@ -38,6 +38,7 @@ const inputCls =
 const selectCls = `${inputCls} appearance-none`;
 const labelCls = "text-[10px] font-bold uppercase tracking-wider text-cornsilk/55";
 const helperCls = "text-[11px] leading-relaxed text-cornsilk/50";
+const currentYear = String(new Date().getFullYear());
 
 const yearModeOptions: Array<{ value: SyncYearFilterMode; label: string }> = [
   { value: "any", label: "Any year" },
@@ -126,7 +127,16 @@ function removeGenre(values: string[], raw: string): string[] {
   return values.filter((value) => normalizeGenreKey(value) !== key);
 }
 
-function GenrePicker({
+function toggleGenre(values: string[], raw: string): string[] {
+  const key = normalizeGenreKey(raw);
+  if (!key) return values;
+  if (values.some((value) => normalizeGenreKey(value) === key)) {
+    return removeGenre(values, raw);
+  }
+  return addGenre(values, raw);
+}
+
+function MultiGenreDropdown({
   label,
   helper,
   values,
@@ -141,58 +151,91 @@ function GenrePicker({
   tone: "include" | "exclude";
   onChange: (values: string[]) => void;
 }) {
-  const id = useId();
-  const [input, setInput] = useState("");
-  const normalizedOptions = useMemo(() => {
-    const selected = new Set(values.map(normalizeGenreKey));
-    return options.filter((option) => !selected.has(normalizeGenreKey(option)));
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const availableOptions = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const option of [...options, ...values]) {
+      const label = normalizeGenreLabel(option);
+      const key = normalizeGenreKey(label);
+      if (key) labels.set(key, label);
+    }
+    return Array.from(labels.values()).sort((a, b) => a.localeCompare(b));
   }, [options, values]);
+  const filteredOptions = useMemo(() => {
+    const normalizedQuery = normalizeGenreKey(query);
+    if (!normalizedQuery) return availableOptions;
+    return availableOptions.filter((option) => normalizeGenreKey(option).includes(normalizedQuery));
+  }, [availableOptions, query]);
+  const selectedKeys = useMemo(() => new Set(values.map(normalizeGenreKey)), [values]);
   const chipTone =
     tone === "include"
       ? "border-pine/20 bg-pine/10 text-chartreuse"
       : "border-gold/20 bg-gold/10 text-gold";
-
-  function commitGenre() {
-    const next = addGenre(values, input);
-    if (next !== values) onChange(next);
-    setInput("");
-  }
+  const dropdownTone = tone === "include" ? "focus:ring-pine/25" : "focus:ring-gold/25";
+  const summary =
+    values.length === 0
+      ? `Select ${tone === "include" ? "included" : "excluded"} genres`
+      : `${values.length} selected`;
 
   return (
-    <div className="space-y-2">
-      <label className="space-y-1" htmlFor={id}>
+    <div className="relative space-y-2">
+      <div className="space-y-1">
         <span className={labelCls}>{label}</span>
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+        <button
+          aria-expanded={isOpen}
+          aria-label={label}
+          className={`min-h-10 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 py-2 text-left text-xs font-bold leading-snug text-cornsilk/75 transition hover:border-white/20 hover:bg-white/[0.05] focus:border-pine/60 focus:outline-none focus:ring-2 ${dropdownTone}`}
+          type="button"
+          onClick={() => setIsOpen((current) => !current)}
+        >
+          <span className="block whitespace-normal">{summary}</span>
+        </button>
+      </div>
+      <p className={helperCls}>{helper}</p>
+
+      {isOpen && (
+        <div className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-ink p-2 shadow-2xl">
           <input
+            aria-label={`Search ${label.toLowerCase()}`}
             className={inputCls}
-            id={id}
-            list={`${id}-options`}
-            placeholder="Search or type a genre"
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                commitGenre();
-              }
-            }}
+            placeholder="Search genres"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
           />
+          <div className="mt-2 max-h-48 overflow-y-auto pr-1">
+            {filteredOptions.map((option) => {
+              const key = normalizeGenreKey(option);
+              const checked = selectedKeys.has(key);
+              return (
+                <label
+                  key={option}
+                  className="flex cursor-pointer items-center gap-2 rounded-[var(--radius-control)] px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]"
+                >
+                  <input
+                    checked={checked}
+                    className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                    type="checkbox"
+                    onChange={() => onChange(toggleGenre(values, option))}
+                  />
+                  <span className="min-w-0 flex-1 whitespace-normal leading-snug">{option}</span>
+                </label>
+              );
+            })}
+            {filteredOptions.length === 0 && (
+              <p className="px-2 py-3 text-xs font-semibold text-cornsilk/45">No matching genres.</p>
+            )}
+          </div>
           <button
-            className="h-9 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/70 transition hover:border-pine/30 hover:bg-pine/10 hover:text-pine disabled:cursor-not-allowed disabled:opacity-45"
-            disabled={!input.trim()}
+            className="mt-2 h-8 w-full rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/70 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-cornsilk"
             type="button"
-            onClick={commitGenre}
+            onClick={() => setIsOpen(false)}
           >
-            Add
+            Done
           </button>
         </div>
-      </label>
-      <datalist id={`${id}-options`}>
-        {normalizedOptions.map((option) => (
-          <option key={option} value={option} />
-        ))}
-      </datalist>
-      <p className={helperCls}>{helper}</p>
+      )}
+
       <div className="flex min-h-8 flex-wrap gap-2">
         {values.map((genre) => (
           <span
@@ -220,6 +263,12 @@ export function SyncFilterControls({ draft, error, genreOptions, onChange }: Syn
   const updateYear = (update: Partial<SyncFilterDraft["year"]>) => {
     onChange({ ...draft, year: { ...draft.year, ...update } });
   };
+  const updateYearMode = (mode: SyncYearFilterMode) => {
+    updateYear({
+      mode,
+      exactYear: mode === "exact" && !draft.year.exactYear.trim() ? currentYear : draft.year.exactYear,
+    });
+  };
 
   return (
     <div className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 p-3">
@@ -235,7 +284,7 @@ export function SyncFilterControls({ draft, error, genreOptions, onChange }: Syn
             <select
               className={selectCls}
               value={draft.year.mode}
-              onChange={(event) => updateYear({ mode: event.target.value as SyncYearFilterMode })}
+              onChange={(event) => updateYearMode(event.target.value as SyncYearFilterMode)}
             >
               {yearModeOptions.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -253,7 +302,7 @@ export function SyncFilterControls({ draft, error, genreOptions, onChange }: Syn
                 inputMode="numeric"
                 max={MAX_SYNC_YEAR}
                 min={MIN_SYNC_YEAR}
-                placeholder="2026"
+                placeholder={currentYear}
                 type="text"
                 value={draft.year.exactYear}
                 onChange={(event) => updateYear({ exactYear: event.target.value })}
@@ -326,7 +375,7 @@ export function SyncFilterControls({ draft, error, genreOptions, onChange }: Syn
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <GenrePicker
+          <MultiGenreDropdown
             helper="Included genres limit syncing to movies matching at least one selected genre."
             label="Included genres"
             options={genreOptions}
@@ -334,7 +383,7 @@ export function SyncFilterControls({ draft, error, genreOptions, onChange }: Syn
             values={draft.genres.include}
             onChange={(include) => onChange({ ...draft, genres: { ...draft.genres, include } })}
           />
-          <GenrePicker
+          <MultiGenreDropdown
             helper="Excluded genres prevent matching movies from syncing."
             label="Excluded genres"
             options={genreOptions}
