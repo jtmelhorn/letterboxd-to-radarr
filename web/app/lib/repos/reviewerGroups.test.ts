@@ -32,6 +32,95 @@ afterEach(() => {
 });
 
 describeWithSqlite("reviewer group filters", () => {
+  it("marks the default group explicitly and allows it to be disabled", async () => {
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { deleteReviewerGroup, getReviewerGroup, upsertReviewerGroup } = await import(
+      "@/app/lib/repos/reviewerGroups"
+    );
+
+    getOrCreateUser("alice");
+
+    const initial = getReviewerGroup(1);
+    expect(initial).toMatchObject({
+      id: 1,
+      name: "All reviewers",
+      enabled: true,
+      isDefault: true,
+      reviewerHandles: ["alice"],
+    });
+
+    upsertReviewerGroup({
+      id: 1,
+      name: "All reviewers",
+      enabled: false,
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: false,
+      reviewerHandles: [],
+    });
+
+    expect(getReviewerGroup(1)).toMatchObject({ enabled: false, isDefault: true });
+    expect(() => deleteReviewerGroup(1)).toThrow("The default reviewer group cannot be deleted.");
+  });
+
+  it("persists enabled state for custom groups", async () => {
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { getReviewerGroup, upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+
+    getOrCreateUser("alice");
+    const saved = upsertReviewerGroup({
+      name: "Paused",
+      enabled: false,
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: false,
+      reviewerHandles: ["alice"],
+    });
+
+    expect(saved).toMatchObject({ enabled: false, isDefault: false });
+    expect(getReviewerGroup(saved.id)).toMatchObject({ enabled: false, reviewerHandles: ["alice"] });
+  });
+
+  it("only lists enabled non-manual groups as schedulable", async () => {
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { listSchedulableReviewerGroups, upsertReviewerGroup } = await import(
+      "@/app/lib/repos/reviewerGroups"
+    );
+
+    getOrCreateUser("alice");
+    upsertReviewerGroup({
+      name: "Disabled",
+      enabled: false,
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: false,
+      reviewerHandles: ["alice"],
+    });
+    upsertReviewerGroup({
+      name: "Manual",
+      enabled: true,
+      ratingThreshold: 4,
+      syncInterval: "manual",
+      requiresManualApproval: false,
+      reviewerHandles: ["alice"],
+    });
+    upsertReviewerGroup({
+      name: "Daily",
+      enabled: true,
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: false,
+      reviewerHandles: ["alice"],
+    });
+
+    const names = listSchedulableReviewerGroups().map((group) => group.name);
+
+    expect(names).toContain("All reviewers");
+    expect(names).toContain("Daily");
+    expect(names).not.toContain("Disabled");
+    expect(names).not.toContain("Manual");
+  });
+
   it("persists filters and returns empty filters for existing defaults", async () => {
     const { getOrCreateUser } = await import("@/app/lib/repos/users");
     const { getReviewerGroup, upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");

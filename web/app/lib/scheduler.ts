@@ -1,7 +1,7 @@
 import cron from "node-cron";
 
 import { getConfiguredReviewer } from "@/app/lib/config";
-import { listEnabledReviewerGroups } from "@/app/lib/repos/reviewerGroups";
+import { listSchedulableReviewerGroups } from "@/app/lib/repos/reviewerGroups";
 import { getOrCreateUser } from "@/app/lib/repos/users";
 import { runSyncScope } from "@/app/lib/sync";
 
@@ -35,7 +35,7 @@ function seedConfiguredReviewer(): void {
 
 async function runScheduledSync(): Promise<void> {
   seedConfiguredReviewer();
-  const groups = listEnabledReviewerGroups();
+  const groups = listSchedulableReviewerGroups();
   for (const group of groups) {
     try {
       const summary = await runSyncScope(
@@ -55,7 +55,7 @@ async function runScheduledSync(): Promise<void> {
 
 async function runScheduledInterval(interval: keyof typeof intervalSchedules): Promise<void> {
   seedConfiguredReviewer();
-  const groups = listEnabledReviewerGroups().filter((group) => group.syncInterval === interval);
+  const groups = listSchedulableReviewerGroups().filter((group) => group.syncInterval === interval);
   for (const group of groups) {
     try {
       const summary = await runSyncScope(

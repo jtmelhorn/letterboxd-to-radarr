@@ -275,6 +275,7 @@ export function SyncFilterControls({ draft, error, genreOptions, onChange }: Syn
       <div className="mb-3 space-y-1">
         <p className={labelCls}>Movie filters</p>
         <p className={helperCls}>Filters apply before approvals or Radarr adds for this group.</p>
+        <p className={helperCls}>Genre filters require a movie metadata lookup during sync.</p>
       </div>
 
       <div className="space-y-4">

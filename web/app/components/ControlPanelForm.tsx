@@ -8,7 +8,6 @@ export interface SettingsDraft {
   radarrUrl: string;
   radarrApiKey: string;
   autoThreshold: number;
-  autoFetchMetadata: boolean;
   qualityProfileId: number | "";
   rootFolderPath: string;
 }
@@ -363,52 +362,33 @@ export function ControlPanelForm({
         </div>
       </SectionCard>
 
-      <SectionCard
-        description="This threshold controls automatic Radarr adds from the scheduler and Sync Feed."
-        title="Automation"
-      >
-        <div className="space-y-2">
-          <FieldLabel htmlFor={`${idPrefix}-auto-threshold`}>Auto-download threshold</FieldLabel>
-          <div className="relative">
-            <select
-              className={selectCls}
-              id={`${idPrefix}-auto-threshold`}
-              value={settingsDraft.autoThreshold}
-              onChange={(e) =>
-                onDraftChange((current) => ({ ...current, autoThreshold: Number(e.target.value) }))
-              }
-            >
-              <option value={-1}>Disable automatic syncing</option>
-              {ratingOptions.map((rating) => (
-                <option key={rating} value={rating}>
-                  Sync rated ≥ {rating.toFixed(1)} ★
-                </option>
-              ))}
-            </select>
-            <SelectChevron />
+      {isSetup && (
+        <SectionCard
+          description="Sets the starting threshold for the default All reviewers group. You can change or disable that group later in Sync Configuration."
+          title="Initial All reviewers group"
+        >
+          <div className="space-y-2">
+            <FieldLabel htmlFor={`${idPrefix}-auto-threshold`}>Auto-sync threshold</FieldLabel>
+            <div className="relative">
+              <select
+                className={selectCls}
+                id={`${idPrefix}-auto-threshold`}
+                value={settingsDraft.autoThreshold}
+                onChange={(e) =>
+                  onDraftChange((current) => ({ ...current, autoThreshold: Number(e.target.value) }))
+                }
+              >
+                {ratingOptions.map((rating) => (
+                  <option key={rating} value={rating}>
+                    Sync rated ≥ {rating.toFixed(1)} ★
+                  </option>
+                ))}
+              </select>
+              <SelectChevron />
+            </div>
           </div>
-        </div>
-
-        <label className="flex cursor-pointer items-start gap-3 rounded-[var(--radius-control)] border border-white/10 bg-black/15 p-3">
-          <input
-            checked={settingsDraft.autoFetchMetadata}
-            className="mt-0.5 h-4 w-4 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-            type="checkbox"
-            onChange={(e) =>
-              onDraftChange((current) => ({ ...current, autoFetchMetadata: e.target.checked }))
-            }
-          />
-          <span>
-            <span className="block text-sm font-semibold text-cornsilk">
-              Auto-fetch genres during RSS sync
-            </span>
-            <span className={helperCls}>
-              Uses your existing Radarr lookup for movies and public TVmaze lookup only for TV-style
-              entries. No separate TMDB, OMDb, or IMDb API key is required.
-            </span>
-          </span>
-        </label>
-      </SectionCard>
+        </SectionCard>
+      )}
 
       <Alert tone="info">
         <p className="font-semibold text-cornsilk">Storage and security</p>

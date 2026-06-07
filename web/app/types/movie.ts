@@ -78,6 +78,8 @@ export interface LegacySyncFilters {
 export interface ReviewerGroupDto {
   id: number;
   name: string;
+  enabled: boolean;
+  isDefault: boolean;
   /** @deprecated Use ratingThreshold. */
   autoThreshold: number;
   ratingThreshold: number;
@@ -162,7 +164,6 @@ export interface ResolvedRadarrTarget {
   minAvailability: string;
   autoThreshold: number;
   monitored: boolean;
-  autoFetchMetadata: boolean;
 }
 
 export interface SettingsUpdate {
@@ -174,7 +175,6 @@ export interface SettingsUpdate {
   minAvailability?: string;
   autoThreshold?: number;
   monitored?: boolean;
-  autoFetchMetadata?: boolean;
 }
 
 export interface PublicSettings {
@@ -187,7 +187,6 @@ export interface PublicSettings {
   minAvailability: string;
   autoThreshold: number;
   monitored: boolean;
-  autoFetchMetadata: boolean;
   dataDir: string;
   authEnabled: boolean;
   setupComplete: boolean;

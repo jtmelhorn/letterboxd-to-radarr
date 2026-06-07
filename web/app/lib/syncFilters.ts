@@ -249,6 +249,11 @@ export function normalizeSyncFilters(value: unknown): SyncFilters {
   return normalizeLenient(value);
 }
 
+export function syncFiltersNeedGenreMetadata(value: unknown): boolean {
+  const filters = normalizeSyncFilters(value);
+  return filters.genres.include.length > 0 || filters.genres.exclude.length > 0;
+}
+
 export function parseSyncFiltersJson(value: string | null | undefined): SyncFilters {
   if (!value) return cloneFilters(EMPTY_SYNC_FILTERS);
   try {

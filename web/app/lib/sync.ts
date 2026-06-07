@@ -9,15 +9,17 @@ import { createPendingApproval } from "@/app/lib/repos/pendingApprovals";
 import { getReviewRows, upsertReviews } from "@/app/lib/repos/reviews";
 import {
   DEFAULT_REVIEWER_GROUP_ID,
+  groupCoversReviewer,
   getReviewerGroup,
   listReviewerGroups,
 } from "@/app/lib/repos/reviewerGroups";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
 import { getRecentSyncResults, recordSyncResult } from "@/app/lib/repos/syncResults";
 import { findUser, getOrCreateUser, listUsers } from "@/app/lib/repos/users";
-import { evaluateSyncFilters } from "@/app/lib/syncFilters";
+import { evaluateSyncFilters, syncFiltersNeedGenreMetadata } from "@/app/lib/syncFilters";
 import type {
   AggregatedMovieDto,
+  ReviewerGroupDto,
   ReviewerScope,
   ResolvedRadarrTarget,
   SyncRunSummary,
@@ -75,44 +77,101 @@ function scopeKey(scope: ReviewerScope): string {
   return "all";
 }
 
-function handlesForScope(scope: ReviewerScope): string[] {
-  if (scope.type === "reviewer" && scope.reviewer) {
-    return [scope.reviewer.trim().toLowerCase()].filter(Boolean);
-  }
-  if (scope.type === "group" && typeof scope.groupId === "number") {
-    return getReviewerGroup(scope.groupId)?.reviewerHandles ?? [];
-  }
-  return listUsers().map((user) => user.handle);
+function emptySummary(threshold: number): SyncRunSummary {
+  return {
+    fetched: 0,
+    added: 0,
+    exists: 0,
+    failed: 0,
+    pending: 0,
+    skipped: 0,
+    threshold,
+    results: getRecentSyncResults(undefined, 100),
+  };
 }
 
-function thresholdForScope(scope: ReviewerScope, explicit?: number): number {
-  if (typeof explicit === "number") return explicit;
+function handlesForGroup(group: ReviewerGroupDto): string[] {
+  if (group.isDefault) {
+    return listUsers().map((user) => user.handle);
+  }
+  return group.reviewerHandles;
+}
+
+function fallbackThresholdForScope(scope: ReviewerScope): number {
   if (scope.type === "group" && typeof scope.groupId === "number") {
     return getReviewerGroup(scope.groupId)?.ratingThreshold ?? -1;
   }
-  return listReviewerGroups()[0]?.ratingThreshold ?? getRadarrTarget().autoThreshold;
+  return getReviewerGroup(DEFAULT_REVIEWER_GROUP_ID)?.ratingThreshold ?? getRadarrTarget().autoThreshold;
 }
 
-function filterGroupForScope(scope: ReviewerScope) {
-  if (scope.type === "group" && typeof scope.groupId === "number") {
-    return getReviewerGroup(scope.groupId);
-  }
-  if (scope.type === "all") {
-    return getReviewerGroup(DEFAULT_REVIEWER_GROUP_ID);
-  }
-  return null;
-}
-
-async function refreshHandles(handles: string[]): Promise<number> {
+async function refreshHandles(
+  handles: string[],
+  options: { fetchMetadata?: boolean } = {},
+): Promise<number> {
   let fetched = 0;
   for (const handle of handles) {
     const user = getOrCreateUser(handle);
     const movies = await fetchLetterboxdReviews(handle);
     upsertReviews(user.id, movies);
-    await enrichReviewsWithMetadata(getReviewRows(user.id));
+    if (options.fetchMetadata) {
+      await enrichReviewsWithMetadata(getReviewRows(user.id));
+    }
     fetched += movies.length;
   }
   return fetched;
+}
+
+interface GroupSyncRun {
+  group: ReviewerGroupDto;
+  handles: string[];
+  aggregationScope: ReviewerScope;
+}
+
+function syncRunsForScope(scope: ReviewerScope): GroupSyncRun[] {
+  if (scope.type === "group" && typeof scope.groupId === "number") {
+    const group = getReviewerGroup(scope.groupId);
+    if (!group?.enabled) return [];
+    const handles = handlesForGroup(group);
+    return handles.length > 0 ? [{ group, handles, aggregationScope: { type: "group", groupId: group.id } }] : [];
+  }
+
+  if (scope.type === "reviewer" && scope.reviewer) {
+    const handle = scope.reviewer.trim().toLowerCase();
+    if (!handle) return [];
+    return listReviewerGroups()
+      .filter((group) => group.enabled && groupCoversReviewer(group, handle))
+      .map(
+        (group): GroupSyncRun => ({
+          group,
+          handles: [handle],
+          aggregationScope: { type: "reviewer", reviewer: handle },
+        }),
+      );
+  }
+
+  return listReviewerGroups()
+    .filter((group) => group.enabled)
+    .map(
+      (group): GroupSyncRun => ({
+        group,
+        handles: handlesForGroup(group),
+        aggregationScope: { type: "group", groupId: group.id },
+      }),
+    )
+    .filter((run) => run.handles.length > 0);
+}
+
+function combineSummaries(summaries: SyncRunSummary[], threshold: number): SyncRunSummary {
+  return {
+    fetched: summaries.reduce((sum, item) => sum + item.fetched, 0),
+    added: summaries.reduce((sum, item) => sum + item.added, 0),
+    exists: summaries.reduce((sum, item) => sum + item.exists, 0),
+    failed: summaries.reduce((sum, item) => sum + item.failed, 0),
+    pending: summaries.reduce((sum, item) => sum + (item.pending ?? 0), 0),
+    skipped: summaries.reduce((sum, item) => sum + (item.skipped ?? 0), 0),
+    threshold,
+    results: getRecentSyncResults(undefined, 100),
+  };
 }
 
 // Single-flight: collapse concurrent syncs for the same reviewer/scope.
@@ -122,10 +181,36 @@ async function executeSyncScope(
   scope: ReviewerScope,
   options: SyncOptions,
 ): Promise<SyncRunSummary> {
-  const handles = handlesForScope(scope);
-  const fetched = await refreshHandles(handles);
+  const runs = syncRunsForScope(scope);
+  const threshold = typeof options.threshold === "number" ? options.threshold : fallbackThresholdForScope(scope);
+  if (runs.length === 0) {
+    return emptySummary(threshold);
+  }
+  if (runs.length > 1) {
+    const summaries: SyncRunSummary[] = [];
+    for (const run of runs) {
+      summaries.push(await executeGroupSync(run, options));
+    }
+    return combineSummaries(summaries, threshold);
+  }
+
+  return executeGroupSync(runs[0], options);
+}
+
+async function executeGroupSync(
+  run: GroupSyncRun,
+  options: SyncOptions,
+): Promise<SyncRunSummary> {
+  const { group } = run;
+  const threshold = typeof options.threshold === "number" ? options.threshold : group.ratingThreshold;
+  if (options.auto && group.syncInterval === "manual") {
+    return emptySummary(threshold);
+  }
+
+  const fetched = await refreshHandles(run.handles, {
+    fetchMetadata: syncFiltersNeedGenreMetadata(group.filters),
+  });
   const target = getRadarrTarget();
-  const threshold = thresholdForScope(scope, options.threshold);
 
   const summary: SyncRunSummary = {
     fetched,
@@ -139,17 +224,14 @@ async function executeSyncScope(
   };
 
   const radarrConfigured = Boolean(target.baseUrl && target.apiKey);
-  const automationDisabled = options.auto && threshold === -1;
+  const automationDisabled = threshold === -1;
 
   if (!radarrConfigured || automationDisabled) {
     summary.results = getRecentSyncResults(undefined, 100);
     return summary;
   }
 
-  const group =
-    scope.type === "group" && typeof scope.groupId === "number" ? getReviewerGroup(scope.groupId) : null;
-  const filterGroup = filterGroupForScope(scope);
-  const candidates = getAggregatedMovies(scope).filter((movie) => {
+  const candidates = getAggregatedMovies(run.aggregationScope).filter((movie) => {
     if (movie.averageRating < threshold) return false;
     if (options.force) return true;
     return movie.status !== "added" && movie.status !== "exists";
@@ -159,9 +241,7 @@ async function executeSyncScope(
   for (const movie of candidates) {
     const representativeReview = movie.reviews[0];
     if (!representativeReview) continue;
-    const filterResult = filterGroup
-      ? evaluateSyncFilters(movie, filterGroup.filters)
-      : { allowed: true, reasons: [] };
+    const filterResult = evaluateSyncFilters(movie, group.filters);
     if (filterResult.allowed) {
       allowedCandidates.push(movie);
       continue;
@@ -170,7 +250,7 @@ async function executeSyncScope(
     recordSyncResult({
       reviewId: representativeReview.id,
       status: "skipped",
-      message: `Skipped: ${filterResult.reasons.join("; ")} (${filterGroup?.name ?? "sync"} filters).`,
+      message: `Skipped: ${filterResult.reasons.join("; ")} (${group.name} filters).`,
       auto: options.auto,
     });
     summary.skipped = (summary.skipped ?? 0) + 1;
@@ -259,9 +339,12 @@ export function runSync(handle: string, options: SyncOptions): Promise<SyncRunSu
   return runSyncScope({ type: "reviewer", reviewer: handle }, options);
 }
 
-export async function refreshReviewer(handle: string): Promise<number> {
+export async function refreshReviewer(
+  handle: string,
+  options: { fetchMetadata?: boolean } = {},
+): Promise<number> {
   if (!findUser(handle)) {
     getOrCreateUser(handle);
   }
-  return refreshHandles([handle]);
+  return refreshHandles([handle], options);
 }

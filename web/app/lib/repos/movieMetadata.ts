@@ -250,7 +250,6 @@ export async function enrichReviewsWithMetadata(
   const force = options.force ?? false;
   const target = getRadarrTarget();
   if (!target.baseUrl || !target.apiKey) return;
-  if (!target.autoFetchMetadata && !force) return;
 
   const uniqueRows = new Map<string, ReviewRow>();
   for (const row of rows) {

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateSyncFilters,
   normalizeSyncFilters,
+  syncFiltersNeedGenreMetadata,
   validateSyncFilters,
 } from "@/app/lib/syncFilters";
 
@@ -161,5 +162,21 @@ describe("sync filters", () => {
       year: { mode: "exact", exactYear: 2026 },
       genres: { include: [], exclude: ["Documentary", "Short"] },
     });
+  });
+
+  it("detects when group filters require genre metadata", () => {
+    expect(
+      syncFiltersNeedGenreMetadata({
+        year: { mode: "exact", exactYear: 2026 },
+        genres: { include: [], exclude: [] },
+      }),
+    ).toBe(false);
+
+    expect(
+      syncFiltersNeedGenreMetadata({
+        year: { mode: "any" },
+        genres: { include: ["Action"], exclude: [] },
+      }),
+    ).toBe(true);
   });
 });

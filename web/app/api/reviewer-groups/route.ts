@@ -15,6 +15,7 @@ export const runtime = "nodejs";
 interface ReviewerGroupRequestBody {
   id?: unknown;
   name?: unknown;
+  enabled?: unknown;
   autoThreshold?: unknown;
   ratingThreshold?: unknown;
   syncInterval?: unknown;
@@ -26,6 +27,7 @@ interface ReviewerGroupRequestBody {
 function parseGroupBody(body: ReviewerGroupRequestBody) {
   const id = typeof body.id === "number" ? body.id : undefined;
   const name = typeof body.name === "string" ? body.name : "";
+  const enabled = typeof body.enabled === "boolean" ? body.enabled : undefined;
   const ratingThreshold =
     typeof body.ratingThreshold === "number"
       ? body.ratingThreshold
@@ -41,7 +43,16 @@ function parseGroupBody(body: ReviewerGroupRequestBody) {
     ? body.reviewerHandles.filter((h): h is string => typeof h === "string")
     : [];
 
-  return { id, name, ratingThreshold, syncInterval, requiresManualApproval, filters: body.filters, reviewerHandles };
+  return {
+    id,
+    name,
+    enabled,
+    ratingThreshold,
+    syncInterval,
+    requiresManualApproval,
+    filters: body.filters,
+    reviewerHandles,
+  };
 }
 
 export async function GET(request: Request) {

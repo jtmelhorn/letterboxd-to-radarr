@@ -137,6 +137,8 @@ describeWithSqlite("sync filtering", () => {
     );
 
     const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { getDb } = await import("@/app/lib/db");
+    const { radarrTargets } = await import("@/app/lib/db/schema");
     const { getReviewRows } = await import("@/app/lib/repos/reviews");
     const { upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
     const { saveSettings } = await import("@/app/lib/repos/settings");
@@ -148,8 +150,8 @@ describeWithSqlite("sync filtering", () => {
       radarrApiKey: "secret",
       qualityProfileId: 1,
       rootFolderPath: "/movies",
-      autoFetchMetadata: true,
     });
+    getDb().update(radarrTargets).set({ autoFetchMetadata: false }).run();
     const group = upsertReviewerGroup({
       name: "2026 no docs",
       ratingThreshold: 4,
@@ -190,5 +192,88 @@ describeWithSqlite("sync filtering", () => {
 
     expect(response.status).toBe(200);
     expect(addCalls).toBe(1);
+  });
+
+  it("does not fetch or sync a disabled group", async () => {
+    const fetchSpy = vi.fn(async () => Response.json({ message: "Unexpected request" }, { status: 500 }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+    const { runSyncScope } = await import("@/app/lib/sync");
+
+    getOrCreateUser("alice");
+    const group = upsertReviewerGroup({
+      name: "Paused",
+      enabled: false,
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: false,
+      reviewerHandles: ["alice"],
+    });
+
+    const summary = await runSyncScope({ type: "group", groupId: group.id }, { auto: true });
+
+    expect(summary.fetched).toBe(0);
+    expect(summary.added).toBe(0);
+    expect(summary.pending).toBe(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("skips metadata lookup when enabled group filters do not use genres", async () => {
+    let lookupCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const request = input instanceof Request ? input : null;
+        const url = request?.url ?? String(input);
+        const method = init?.method ?? request?.method ?? "GET";
+
+        if (url === "https://letterboxd.com/alice/rss/") {
+          return new Response(rss, {
+            status: 200,
+            headers: { "Content-Type": "application/rss+xml" },
+          });
+        }
+
+        if (url.startsWith("http://radarr.local/api/v3/movie/lookup")) {
+          lookupCalls += 1;
+          return Response.json([]);
+        }
+
+        return Response.json({ message: `Unexpected request: ${method} ${url}` }, { status: 500 });
+      }),
+    );
+
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+    const { saveSettings } = await import("@/app/lib/repos/settings");
+    const { runSyncScope } = await import("@/app/lib/sync");
+
+    getOrCreateUser("alice");
+    saveSettings({
+      radarrUrl: "http://radarr.local",
+      radarrApiKey: "secret",
+      qualityProfileId: 1,
+      rootFolderPath: "/movies",
+    });
+    const group = upsertReviewerGroup({
+      name: "Future only",
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: true,
+      filters: {
+        year: { mode: "exact", exactYear: 2026 },
+        genres: { include: [], exclude: [] },
+      },
+      reviewerHandles: ["alice"],
+    });
+
+    const summary = await runSyncScope({ type: "group", groupId: group.id }, { auto: true });
+
+    expect(summary.fetched).toBe(3);
+    expect(summary.pending).toBe(2);
+    expect(summary.skipped).toBe(1);
+    expect(lookupCalls).toBe(0);
   });
 });

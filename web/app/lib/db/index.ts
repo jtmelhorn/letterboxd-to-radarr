@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS reviewer_groups (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
+  enabled INTEGER NOT NULL DEFAULT 1,
   auto_threshold REAL NOT NULL DEFAULT 4,
   sync_interval TEXT NOT NULL DEFAULT '1d',
   requires_manual_approval INTEGER NOT NULL DEFAULT 0,
@@ -134,11 +135,13 @@ CREATE TABLE IF NOT EXISTS app_state (
 );
 `;
 
-function ensureColumn(sqlite: Database.Database, table: string, column: string, ddl: string): void {
+function ensureColumn(sqlite: Database.Database, table: string, column: string, ddl: string): boolean {
   const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   if (!columns.some((row) => row.name === column)) {
     sqlite.prepare(`ALTER TABLE ${table} ADD COLUMN ${ddl}`).run();
+    return true;
   }
+  return false;
 }
 
 function init(): { sqlite: Database.Database; db: DrizzleDb } {
@@ -150,6 +153,15 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
   sqlite.pragma("foreign_keys = ON");
   sqlite.pragma("busy_timeout = 5000");
   sqlite.exec(DDL);
+  const addedReviewerGroupEnabled = ensureColumn(
+    sqlite,
+    "reviewer_groups",
+    "enabled",
+    "enabled INTEGER NOT NULL DEFAULT 1",
+  );
+  if (addedReviewerGroupEnabled) {
+    sqlite.prepare("UPDATE reviewer_groups SET enabled = 0 WHERE auto_threshold = -1").run();
+  }
   ensureColumn(sqlite, "reviewer_groups", "sync_interval", "sync_interval TEXT NOT NULL DEFAULT '1d'");
   ensureColumn(
     sqlite,

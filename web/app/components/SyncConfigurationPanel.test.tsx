@@ -28,6 +28,8 @@ function group(input: Partial<ReviewerGroupDto> & { id: number; name: string }):
   return {
     id: input.id,
     name: input.name,
+    enabled: input.enabled ?? true,
+    isDefault: input.isDefault ?? input.id === 1,
     autoThreshold: input.autoThreshold ?? 4,
     ratingThreshold: input.ratingThreshold ?? input.autoThreshold ?? 4,
     syncInterval: input.syncInterval ?? "1d",
@@ -119,6 +121,39 @@ describe("SyncConfigurationPanel", () => {
     );
   });
 
+  it("shows behavior-based reviewer pool labels instead of unassigned", () => {
+    renderPanel();
+
+    expect(screen.queryByText("Unassigned")).not.toBeInTheDocument();
+    expect(screen.getByText("In All reviewers")).toBeInTheDocument();
+  });
+
+  it("shows not syncing when a reviewer is not covered by any enabled group", () => {
+    renderPanel({
+      reviewerGroups: [
+        group({ id: 1, name: "All reviewers", enabled: false }),
+        group({ id: 2, name: "Favorites", enabled: false, reviewerHandles: [] }),
+      ],
+    });
+
+    expect(screen.getByText("Not syncing")).toBeInTheDocument();
+  });
+
+  it("saves the enabled toggle with group settings", async () => {
+    const user = userEvent.setup();
+    const props = renderPanel();
+    const favorites = screen.getByLabelText("Favorites group name").closest("article");
+    const scope = within(favorites as HTMLElement);
+
+    await user.click(scope.getByLabelText("Enabled"));
+    await user.click(scope.getByRole("button", { name: "Save group" }));
+
+    expect(props.onSaveGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 2, name: "Favorites" }),
+      expect.objectContaining({ enabled: false }),
+    );
+  });
+
   it("changes visible year fields as the year mode changes", async () => {
     const user = userEvent.setup();
     renderPanel();
@@ -197,6 +232,9 @@ describe("SyncConfigurationPanel", () => {
     const scope = within(allReviewers as HTMLElement);
 
     expect(scope.getByLabelText("Release year filter")).toHaveValue("any");
+    expect(scope.getByText("Default group")).toBeInTheDocument();
+    expect(scope.getByLabelText("Enabled")).toBeChecked();
+    expect(scope.getByText("Genre filters require a movie metadata lookup during sync.")).toBeInTheDocument();
     expect(scope.getByDisplayValue("Avg >= 4.0 stars")).toBeInTheDocument();
     expect(scope.getByLabelText("Included genres")).toHaveTextContent("Select included genres");
     expect(scope.getByLabelText("Excluded genres")).toHaveTextContent("Select excluded genres");

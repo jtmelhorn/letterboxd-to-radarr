@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { DragEvent } from "react";
 
 import {
@@ -15,7 +15,13 @@ import type { ReviewerDto, ReviewerGroupDto, SyncInterval } from "@/app/types/mo
 type GroupUpdate = Partial<
   Pick<
     ReviewerGroupDto,
-    "name" | "ratingThreshold" | "syncInterval" | "requiresManualApproval" | "filters" | "reviewerHandles"
+    | "name"
+    | "enabled"
+    | "ratingThreshold"
+    | "syncInterval"
+    | "requiresManualApproval"
+    | "filters"
+    | "reviewerHandles"
   >
 >;
 
@@ -41,6 +47,7 @@ interface DraggedReviewer {
 
 interface GroupDraft {
   name: string;
+  enabled: boolean;
   ratingThreshold: number;
   syncInterval: SyncInterval;
   requiresManualApproval: boolean;
@@ -101,6 +108,7 @@ function TrashIcon({ className }: { className?: string }) {
 function draftFromGroup(group: ReviewerGroupDto): GroupDraft {
   return {
     name: group.name,
+    enabled: group.enabled,
     ratingThreshold: group.ratingThreshold ?? group.autoThreshold,
     syncInterval: group.syncInterval,
     requiresManualApproval: group.requiresManualApproval,
@@ -108,16 +116,18 @@ function draftFromGroup(group: ReviewerGroupDto): GroupDraft {
   };
 }
 
-function reviewerGroupsByHandle(groups: ReviewerGroupDto[]): Map<string, string[]> {
-  const map = new Map<string, string[]>();
-  for (const group of groups) {
-    if (group.id === DEFAULT_GROUP_ID) continue;
-    for (const handle of group.reviewerHandles) {
-      const key = handle.toLowerCase();
-      map.set(key, [...(map.get(key) ?? []), group.name].sort((a, b) => a.localeCompare(b)));
-    }
-  }
-  return map;
+function groupCoversReviewer(group: ReviewerGroupDto, handle: string): boolean {
+  if (group.isDefault || group.id === DEFAULT_GROUP_ID) return true;
+  return group.reviewerHandles.some((candidate) => candidate.toLowerCase() === handle.toLowerCase());
+}
+
+function reviewerSyncLabels(groups: ReviewerGroupDto[], handle: string): string[] {
+  const enabledGroups = groups.filter((group) => group.enabled && groupCoversReviewer(group, handle));
+  if (enabledGroups.length === 0) return ["Not syncing"];
+  if (enabledGroups.length > 1) return [`Synced by ${enabledGroups.length} groups`];
+
+  const group = enabledGroups[0];
+  return group.isDefault || group.id === DEFAULT_GROUP_ID ? ["In All reviewers"] : [group.name];
 }
 
 function ReviewerChip({
@@ -148,18 +158,20 @@ function ReviewerChip({
     >
       <span className="truncate">@{handle}</span>
       {showGroupBadges && groupNames.length > 0 ? (
-        groupNames.slice(0, 2).map((name) => (
-          <span
-            key={name}
-            className="max-w-24 truncate rounded-full border border-pine/20 bg-pine/10 px-1.5 py-0.5 text-[10px] text-chartreuse"
-          >
-            {name}
-          </span>
-        ))
-      ) : showGroupBadges ? (
-        <span className="rounded-full border border-cornsilk/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-cornsilk/45">
-          Unassigned
-        </span>
+        groupNames.slice(0, 2).map((name) => {
+          const tone =
+            name === "Not syncing"
+              ? "border-cornsilk/10 bg-white/[0.04] text-cornsilk/50"
+              : "border-pine/20 bg-pine/10 text-chartreuse";
+          return (
+            <span
+              key={name}
+              className={`max-w-32 truncate rounded-full border px-1.5 py-0.5 text-[10px] ${tone}`}
+            >
+              {name}
+            </span>
+          );
+        })
       ) : null}
       {showGroupBadges && groupNames.length > 2 && (
         <span className="rounded-full border border-cornsilk/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-cornsilk/50">
@@ -201,8 +213,6 @@ export function SyncConfigurationPanel({
   const [groupDrafts, setGroupDrafts] = useState<Record<number, GroupDraft>>({});
   const [groupErrors, setGroupErrors] = useState<Record<number, string | null>>({});
   const [savingGroupId, setSavingGroupId] = useState<number | null>(null);
-
-  const customGroupsByHandle = useMemo(() => reviewerGroupsByHandle(reviewerGroups), [reviewerGroups]);
 
   useEffect(() => {
     setGroupDrafts(
@@ -312,6 +322,7 @@ export function SyncConfigurationPanel({
     try {
       const saved = await onSaveGroup(group, {
         name,
+        enabled: draft.enabled,
         ratingThreshold: draft.ratingThreshold,
         syncInterval: draft.syncInterval,
         requiresManualApproval: draft.requiresManualApproval,
@@ -344,7 +355,7 @@ export function SyncConfigurationPanel({
               <div>
                 <p className={labelCls}>Reviewer pool</p>
                 <p className="mt-1 text-[11px] leading-relaxed text-cornsilk/50">
-                  Drag reviewers into custom groups or remove them from groups here.
+                  Reviewers here can be added to custom groups. Badges show which enabled groups sync them.
                 </p>
               </div>
               {pendingApprovalCount > 0 && (
@@ -393,7 +404,7 @@ export function SyncConfigurationPanel({
                   <ReviewerChip
                     key={reviewer.handle}
                     draggable
-                    groupNames={customGroupsByHandle.get(reviewer.handle.toLowerCase()) ?? []}
+                    groupNames={reviewerSyncLabels(reviewerGroups, reviewer.handle)}
                     handle={reviewer.handle}
                     onDragEnd={() => {
                       setDraggedReviewer(null);
@@ -446,7 +457,7 @@ export function SyncConfigurationPanel({
           <div>
             <p className={labelCls}>Sync groups</p>
             <p className="mt-1 text-[11px] leading-relaxed text-cornsilk/50">
-              The default All reviewers group includes every reviewer automatically.
+              Enabled groups control sync timing, threshold, approvals, and movie filters. Custom groups are optional.
             </p>
           </div>
 
@@ -458,10 +469,12 @@ export function SyncConfigurationPanel({
             return (
               <article
                 key={group.id}
-                className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 p-3 text-xs text-cornsilk/70"
+                className={`rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 p-3 text-xs text-cornsilk/70 ${
+                  draft.enabled ? "" : "opacity-80"
+                }`}
               >
                 <div className="space-y-3">
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-center">
                     <label className="space-y-1">
                       <span className={labelCls}>Group name</span>
                       <input
@@ -474,9 +487,23 @@ export function SyncConfigurationPanel({
                         }
                       />
                     </label>
+                    <label className="mt-5 flex h-9 cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-white/20 hover:bg-white/[0.05]">
+                      <input
+                        checked={draft.enabled}
+                        className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                        type="checkbox"
+                        onChange={(event) =>
+                          updateDraft(group.id, (current) => ({
+                            ...current,
+                            enabled: event.target.checked,
+                          }))
+                        }
+                      />
+                      <span>{draft.enabled ? "Enabled" : "Disabled"}</span>
+                    </label>
                     {isDefaultGroup && (
                       <span className="mt-5 rounded-full border border-pine/20 bg-pine/10 px-2.5 py-1 text-[10px] font-bold text-chartreuse">
-                        Automatic membership
+                        Default group
                       </span>
                     )}
                     <button
@@ -565,7 +592,7 @@ export function SyncConfigurationPanel({
                     onDrop={(event) => void dropReviewerOnGroup(event, group)}
                   >
                     <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <p className={labelCls}>Assigned reviewers</p>
+                      <p className={labelCls}>{isDefaultGroup ? "Included reviewers" : "Assigned reviewers"}</p>
                       {!isDefaultGroup && reviewers.length > 0 && (
                         <select
                           aria-label={`Add reviewer to ${group.name}`}
@@ -618,13 +645,17 @@ export function SyncConfigurationPanel({
                       ))}
                       {displayedHandles.length === 0 && (
                         <span className="text-xs font-semibold text-cornsilk/45">
-                          {isDefaultGroup ? "Add reviewers to fill this automatic group." : "Drag reviewers here"}
+                          {isDefaultGroup
+                            ? "Add reviewers to include them in this default group."
+                            : "Drag reviewers here"}
                         </span>
                       )}
                     </div>
                     {isDefaultGroup && (
                       <p className="mt-2 text-[11px] text-cornsilk/45">
-                        The default group automatically applies to every reviewer. Membership is not manually edited.
+                        {draft.enabled
+                          ? "The default group applies to every reviewer unless you turn it off."
+                          : "This default group is disabled. Reviewers only sync through enabled custom groups."}
                       </p>
                     )}
                   </div>

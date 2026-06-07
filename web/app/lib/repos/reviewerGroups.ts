@@ -28,6 +28,15 @@ export function isValidAutoThreshold(value: number): boolean {
 
 function handlesForGroup(groupId: number): string[] {
   const db = getDb();
+  if (groupId === DEFAULT_REVIEWER_GROUP_ID) {
+    return db
+      .select({ handle: users.handle })
+      .from(users)
+      .orderBy(asc(users.handle))
+      .all()
+      .map((row) => row.handle);
+  }
+
   return db
     .select({ handle: users.handle })
     .from(reviewerGroupMembers)
@@ -42,6 +51,8 @@ function toReviewerGroupDto(group: typeof reviewerGroups.$inferSelect): Reviewer
   return {
     id: group.id,
     name: group.name,
+    enabled: group.enabled,
+    isDefault: group.id === DEFAULT_REVIEWER_GROUP_ID,
     autoThreshold: group.autoThreshold,
     ratingThreshold: group.autoThreshold,
     syncInterval: isValidSyncInterval(group.syncInterval) ? group.syncInterval : "1d",
@@ -81,6 +92,7 @@ export function upsertReviewerGroup(input: {
   name: string;
   autoThreshold?: number;
   ratingThreshold?: number;
+  enabled?: boolean;
   syncInterval?: SyncInterval;
   requiresManualApproval?: boolean;
   filters?: unknown;
@@ -102,6 +114,7 @@ export function upsertReviewerGroup(input: {
       ? db.select().from(reviewerGroups).where(eq(reviewerGroups.id, input.id)).get()
       : null;
   const autoThreshold = normalizeThreshold(rawThreshold);
+  const enabled = input.enabled ?? existingGroup?.enabled ?? true;
   const syncInterval = input.syncInterval ?? "1d";
   if (!isValidSyncInterval(syncInterval)) {
     throw new Error("Sync interval is not supported.");
@@ -119,7 +132,7 @@ export function upsertReviewerGroup(input: {
       typeof input.id === "number"
         ? tx
             .update(reviewerGroups)
-            .set({ name, autoThreshold, syncInterval, requiresManualApproval, filtersJson, updatedAt: now })
+            .set({ name, enabled, autoThreshold, syncInterval, requiresManualApproval, filtersJson, updatedAt: now })
             .where(eq(reviewerGroups.id, input.id))
             .returning()
             .get()
@@ -127,6 +140,7 @@ export function upsertReviewerGroup(input: {
             .insert(reviewerGroups)
             .values({
               name,
+              enabled,
               autoThreshold,
               syncInterval,
               requiresManualApproval,
@@ -162,6 +176,7 @@ export function updateDefaultGroupThreshold(autoThreshold: number): ReviewerGrou
   return upsertReviewerGroup({
     id: DEFAULT_REVIEWER_GROUP_ID,
     name: existing?.name ?? "All reviewers",
+    enabled: existing?.enabled ?? true,
     ratingThreshold: autoThreshold,
     syncInterval: existing?.syncInterval ?? "1d",
     requiresManualApproval: existing?.requiresManualApproval ?? false,
@@ -181,8 +196,16 @@ export function deleteReviewerGroup(groupId: number): boolean {
 }
 
 export function listEnabledReviewerGroups(): ReviewerGroupDto[] {
-  return listReviewerGroups().filter(
-    (group) =>
-      group.ratingThreshold !== -1 && group.syncInterval !== "manual" && group.reviewerHandles.length > 0,
-  );
+  return listReviewerGroups().filter((group) => group.enabled && group.reviewerHandles.length > 0);
+}
+
+export function listSchedulableReviewerGroups(): ReviewerGroupDto[] {
+  return listEnabledReviewerGroups().filter((group) => group.syncInterval !== "manual");
+}
+
+export function groupCoversReviewer(group: ReviewerGroupDto, handle: string): boolean {
+  const normalized = handle.trim().toLowerCase();
+  if (!normalized) return false;
+  if (group.isDefault) return true;
+  return group.reviewerHandles.some((candidate) => candidate.toLowerCase() === normalized);
 }

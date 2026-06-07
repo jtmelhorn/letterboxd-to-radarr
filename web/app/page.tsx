@@ -80,7 +80,6 @@ const defaultSettings: PublicSettings = {
   minAvailability: "announced",
   autoThreshold: 4,
   monitored: true,
-  autoFetchMetadata: true,
   dataDir: "",
   authEnabled: false,
   setupComplete: false,
@@ -649,7 +648,6 @@ export default function Home() {
     radarrUrl: "",
     radarrApiKey: "",
     autoThreshold: 4,
-    autoFetchMetadata: true,
     qualityProfileId: "" as number | "",
     rootFolderPath: "",
   });
@@ -713,6 +711,9 @@ export default function Home() {
   );
   const pendingApprovalCount = pendingApprovals.filter((approval) => approval.status === "pending").length;
   const hasManualApprovalGroups = reviewerGroups.some((group) => group.requiresManualApproval);
+  const enabledSyncGroupCount = reviewerGroups.filter(
+    (group) => group.enabled && (group.isDefault ? reviewers.length > 0 : group.reviewerHandles.length > 0),
+  ).length;
 
   const openActivity = useCallback(() => {
     setActivitySeenAt(Date.now());
@@ -915,7 +916,6 @@ export default function Home() {
         radarrUrl: body.radarrUrl,
         radarrApiKey: "",
         autoThreshold: body.autoThreshold,
-        autoFetchMetadata: body.autoFetchMetadata,
         qualityProfileId: body.qualityProfileId ?? "",
         rootFolderPath: body.rootFolderPath ?? "",
       });
@@ -1133,25 +1133,28 @@ export default function Home() {
     }
   }
 
-  async function persistSettings(): Promise<PublicSettings> {
+  async function persistSettings(options: { includeAutoThreshold?: boolean } = {}): Promise<PublicSettings> {
     const qualityProfileId =
       settingsDraft.qualityProfileId === "" ? null : Number(settingsDraft.qualityProfileId);
     const qualityProfileName =
       qualityProfileId != null
         ? (radarrOptions?.qualityProfiles.find((p) => p.id === qualityProfileId)?.name ?? null)
         : null;
+    const bodyPayload: Record<string, unknown> = {
+      radarrUrl: settingsDraft.radarrUrl,
+      radarrApiKey: settingsDraft.radarrApiKey,
+      qualityProfileId,
+      qualityProfileName,
+      rootFolderPath: settingsDraft.rootFolderPath || null,
+    };
+    if (options.includeAutoThreshold) {
+      bodyPayload.autoThreshold = settingsDraft.autoThreshold;
+    }
+
     const res = await fetch("/api/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        radarrUrl: settingsDraft.radarrUrl,
-        radarrApiKey: settingsDraft.radarrApiKey,
-        autoThreshold: settingsDraft.autoThreshold,
-        autoFetchMetadata: settingsDraft.autoFetchMetadata,
-        qualityProfileId,
-        qualityProfileName,
-        rootFolderPath: settingsDraft.rootFolderPath || null,
-      }),
+      body: JSON.stringify(bodyPayload),
     });
     const body = (await res.json().catch(() => null)) as PublicSettings | null;
     if (!res.ok || !body) throw new Error(apiMessage(body, "Unable to save settings."));
@@ -1160,7 +1163,6 @@ export default function Home() {
       radarrUrl: body.radarrUrl,
       radarrApiKey: "",
       autoThreshold: body.autoThreshold,
-      autoFetchMetadata: body.autoFetchMetadata,
       qualityProfileId: body.qualityProfileId ?? "",
       rootFolderPath: body.rootFolderPath ?? "",
     });
@@ -1246,13 +1248,20 @@ export default function Home() {
     update: Partial<
       Pick<
         ReviewerGroupDto,
-        "name" | "ratingThreshold" | "syncInterval" | "requiresManualApproval" | "filters" | "reviewerHandles"
+        | "name"
+        | "enabled"
+        | "ratingThreshold"
+        | "syncInterval"
+        | "requiresManualApproval"
+        | "filters"
+        | "reviewerHandles"
       >
     >,
   ): Promise<boolean> {
     const next = {
       id: group.id,
       name: update.name ?? group.name,
+      enabled: update.enabled ?? group.enabled,
       ratingThreshold: update.ratingThreshold ?? group.ratingThreshold ?? group.autoThreshold,
       syncInterval: update.syncInterval ?? group.syncInterval,
       requiresManualApproval: update.requiresManualApproval ?? group.requiresManualApproval,
@@ -1301,6 +1310,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
+          enabled: true,
           ratingThreshold: input.ratingThreshold,
           syncInterval: "1d",
           requiresManualApproval: false,
@@ -1347,7 +1357,7 @@ export default function Home() {
         const reviewerBody = (await reviewerRes.json().catch(() => null)) as { message?: string } | null;
         if (!reviewerRes.ok) throw new Error(apiMessage(reviewerBody, "Unable to save reviewer."));
       }
-      await persistSettings();
+      await persistSettings({ includeAutoThreshold: true });
       const res = await fetch("/api/setup/complete", { method: "POST" });
       const body = (await res.json().catch(() => null)) as { message?: string; success?: boolean } | null;
       if (!res.ok || !body?.success) {
@@ -1704,7 +1714,7 @@ export default function Home() {
               <p className="mt-1">Radarr URL and API key</p>
             </div>
             <div className="rounded-2xl bg-black/20 p-3">
-              <span className="font-extrabold text-cornsilk">3. Automation</span>
+              <span className="font-extrabold text-cornsilk">3. Default group</span>
               <p className="mt-1">Profile, folder, threshold</p>
             </div>
           </div>
@@ -1780,7 +1790,6 @@ export default function Home() {
                   radarrUrl: settings.radarrUrl,
                   radarrApiKey: "",
                   autoThreshold: settings.autoThreshold,
-                  autoFetchMetadata: settings.autoFetchMetadata,
                   qualityProfileId: settings.qualityProfileId ?? "",
                   rootFolderPath: settings.rootFolderPath ?? "",
                 });
@@ -1861,7 +1870,7 @@ export default function Home() {
                   icon={<UserIcon className="h-5 w-5" />}
                   label="Letterboxd"
                   value={
-                    <span title={currentScope.type === "all" ? "All reviewers" : scopeSelection}>
+                    <span title={currentScope.type === "all" ? "All enabled groups" : scopeSelection}>
                       {currentScope.type === "all"
                         ? `${reviewers.length} reviewers`
                         : currentScope.type === "group"
@@ -1871,14 +1880,14 @@ export default function Home() {
                   }
                 />
                 <StatCard
-                  detail="Runs on schedule and manual sync"
+                  detail="Configured in Sync groups"
                   icon={<ServerIcon className="h-5 w-5" />}
-                  label="Automation"
+                  label="Sync groups"
                   value={
-                    settings.autoThreshold === -1 ? (
-                      <span className="text-cornsilk/65">Disabled</span>
+                    enabledSyncGroupCount === 0 ? (
+                      <span className="text-cornsilk/65">None enabled</span>
                     ) : (
-                      <span className="text-gold">≥{settings.autoThreshold.toFixed(1)}★</span>
+                      <span className="text-gold">{enabledSyncGroupCount} enabled</span>
                     )
                   }
                 />
@@ -1926,7 +1935,7 @@ export default function Home() {
                         setHasAutoFetched(false);
                       }}
                     >
-                      <option value="all">All reviewers</option>
+                      <option value="all">All enabled groups</option>
                       {reviewers.map((reviewer) => (
                         <option key={reviewer.handle} value={`reviewer:${reviewer.handle}`}>
                           @{reviewer.handle}
@@ -1950,8 +1959,8 @@ export default function Home() {
                       className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-60 rounded-lg border border-cornsilk/10 bg-ink px-3 py-2 text-[11px] font-medium leading-relaxed text-cornsilk/80 opacity-0 shadow-xl transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
                       role="tooltip"
                     >
-                      Filter which movies appear in the grid. Auto-download to Radarr uses the separate
-                      threshold in Settings.
+                      Filter which movies appear in the grid. Auto-sync to Radarr uses thresholds in Sync
+                      groups.
                     </span>
                   </span>
                   <div className="flex h-9 rounded-[var(--radius-control)] border border-white/10 bg-black/20 p-0.5">
@@ -2165,7 +2174,7 @@ export default function Home() {
                 </h1>
                 <p className="max-w-xl text-base leading-relaxed text-cornsilk/68 md:text-lg">
                   Configure Radarr once, enter your public Letterboxd handle, then sync. Movies that meet
-                  your threshold can be queued automatically while the dashboard stays readable and manual.
+                  enabled group rules can be queued automatically while the dashboard stays readable and manual.
                 </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
@@ -2185,9 +2194,9 @@ export default function Home() {
                       <CheckIcon className="h-5 w-5" />
                     </div>
                     <div>
-                      <h4 className="text-sm font-bold text-cornsilk">Configurable Automation</h4>
+                      <h4 className="text-sm font-bold text-cornsilk">Sync Groups</h4>
                       <p className="mt-1 text-xs leading-relaxed text-cornsilk/65">
-                        Set thresholds, quality profile, and root folder for hands-off downloads.
+                        Set thresholds, timing, approvals, and filters for hands-off downloads.
                       </p>
                     </div>
                   </div>

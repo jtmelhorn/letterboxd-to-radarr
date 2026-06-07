@@ -35,7 +35,7 @@ On first launch, the app walks you through:
 
 1. **Admin password** — required if `APP_PASSWORD` is not set in the environment (stored hashed in `/data`).
 2. **Sign in** — when `APP_PASSWORD` is set, or after you create a password in step 1.
-3. **Setup wizard** — full-screen control panel to add the first Letterboxd reviewer, confirm Radarr connection, choose quality profile/root folder, and set the default auto-sync threshold. This runs once per data volume even when env vars pre-fill the fields.
+3. **Setup wizard** — full-screen control panel to add the first Letterboxd reviewer, confirm Radarr connection, choose quality profile/root folder, and set the initial All reviewers group threshold. This runs once per data volume even when env vars pre-fill the fields.
 
 The placeholders are:
 
@@ -105,12 +105,12 @@ Open http://localhost:3000 and enter:
 
 The display rating, genre, and Radarr-status filters are stored in browser `localStorage`. Everything else—Letterboxd reviewer sources, reviewer groups, group auto-sync thresholds, Radarr connection, quality profile, root folder, cached reviews, movie metadata, and sync history—is stored server-side in a SQLite database (`app.db`). In local development this data defaults to `web/.data`; Docker Compose stores it in the `letterboxd-radarr-data` volume mounted at `/data`. The Radarr API key is encrypted at rest with AES-256-GCM.
 
-Letterboxd RSS exposes the latest activity items. Fetching reviews merges those items (keyed by RSS guid) into the database, including `tmdb:movieId` and `tmdb:tvId` when Letterboxd provides them. When Radarr is configured and metadata auto-fetch is enabled, the app looks up missing genres through Radarr without adding the movie, caches matched/not-found/error results, and keeps RSS sync working even when metadata lookup fails. The dashboard groups reviews by film identity, shows an average rating when multiple reviewers reviewed the same movie, and keeps each review visible in the movie detail view. A background scheduler evaluates enabled reviewer groups and adds movies whose group-average rating meets that group's threshold. Adds are idempotent—a movie that already synced successfully is not re-sent.
+Letterboxd RSS exposes the latest activity items. Fetching reviews merges those items (keyed by RSS guid) into the database, including `tmdb:movieId` and `tmdb:tvId` when Letterboxd provides them. When an enabled sync group uses genre filters, the app looks up missing genres through Radarr without adding the movie, caches matched/not-found/error results, and keeps RSS sync working even when metadata lookup fails. The dashboard groups reviews by film identity, shows an average rating when multiple reviewers reviewed the same movie, and keeps each review visible in the movie detail view. A background scheduler evaluates enabled reviewer groups and adds movies whose group-average rating meets that group's threshold. Adds are idempotent—a movie that already synced successfully is not re-sent.
 
 ### API overview
 
 - `GET /api/reviewers`, `POST /api/reviewers`, `DELETE /api/reviewers?handle=<user>` — manage Letterboxd reviewer sources.
-- `GET|POST|PUT /api/reviewer-groups`, `DELETE /api/reviewer-groups?id=<id>` — manage named reviewer groups and group auto-sync thresholds.
+- `GET|POST|PUT /api/reviewer-groups`, `DELETE /api/reviewer-groups?id=<id>` — manage enabled sync groups, membership, thresholds, timing, approval, and filters.
 - `GET /api/reviews?scope=all|group&groupId=<id>&reviewer=<handle>&refresh=1` — read aggregated film reviews (optionally refreshing RSS); no Radarr side effects.
 - `POST /api/sync` `{ scope, reviewer, groupId }` — fetch, upsert, and auto-add qualifying aggregated movies to Radarr; returns a run summary.
 - `GET /api/sync?...` — recent sync history (activity log).
@@ -118,7 +118,7 @@ Letterboxd RSS exposes the latest activity items. Fetching reviews merges those 
 - `GET /api/radarr/synced?...` — aggregated movies successfully sent to Radarr, including all reviewer details.
 - `GET /api/radarr/options` — available Radarr quality profiles and root folders.
 - `POST /api/metadata/refresh` `{ reviewId }` — retry genre metadata lookup for one stored movie.
-- `GET|PUT /api/settings`, `POST /api/settings/test` — read/update connection + automation settings and test connectivity.
+- `GET|PUT /api/settings`, `POST /api/settings/test` — read/update Radarr connection and library target settings and test connectivity.
 - `GET /api/auth/status` — bootstrap state (`needsPasswordSetup`, `needsLogin`, `setupComplete`).
 - `POST /api/auth/setup-password` — set the admin password on first launch (when no env password).
 - `POST /api/auth/login`, `POST /api/auth/logout` — session management.

@@ -19,6 +19,7 @@ export const users = sqliteTable("users", {
 export const reviewerGroups = sqliteTable("reviewer_groups", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull().unique(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
   autoThreshold: real("auto_threshold").notNull().default(4),
   syncInterval: text("sync_interval").notNull().default("1d"),
   requiresManualApproval: integer("requires_manual_approval", { mode: "boolean" }).notNull().default(false),
