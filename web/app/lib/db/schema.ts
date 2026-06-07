@@ -191,6 +191,26 @@ export const appState = sqliteTable("app_state", {
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
 });
 
+export const movieBlocklist = sqliteTable(
+  "movie_blocklist",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tmdbId: integer("tmdb_id"),
+    title: text("title").notNull(),
+    year: integer("year"),
+    filmId: text("film_id").notNull(),
+    source: text("source").notNull().default("manually_blocked"),
+    message: text("message").notNull().default(""),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+  },
+  (table) => [
+    uniqueIndex("movie_blocklist_tmdb_idx").on(table.tmdbId).where(sql`tmdb_id IS NOT NULL`),
+    index("movie_blocklist_film_idx").on(table.filmId),
+  ],
+);
+
 export type ReviewRow = typeof reviews.$inferSelect;
 export type MovieMetadataRow = typeof movieMetadata.$inferSelect;
 export type SyncResultRow = typeof syncResults.$inferSelect;
@@ -198,3 +218,4 @@ export type PendingApprovalRow = typeof pendingApprovals.$inferSelect;
 export type RadarrTargetRow = typeof radarrTargets.$inferSelect;
 export type AppStateRow = typeof appState.$inferSelect;
 export type ReviewerGroupRow = typeof reviewerGroups.$inferSelect;
+export type MovieBlocklistRow = typeof movieBlocklist.$inferSelect;

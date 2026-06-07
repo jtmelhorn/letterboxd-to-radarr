@@ -467,6 +467,7 @@ export interface DeleteMovieResult {
 export async function deleteMovie(
   target: ResolvedRadarrTarget,
   tmdbId: number,
+  options: { deleteFiles?: boolean; addExclusion?: boolean } = {},
 ): Promise<DeleteMovieResult> {
   const baseUrl = normalizeRadarrUrl(target.baseUrl);
   if (!baseUrl) {
@@ -475,6 +476,9 @@ export async function deleteMovie(
   if (!target.apiKey) {
     return { status: "error", message: "Radarr API key is not configured.", httpStatus: 400 };
   }
+
+  const deleteFiles = options.deleteFiles ?? false;
+  const addExclusion = options.addExclusion ?? false;
 
   try {
     const listResponse = await radarrFetch(baseUrl, target.apiKey, `/api/v3/movie?tmdbId=${tmdbId}`);
@@ -499,10 +503,15 @@ export async function deleteMovie(
       };
     }
 
+    const params = new URLSearchParams();
+    if (deleteFiles) params.set("deleteFiles", "true");
+    if (addExclusion) params.set("addExclusion", "true");
+    const queryString = params.toString() ? `?${params.toString()}` : "";
+
     const deleteResponse = await radarrFetch(
       baseUrl,
       target.apiKey,
-      `/api/v3/movie/${match.id}?deleteFiles=true&addExclusion=true`,
+      `/api/v3/movie/${match.id}${queryString}`,
       { method: "DELETE" },
     );
 

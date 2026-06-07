@@ -15,6 +15,7 @@ import {
 import { getRadarrTarget } from "@/app/lib/repos/settings";
 import { getRecentSyncResults, recordSyncResult } from "@/app/lib/repos/syncResults";
 import { findUser, getOrCreateUser } from "@/app/lib/repos/users";
+import { isMovieBlocklisted } from "@/app/lib/repos/movieBlocklist";
 import { evaluateSyncFilters, syncFiltersNeedGenreMetadata } from "@/app/lib/syncFilters";
 import type {
   AggregatedMovieDto,
@@ -237,6 +238,18 @@ async function executeGroupSync(
   for (const movie of candidates) {
     const representativeReview = movie.reviews[0];
     if (!representativeReview) continue;
+
+    if (isMovieBlocklisted({ tmdbId: movie.tmdbMovieId, filmId: movie.id })) {
+      recordSyncResult({
+        reviewId: representativeReview.id,
+        status: "skipped",
+        message: "Skipped: movie is blocklisted.",
+        auto: options.auto,
+      });
+      summary.skipped = (summary.skipped ?? 0) + 1;
+      continue;
+    }
+
     const filterResult = evaluateSyncFilters(movie, group.filters);
     if (filterResult.allowed) {
       allowedCandidates.push(movie);

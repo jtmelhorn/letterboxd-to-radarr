@@ -23,6 +23,7 @@ import type {
 
 interface LocalConfig {
   username: string;
+  searchQuery?: string;
 }
 
 type SendState = "idle" | "loading" | "added" | "error";
@@ -68,7 +69,7 @@ const syncIntervalOptions: Array<{ value: SyncInterval; label: string }> = [
 type BootPhase = "loading" | "needsPasswordSetup" | "needsLogin" | "needsSetup" | "ready";
 type ScopeSelection = "all" | `reviewer:${string}` | `group:${number}`;
 
-const defaultConfig: LocalConfig = { username: "" };
+const defaultConfig: LocalConfig = { username: "", searchQuery: "" };
 
 const defaultSettings: PublicSettings = {
   reviewer: "",
@@ -697,6 +698,7 @@ export default function Home() {
   const [hideAdded, setHideAdded] = useState(false);
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [isGenreFilterOpen, setIsGenreFilterOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [movies, setMovies] = useState<AggregatedMovieDto[]>([]);
   const [syncedMovies, setSyncedMovies] = useState<AggregatedMovieDto[]>([]);
   const [reviewers, setReviewers] = useState<ReviewerDto[]>([]);
@@ -709,6 +711,9 @@ export default function Home() {
   const [hasAutoFetched, setHasAutoFetched] = useState(false);
   const [removingMovie, setRemovingMovie] = useState<AggregatedMovieDto | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
+  const [deleteFiles, setDeleteFiles] = useState(false);
+  const [blockFutureSync, setBlockFutureSync] = useState(true);
+  const [syncedSearch, setSyncedSearch] = useState("");
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sendStates, setSendStates] = useState<Record<string, SendState>>({});
   const [sendMessages, setSendMessages] = useState<Record<string, string>>({});
@@ -748,12 +753,13 @@ export default function Home() {
           hideAdded?: boolean;
           selectedGenres?: unknown;
         };
-        setConfig({ username: parsed.username ?? "" });
+        setConfig({ username: parsed.username ?? "", searchQuery: parsed.searchQuery ?? "" });
         if (typeof parsed.minimumRating === "number") setMinimumRating(parsed.minimumRating);
         if (typeof parsed.hideAdded === "boolean") setHideAdded(parsed.hideAdded);
         if (Array.isArray(parsed.selectedGenres)) {
           setSelectedGenres(parsed.selectedGenres.filter((genre): genre is string => typeof genre === "string"));
         }
+        if (typeof parsed.searchQuery === "string") setSearchQuery(parsed.searchQuery);
       } catch {
         window.localStorage.removeItem(STORAGE_KEY);
         window.localStorage.removeItem(LEGACY_STORAGE_KEY);
@@ -766,10 +772,10 @@ export default function Home() {
     if (!hasLoadedConfig) return;
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ ...config, minimumRating, hideAdded, selectedGenres }),
+      JSON.stringify({ ...config, minimumRating, hideAdded, selectedGenres, searchQuery }),
     );
     window.localStorage.removeItem(LEGACY_STORAGE_KEY);
-  }, [config, hasLoadedConfig, hideAdded, minimumRating, selectedGenres]);
+  }, [config, hasLoadedConfig, hideAdded, minimumRating, selectedGenres, searchQuery]);
 
   const currentScope = useMemo<ReviewerScope>(() => {
     if (scopeSelection.startsWith("reviewer:")) {
@@ -944,7 +950,11 @@ export default function Home() {
       const res = await fetch("/api/radarr", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reviewId: representative.id }),
+        body: JSON.stringify({
+          reviewId: representative.id,
+          deleteFiles,
+          blockFutureSync,
+        }),
       });
       const body = (await res.json().catch(() => null)) as { message?: string } | null;
       if (res.ok) {
@@ -957,8 +967,10 @@ export default function Home() {
     } finally {
       setIsRemoving(false);
       setRemovingMovie(null);
+      setDeleteFiles(false);
+      setBlockFutureSync(true);
     }
-  }, [removingMovie]);
+  }, [removingMovie, deleteFiles, blockFutureSync]);
 
   const loadSettings = useCallback(async () => {
     try {
@@ -1105,10 +1117,19 @@ export default function Home() {
             const genres = movieGenres(m);
             if (!selectedGenres.some((genre) => genres.includes(genre))) return false;
           }
+          if (searchQuery.trim()) {
+            const q = searchQuery.trim().toLowerCase();
+            const matchTitle = m.title.toLowerCase().includes(q);
+            const matchYear = typeof m.year === "number" ? String(m.year).includes(q) : false;
+            const matchReviewers = m.reviewerHandles.some((h) => h.toLowerCase().includes(q));
+            const matchGenres = m.genres.some((g) => g.toLowerCase().includes(q));
+            const matchId = m.id.toLowerCase().includes(q);
+            if (!matchTitle && !matchYear && !matchReviewers && !matchGenres && !matchId) return false;
+          }
           return true;
         }),
       ),
-    [hideAdded, minimumRating, movies, selectedGenres, sendStates],
+    [hideAdded, minimumRating, movies, selectedGenres, searchQuery, sendStates],
   );
 
   const activeMovie = useMemo(
@@ -2130,6 +2151,14 @@ export default function Home() {
                     />
                     <span className="text-xs font-bold text-cornsilk/70 whitespace-nowrap">Hide in Radarr</span>
                   </label>
+
+                  <input
+                    aria-label="Search movies"
+                    className="h-9 w-full max-w-xs rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
+                    placeholder="Search movies, year, reviewer, or genre…"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
                 </div>
               </div>
             </div>
@@ -2141,10 +2170,12 @@ export default function Home() {
                     <FilmIcon className="h-6 w-6" />
                   </div>
                   <h3 className="text-xl font-black tracking-tight text-cornsilk">No movies match this filter</h3>
-                  <p className="mt-2 max-w-sm text-sm leading-relaxed text-cornsilk/65">
+                   <p className="mt-2 max-w-sm text-sm leading-relaxed text-cornsilk/65">
                     {hideAdded
                       ? "All visible movies are already in Radarr, or none meet the current filter. Adjust the filters above."
-                      : selectedGenres.length > 0
+                      : searchQuery.trim()
+                        ? "No movies match your search. Try a different query."
+                        : selectedGenres.length > 0
                         ? "No movies match the selected genre filter. Clear genres or choose a different selection above."
                         : minimumRating > 0
                         ? `No movies rated ${minimumRating.toFixed(1)}★ or higher. Choose All or lower the minimum rating above.`
@@ -2812,12 +2843,25 @@ export default function Home() {
                 <button
                   aria-label="Close synced movies"
                   className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-cornsilk/10 bg-white/[0.035] text-cornsilk/60 transition hover:bg-white/[0.08] hover:text-cornsilk"
-                  onClick={() => setIsSyncedOpen(false)}
+                  onClick={() => {
+                    setIsSyncedOpen(false);
+                    setSyncedSearch("");
+                  }}
                   type="button"
                 >
                   <XIcon className="h-4 w-4" />
                 </button>
               </div>
+            </div>
+
+            <div className="px-4 pt-3 pb-1">
+              <input
+                aria-label="Search synced movies"
+                className="h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
+                placeholder="Search synced movies…"
+                value={syncedSearch}
+                onChange={(e) => setSyncedSearch(e.target.value)}
+              />
             </div>
 
             <div className="flex-1 overflow-y-auto px-4 py-4">
@@ -2833,7 +2877,15 @@ export default function Home() {
                 </div>
               ) : (
                 <ul className="space-y-2">
-                  {syncedMovies.map((movie) => (
+                  {syncedMovies.filter((m) => {
+                    if (!syncedSearch.trim()) return true;
+                    const q = syncedSearch.trim().toLowerCase();
+                    return (
+                      m.title.toLowerCase().includes(q) ||
+                      (typeof m.year === "number" && String(m.year).includes(q)) ||
+                      m.reviewerHandles.some((h) => h.toLowerCase().includes(q))
+                    );
+                  }).map((movie) => (
                     <li key={movie.id} className="group relative">
                       <button
                         className="flex w-full items-center gap-3 rounded-xl border border-cornsilk/5 bg-ink/30 p-3 text-left transition hover:border-gold/20 hover:bg-ink/45"
@@ -2892,14 +2944,51 @@ export default function Home() {
           <div className="glass-modal w-full max-w-sm rounded-[var(--radius-card)] border border-cornsilk/10 p-5 shadow-2xl">
             <h3 className="text-base font-extrabold text-cornsilk">Remove from Radarr?</h3>
             <p className="mt-2 text-sm text-cornsilk/70">
-              This will delete <strong className="text-cornsilk">{removingMovie.title}</strong> and its
-              downloaded files from Radarr, and block it from being re-added automatically.
+              This will remove <strong className="text-cornsilk">{removingMovie.title}</strong>
+              {removingMovie.year != null && <span className="text-cornsilk/50"> ({removingMovie.year})</span>} from your
+              Radarr library.
             </p>
-            <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+
+            <div className="mt-4 space-y-3">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  checked={deleteFiles}
+                  className="mt-0.5 h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                  onChange={(e) => setDeleteFiles(e.target.checked)}
+                  type="checkbox"
+                />
+                <div>
+                  <span className="text-sm font-bold text-cornsilk/80">Also delete files from disk</span>
+                  <p className="mt-0.5 text-xs text-cornsilk/55">
+                    Deletes the movie folder and files through Radarr.
+                  </p>
+                </div>
+              </label>
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  checked={blockFutureSync}
+                  className="mt-0.5 h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                  onChange={(e) => setBlockFutureSync(e.target.checked)}
+                  type="checkbox"
+                />
+                <div>
+                  <span className="text-sm font-bold text-cornsilk/80">Block this movie from future auto-sync</span>
+                  <p className="mt-0.5 text-xs text-cornsilk/55">
+                    Prevents this app from adding the movie again during future syncs.
+                  </p>
+                </div>
+              </label>
+            </div>
+
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button
                 className="h-9 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-4 text-xs font-bold text-cornsilk/70 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-cornsilk"
                 disabled={isRemoving}
-                onClick={() => setRemovingMovie(null)}
+                onClick={() => {
+                  setRemovingMovie(null);
+                  setDeleteFiles(false);
+                  setBlockFutureSync(true);
+                }}
                 type="button"
               >
                 Cancel
@@ -2910,7 +2999,7 @@ export default function Home() {
                 onClick={() => void removeSyncedMovie()}
                 type="button"
               >
-                {isRemoving ? "Removing..." : "Remove from Radarr"}
+                {isRemoving ? "Removing..." : "Remove"}
               </button>
             </div>
           </div>

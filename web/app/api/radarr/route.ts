@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 
 import { isRequestAuthorized } from "@/app/lib/auth";
 import { addMovie, deleteMovie } from "@/app/lib/radarr";
+import { addToBlocklist } from "@/app/lib/repos/movieBlocklist";
 import { getReviewById } from "@/app/lib/repos/reviews";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
 import { clearSyncResultForReview, recordSyncResult } from "@/app/lib/repos/syncResults";
+import { canonicalFilmGuid } from "@/app/lib/filmIdentity";
 import type { RadarrAddRequest, RadarrAddResponse } from "@/app/types/movie";
 
 export const runtime = "nodejs";
@@ -86,9 +88,13 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ message: "Unauthorized." }, { status: 401 });
   }
 
-  let body: { reviewId?: number };
+  let body: { reviewId?: number; deleteFiles?: boolean; blockFutureSync?: boolean };
   try {
-    body = (await request.json()) as { reviewId?: number };
+    body = (await request.json()) as {
+      reviewId?: number;
+      deleteFiles?: boolean;
+      blockFutureSync?: boolean;
+    };
   } catch {
     return NextResponse.json({ message: "Request body must be valid JSON." }, { status: 400 });
   }
@@ -110,12 +116,29 @@ export async function DELETE(request: Request) {
     );
   }
 
-  const result = await deleteMovie(target, review.tmdbMovieId);
-  if (result.status === "deleted") {
+  const deleteFiles = body.deleteFiles ?? false;
+  const blockFutureSync = body.blockFutureSync ?? true;
+
+  const result = await deleteMovie(target, review.tmdbMovieId, {
+    deleteFiles,
+    addExclusion: blockFutureSync,
+  });
+
+  if (result.status === "deleted" || result.status === "not_found") {
     clearSyncResultForReview(review.id);
+    if (blockFutureSync) {
+      addToBlocklist({
+        tmdbId: review.tmdbMovieId,
+        title: review.title,
+        year: review.year,
+        filmId: canonicalFilmGuid(review),
+        source: "removed_from_radarr",
+        message: `Removed from Radarr${result.status === "not_found" ? " (already missing)" : ""}.`,
+      });
+    }
   }
 
-  const httpStatus = result.status === "deleted" ? 200 : result.httpStatus;
+  const httpStatus = result.status === "deleted" || result.status === "not_found" ? 200 : result.httpStatus;
   return NextResponse.json(
     { message: result.message, status: result.status },
     { status: httpStatus },

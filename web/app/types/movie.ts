@@ -240,3 +240,14 @@ export interface ReviewerScope {
   reviewer?: string;
   groupId?: number;
 }
+
+export interface BlocklistedMovieDto {
+  id: number;
+  tmdbId: number | null;
+  title: string;
+  year: number | null;
+  filmId: string;
+  source: string;
+  message: string;
+  createdAt: string;
+}

@@ -133,6 +133,20 @@ CREATE TABLE IF NOT EXISTS app_state (
   setup_completed_at TEXT,
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+
+CREATE TABLE IF NOT EXISTS movie_blocklist (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tmdb_id INTEGER,
+  title TEXT NOT NULL,
+  year INTEGER,
+  film_id TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'manually_blocked',
+  message TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS movie_blocklist_tmdb_idx ON movie_blocklist(tmdb_id) WHERE tmdb_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS movie_blocklist_film_idx ON movie_blocklist(film_id);
 `;
 
 function ensureColumn(sqlite: Database.Database, table: string, column: string, ddl: string): boolean {

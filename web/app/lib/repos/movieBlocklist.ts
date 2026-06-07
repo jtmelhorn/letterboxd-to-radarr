@@ -1,0 +1,104 @@
+import { and, asc, eq, isNotNull, or } from "drizzle-orm";
+
+import { getDb } from "@/app/lib/db";
+import { movieBlocklist } from "@/app/lib/db/schema";
+import type { BlocklistedMovieDto } from "@/app/types/movie";
+
+export function isMovieBlocklisted(input: {
+  tmdbId?: number | null;
+  filmId: string;
+}): boolean {
+  const db = getDb();
+  const conditions = [eq(movieBlocklist.filmId, input.filmId)];
+  if (typeof input.tmdbId === "number") {
+    conditions.push(eq(movieBlocklist.tmdbId, input.tmdbId));
+  }
+  const row = db
+    .select({ id: movieBlocklist.id })
+    .from(movieBlocklist)
+    .where(or(...conditions))
+    .get();
+  return row !== undefined;
+}
+
+export function isMovieBlocklistedByTmdbId(tmdbId: number): boolean {
+  const db = getDb();
+  const row = db
+    .select({ id: movieBlocklist.id })
+    .from(movieBlocklist)
+    .where(and(eq(movieBlocklist.tmdbId, tmdbId), isNotNull(movieBlocklist.tmdbId)))
+    .get();
+  return row !== undefined;
+}
+
+export function isMovieBlocklistedByFilmId(filmId: string): boolean {
+  const db = getDb();
+  const row = db
+    .select({ id: movieBlocklist.id })
+    .from(movieBlocklist)
+    .where(eq(movieBlocklist.filmId, filmId))
+    .get();
+  return row !== undefined;
+}
+
+export function addToBlocklist(input: {
+  tmdbId?: number | null;
+  title: string;
+  year?: number | null;
+  filmId: string;
+  source: "removed_from_radarr" | "manually_blocked";
+  message?: string;
+}): void {
+  const db = getDb();
+  db.insert(movieBlocklist)
+    .values({
+      tmdbId: input.tmdbId ?? null,
+      title: input.title,
+      year: input.year ?? null,
+      filmId: input.filmId,
+      source: input.source,
+      message: input.message ?? "",
+    })
+    .onConflictDoNothing()
+    .run();
+}
+
+export function removeFromBlocklist(blocklistId: number): boolean {
+  const db = getDb();
+  const result = db.delete(movieBlocklist).where(eq(movieBlocklist.id, blocklistId)).run();
+  return (result.changes ?? 0) > 0;
+}
+
+export function unblockByFilmId(filmId: string): number {
+  const db = getDb();
+  const result = db.delete(movieBlocklist).where(eq(movieBlocklist.filmId, filmId)).run();
+  return result.changes ?? 0;
+}
+
+export function unblockByTmdbId(tmdbId: number): number {
+  const db = getDb();
+  const result = db
+    .delete(movieBlocklist)
+    .where(and(eq(movieBlocklist.tmdbId, tmdbId), isNotNull(movieBlocklist.tmdbId)))
+    .run();
+  return result.changes ?? 0;
+}
+
+export function listBlocklistedMovies(): BlocklistedMovieDto[] {
+  const db = getDb();
+  return db
+    .select()
+    .from(movieBlocklist)
+    .orderBy(asc(movieBlocklist.createdAt))
+    .all()
+    .map((row) => ({
+      id: row.id,
+      tmdbId: row.tmdbId ?? null,
+      title: row.title,
+      year: row.year ?? null,
+      filmId: row.filmId,
+      source: row.source,
+      message: row.message,
+      createdAt: row.createdAt,
+    }));
+}
