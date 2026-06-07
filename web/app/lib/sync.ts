@@ -8,14 +8,13 @@ import { enrichReviewsWithMetadata } from "@/app/lib/repos/movieMetadata";
 import { createPendingApproval } from "@/app/lib/repos/pendingApprovals";
 import { getReviewRows, upsertReviews } from "@/app/lib/repos/reviews";
 import {
-  DEFAULT_REVIEWER_GROUP_ID,
   groupCoversReviewer,
   getReviewerGroup,
   listReviewerGroups,
 } from "@/app/lib/repos/reviewerGroups";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
 import { getRecentSyncResults, recordSyncResult } from "@/app/lib/repos/syncResults";
-import { findUser, getOrCreateUser, listUsers } from "@/app/lib/repos/users";
+import { findUser, getOrCreateUser } from "@/app/lib/repos/users";
 import { evaluateSyncFilters, syncFiltersNeedGenreMetadata } from "@/app/lib/syncFilters";
 import type {
   AggregatedMovieDto,
@@ -91,9 +90,6 @@ function emptySummary(threshold: number): SyncRunSummary {
 }
 
 function handlesForGroup(group: ReviewerGroupDto): string[] {
-  if (group.isDefault) {
-    return listUsers().map((user) => user.handle);
-  }
   return group.reviewerHandles;
 }
 
@@ -101,7 +97,7 @@ function fallbackThresholdForScope(scope: ReviewerScope): number {
   if (scope.type === "group" && typeof scope.groupId === "number") {
     return getReviewerGroup(scope.groupId)?.ratingThreshold ?? -1;
   }
-  return getReviewerGroup(DEFAULT_REVIEWER_GROUP_ID)?.ratingThreshold ?? getRadarrTarget().autoThreshold;
+  return getRadarrTarget().autoThreshold;
 }
 
 async function refreshHandles(

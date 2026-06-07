@@ -1,9 +1,7 @@
 import { eq } from "drizzle-orm";
 
 import { getDb } from "@/app/lib/db";
-import { reviewerGroupMembers, users } from "@/app/lib/db/schema";
-
-export const DEFAULT_GROUP_ID = 1;
+import { users } from "@/app/lib/db/schema";
 
 export function normalizeHandle(handle: string): string {
   return handle.trim().toLowerCase();
@@ -18,21 +16,11 @@ export function getOrCreateUser(handle: string): { id: number; handle: string } 
   const db = getDb();
   const existing = db.select().from(users).where(eq(users.handle, normalized)).get();
   if (existing) {
-    ensureDefaultGroupMembership(existing.id);
     return { id: existing.id, handle: existing.handle };
   }
 
   const inserted = db.insert(users).values({ handle: normalized }).returning().get();
-  ensureDefaultGroupMembership(inserted.id);
   return { id: inserted.id, handle: inserted.handle };
-}
-
-export function ensureDefaultGroupMembership(userId: number): void {
-  const db = getDb();
-  db.insert(reviewerGroupMembers)
-    .values({ groupId: DEFAULT_GROUP_ID, userId })
-    .onConflictDoNothing()
-    .run();
 }
 
 export function listUsers(): { id: number; handle: string }[] {

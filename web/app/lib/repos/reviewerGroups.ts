@@ -5,8 +5,6 @@ import { reviewerGroupMembers, reviewerGroups, users } from "@/app/lib/db/schema
 import { parseSyncFiltersJson, stringifySyncFilters } from "@/app/lib/syncFilters";
 import type { ReviewerGroupDto, SyncInterval } from "@/app/types/movie";
 
-export const DEFAULT_REVIEWER_GROUP_ID = 1;
-
 function normalizeGroupName(name: string): string {
   return name.trim().replace(/\s+/g, " ");
 }
@@ -28,15 +26,6 @@ export function isValidAutoThreshold(value: number): boolean {
 
 function handlesForGroup(groupId: number): string[] {
   const db = getDb();
-  if (groupId === DEFAULT_REVIEWER_GROUP_ID) {
-    return db
-      .select({ handle: users.handle })
-      .from(users)
-      .orderBy(asc(users.handle))
-      .all()
-      .map((row) => row.handle);
-  }
-
   return db
     .select({ handle: users.handle })
     .from(reviewerGroupMembers)
@@ -52,7 +41,6 @@ function toReviewerGroupDto(group: typeof reviewerGroups.$inferSelect): Reviewer
     id: group.id,
     name: group.name,
     enabled: group.enabled,
-    isDefault: group.id === DEFAULT_REVIEWER_GROUP_ID,
     autoThreshold: group.autoThreshold,
     ratingThreshold: group.autoThreshold,
     syncInterval: isValidSyncInterval(group.syncInterval) ? group.syncInterval : "1d",
@@ -122,10 +110,7 @@ export function upsertReviewerGroup(input: {
   const requiresManualApproval = input.requiresManualApproval ?? false;
   const filtersJson =
     input.filters === undefined && existingGroup ? existingGroup.filtersJson : stringifySyncFilters(input.filters);
-  const memberIds =
-    typeof input.id === "number" && input.id === DEFAULT_REVIEWER_GROUP_ID
-      ? []
-      : reviewerIdsFromHandles(input.reviewerHandles);
+  const memberIds = reviewerIdsFromHandles(input.reviewerHandles);
 
   const group = db.transaction((tx) => {
     const saved =
@@ -155,14 +140,12 @@ export function upsertReviewerGroup(input: {
       throw new Error("Reviewer group was not found.");
     }
 
-    if (saved.id !== DEFAULT_REVIEWER_GROUP_ID) {
-      tx.delete(reviewerGroupMembers).where(eq(reviewerGroupMembers.groupId, saved.id)).run();
-      for (const userId of memberIds) {
-        tx.insert(reviewerGroupMembers)
-          .values({ groupId: saved.id, userId })
-          .onConflictDoNothing()
-          .run();
-      }
+    tx.delete(reviewerGroupMembers).where(eq(reviewerGroupMembers.groupId, saved.id)).run();
+    for (const userId of memberIds) {
+      tx.insert(reviewerGroupMembers)
+        .values({ groupId: saved.id, userId })
+        .onConflictDoNothing()
+        .run();
     }
 
     return saved;
@@ -171,25 +154,7 @@ export function upsertReviewerGroup(input: {
   return toReviewerGroupDto(group);
 }
 
-export function updateDefaultGroupThreshold(autoThreshold: number): ReviewerGroupDto {
-  const existing = getReviewerGroup(DEFAULT_REVIEWER_GROUP_ID);
-  return upsertReviewerGroup({
-    id: DEFAULT_REVIEWER_GROUP_ID,
-    name: existing?.name ?? "All reviewers",
-    enabled: existing?.enabled ?? true,
-    ratingThreshold: autoThreshold,
-    syncInterval: existing?.syncInterval ?? "1d",
-    requiresManualApproval: existing?.requiresManualApproval ?? false,
-    filters: existing?.filters,
-    reviewerHandles: existing?.reviewerHandles ?? [],
-  });
-}
-
 export function deleteReviewerGroup(groupId: number): boolean {
-  if (groupId === DEFAULT_REVIEWER_GROUP_ID) {
-    throw new Error("The default reviewer group cannot be deleted.");
-  }
-
   const db = getDb();
   const result = db.delete(reviewerGroups).where(eq(reviewerGroups.id, groupId)).run();
   return (result.changes ?? 0) > 0;
@@ -206,6 +171,5 @@ export function listSchedulableReviewerGroups(): ReviewerGroupDto[] {
 export function groupCoversReviewer(group: ReviewerGroupDto, handle: string): boolean {
   const normalized = handle.trim().toLowerCase();
   if (!normalized) return false;
-  if (group.isDefault) return true;
   return group.reviewerHandles.some((candidate) => candidate.toLowerCase() === normalized);
 }

@@ -691,6 +691,8 @@ export default function Home() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSyncedOpen, setIsSyncedOpen] = useState(false);
   const [hasAutoFetched, setHasAutoFetched] = useState(false);
+  const [removingMovie, setRemovingMovie] = useState<AggregatedMovieDto | null>(null);
+  const [isRemoving, setIsRemoving] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sendStates, setSendStates] = useState<Record<string, SendState>>({});
   const [sendMessages, setSendMessages] = useState<Record<string, string>>({});
@@ -712,7 +714,7 @@ export default function Home() {
   const pendingApprovalCount = pendingApprovals.filter((approval) => approval.status === "pending").length;
   const hasManualApprovalGroups = reviewerGroups.some((group) => group.requiresManualApproval);
   const enabledSyncGroupCount = reviewerGroups.filter(
-    (group) => group.enabled && (group.isDefault ? reviewers.length > 0 : group.reviewerHandles.length > 0),
+    (group) => group.enabled && group.reviewerHandles.length > 0,
   ).length;
 
   const openActivity = useCallback(() => {
@@ -897,6 +899,34 @@ export default function Home() {
       // non-fatal
     }
   }, [scopeQuery]);
+
+  const removeSyncedMovie = useCallback(async () => {
+    if (!removingMovie) return;
+    const representative = removingMovie.reviews[0];
+    if (!representative) {
+      setRemovingMovie(null);
+      return;
+    }
+    setIsRemoving(true);
+    try {
+      const res = await fetch("/api/radarr", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewId: representative.id }),
+      });
+      const body = (await res.json().catch(() => null)) as { message?: string } | null;
+      if (res.ok) {
+        setSyncedMovies((current) => current.filter((m) => m.id !== removingMovie.id));
+      } else {
+        alert(body?.message ?? "Failed to remove movie from Radarr.");
+      }
+    } catch {
+      alert("Failed to remove movie from Radarr.");
+    } finally {
+      setIsRemoving(false);
+      setRemovingMovie(null);
+    }
+  }, [removingMovie]);
 
   const loadSettings = useCallback(async () => {
     try {
@@ -2755,7 +2785,7 @@ export default function Home() {
               ) : (
                 <ul className="space-y-2">
                   {syncedMovies.map((movie) => (
-                    <li key={movie.id}>
+                    <li key={movie.id} className="group relative">
                       <button
                         className="flex w-full items-center gap-3 rounded-xl border border-cornsilk/5 bg-ink/30 p-3 text-left transition hover:border-gold/20 hover:bg-ink/45"
                         onClick={() => {
@@ -2786,6 +2816,17 @@ export default function Home() {
                             {movie.reviewerCount === 1 ? "" : "s"}
                           </p>
                         </div>
+                        <button
+                          aria-label={`Remove ${movie.title} from Radarr`}
+                          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-cornsilk/10 bg-black/30 text-cornsilk/45 opacity-0 transition hover:border-rose-500/40 hover:bg-rose-500/15 hover:text-rose-300 group-hover:opacity-100 focus:opacity-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRemovingMovie(movie);
+                          }}
+                          type="button"
+                        >
+                          <TrashIcon className="h-3.5 w-3.5" />
+                        </button>
                       </button>
                     </li>
                   ))}
@@ -2793,6 +2834,37 @@ export default function Home() {
               )}
             </div>
           </aside>
+        </div>
+      )}
+
+      {/* ── Remove confirmation dialog ─────────────────────────────────────── */}
+      {removingMovie && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="glass-modal w-full max-w-sm rounded-[var(--radius-card)] border border-cornsilk/10 p-5 shadow-2xl">
+            <h3 className="text-base font-extrabold text-cornsilk">Remove from Radarr?</h3>
+            <p className="mt-2 text-sm text-cornsilk/70">
+              This will delete <strong className="text-cornsilk">{removingMovie.title}</strong> and its
+              downloaded files from Radarr, and block it from being re-added automatically.
+            </p>
+            <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                className="h-9 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-4 text-xs font-bold text-cornsilk/70 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-cornsilk"
+                disabled={isRemoving}
+                onClick={() => setRemovingMovie(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="h-9 rounded-[var(--radius-control)] bg-rose-500 px-4 text-xs font-bold text-white transition hover:bg-rose-600 disabled:opacity-50"
+                disabled={isRemoving}
+                onClick={() => void removeSyncedMovie()}
+                type="button"
+              >
+                {isRemoving ? "Removing..." : "Remove from Radarr"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

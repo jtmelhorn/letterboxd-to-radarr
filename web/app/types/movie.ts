@@ -79,7 +79,6 @@ export interface ReviewerGroupDto {
   id: number;
   name: string;
   enabled: boolean;
-  isDefault: boolean;
   /** @deprecated Use ratingThreshold. */
   autoThreshold: number;
   ratingThreshold: number;

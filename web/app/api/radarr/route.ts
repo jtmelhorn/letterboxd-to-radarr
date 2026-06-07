@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { isRequestAuthorized } from "@/app/lib/auth";
-import { addMovie } from "@/app/lib/radarr";
+import { addMovie, deleteMovie } from "@/app/lib/radarr";
 import { getReviewById } from "@/app/lib/repos/reviews";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
-import { recordSyncResult } from "@/app/lib/repos/syncResults";
+import { clearSyncResultForReview, recordSyncResult } from "@/app/lib/repos/syncResults";
 import type { RadarrAddRequest, RadarrAddResponse } from "@/app/types/movie";
 
 export const runtime = "nodejs";
@@ -79,4 +79,45 @@ export async function POST(request: Request) {
       { status: 502 },
     );
   }
+}
+
+export async function DELETE(request: Request) {
+  if (!isRequestAuthorized(request)) {
+    return NextResponse.json({ message: "Unauthorized." }, { status: 401 });
+  }
+
+  let body: { reviewId?: number };
+  try {
+    body = (await request.json()) as { reviewId?: number };
+  } catch {
+    return NextResponse.json({ message: "Request body must be valid JSON." }, { status: 400 });
+  }
+
+  const reviewId = typeof body.reviewId === "number" ? body.reviewId : null;
+  const review = reviewId ? getReviewById(reviewId) : null;
+  if (!review || !review.tmdbMovieId) {
+    return NextResponse.json(
+      { message: "A valid reviewId with TMDB metadata is required." },
+      { status: 400 },
+    );
+  }
+
+  const target = getRadarrTarget();
+  if (!target.baseUrl || !target.apiKey) {
+    return NextResponse.json(
+      { message: "Configure the Radarr Base URL and API key in Settings first." },
+      { status: 400 },
+    );
+  }
+
+  const result = await deleteMovie(target, review.tmdbMovieId);
+  if (result.status === "deleted") {
+    clearSyncResultForReview(review.id);
+  }
+
+  const httpStatus = result.status === "deleted" ? 200 : result.httpStatus;
+  return NextResponse.json(
+    { message: result.message, status: result.status },
+    { status: httpStatus },
+  );
 }

@@ -87,3 +87,12 @@ export function clearAllSyncResults(): number {
   const result = db.delete(syncResults).run();
   return result.changes ?? 0;
 }
+
+export function clearSyncResultForReview(reviewId: number): number {
+  const db = getDb();
+  const result = db
+    .delete(syncResults)
+    .where(eq(syncResults.reviewId, reviewId))
+    .run();
+  return result.changes ?? 0;
+}

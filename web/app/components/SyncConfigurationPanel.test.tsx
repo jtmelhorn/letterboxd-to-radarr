@@ -29,7 +29,6 @@ function group(input: Partial<ReviewerGroupDto> & { id: number; name: string }):
     id: input.id,
     name: input.name,
     enabled: input.enabled ?? true,
-    isDefault: input.isDefault ?? input.id === 1,
     autoThreshold: input.autoThreshold ?? 4,
     ratingThreshold: input.ratingThreshold ?? input.autoThreshold ?? 4,
     syncInterval: input.syncInterval ?? "1d",
@@ -45,7 +44,6 @@ function renderPanel(overrides: Partial<ComponentProps<typeof SyncConfigurationP
     pendingApprovalCount: 0,
     ratingOptions: [3, 4, 5],
     reviewerGroups: [
-      group({ id: 1, name: "All reviewers", reviewerHandles: ["alice"] }),
       group({ id: 2, name: "Favorites", reviewerHandles: [] }),
     ],
     reviewers: [reviewer("alice", 1)],
@@ -121,22 +119,11 @@ describe("SyncConfigurationPanel", () => {
     );
   });
 
-  it("shows behavior-based reviewer pool labels instead of unassigned", () => {
+  it("shows reviewer pool without group badges", () => {
     renderPanel();
 
-    expect(screen.queryByText("Unassigned")).not.toBeInTheDocument();
-    expect(screen.getByText("In All reviewers")).toBeInTheDocument();
-  });
-
-  it("shows not syncing when a reviewer is not covered by any enabled group", () => {
-    renderPanel({
-      reviewerGroups: [
-        group({ id: 1, name: "All reviewers", enabled: false }),
-        group({ id: 2, name: "Favorites", enabled: false, reviewerHandles: [] }),
-      ],
-    });
-
-    expect(screen.getByText("Not syncing")).toBeInTheDocument();
+    expect(screen.queryByText("In All reviewers")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not syncing")).not.toBeInTheDocument();
   });
 
   it("saves the enabled toggle with group settings", async () => {
@@ -213,7 +200,7 @@ describe("SyncConfigurationPanel", () => {
   it("loads groups without filters using default filter controls", () => {
     renderPanel({
       reviewerGroups: [
-        group({ id: 1, name: "All reviewers" }),
+        group({ id: 2, name: "Favorites" }),
         {
           ...group({ id: 3, name: "Legacy empty" }),
           filters: undefined as unknown as SyncFilters,
@@ -225,14 +212,13 @@ describe("SyncConfigurationPanel", () => {
     expect(within(legacy as HTMLElement).getByLabelText("Release year filter")).toHaveValue("any");
   });
 
-  it("shows the All reviewers defaults as any year, four stars, and no genre filters", () => {
+  it("shows group defaults as any year, four stars, and no genre filters", () => {
     renderPanel();
 
-    const allReviewers = screen.getByLabelText("All reviewers group name").closest("article");
-    const scope = within(allReviewers as HTMLElement);
+    const favorites = screen.getByLabelText("Favorites group name").closest("article");
+    const scope = within(favorites as HTMLElement);
 
     expect(scope.getByLabelText("Release year filter")).toHaveValue("any");
-    expect(scope.getByText("Default group")).toBeInTheDocument();
     expect(scope.getByLabelText("Enabled")).toBeChecked();
     expect(scope.getByText("Genre filters require a movie metadata lookup during sync.")).toBeInTheDocument();
     expect(scope.getByDisplayValue("Avg >= 4.0 stars")).toBeInTheDocument();

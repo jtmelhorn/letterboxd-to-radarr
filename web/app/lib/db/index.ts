@@ -160,7 +160,7 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
     "enabled INTEGER NOT NULL DEFAULT 1",
   );
   if (addedReviewerGroupEnabled) {
-    sqlite.prepare("UPDATE reviewer_groups SET enabled = 0 WHERE auto_threshold = -1").run();
+    sqlite.prepare("UPDATE reviewer_groups SET enabled = 0, auto_threshold = 4 WHERE auto_threshold = -1").run();
   }
   ensureColumn(sqlite, "reviewer_groups", "sync_interval", "sync_interval TEXT NOT NULL DEFAULT '1d'");
   ensureColumn(
@@ -201,21 +201,6 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
     .run();
 
   migrateLegacyJson(sqlite);
-
-  sqlite
-    .prepare(
-      `INSERT INTO reviewer_groups (id, name, auto_threshold, filters_json)
-       SELECT 1, 'All reviewers', 4, '{"year":{"mode":"any"},"genres":{"include":[],"exclude":[]}}'
-       WHERE NOT EXISTS (SELECT 1 FROM reviewer_groups WHERE id = 1)`,
-    )
-    .run();
-
-  sqlite
-    .prepare(
-      `INSERT OR IGNORE INTO reviewer_group_members (group_id, user_id)
-       SELECT 1, id FROM users`,
-    )
-    .run();
 
   const db = drizzle(sqlite, { schema });
   return { sqlite, db };

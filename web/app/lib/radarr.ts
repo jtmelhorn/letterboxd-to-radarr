@@ -457,3 +457,75 @@ export async function addMovie(
     movie: { title: match.title, year: match.year, tmdbId: match.tmdbId },
   };
 }
+
+export interface DeleteMovieResult {
+  status: "deleted" | "not_found" | "error";
+  message: string;
+  httpStatus: number;
+}
+
+export async function deleteMovie(
+  target: ResolvedRadarrTarget,
+  tmdbId: number,
+): Promise<DeleteMovieResult> {
+  const baseUrl = normalizeRadarrUrl(target.baseUrl);
+  if (!baseUrl) {
+    return { status: "error", message: "Radarr Base URL is invalid.", httpStatus: 400 };
+  }
+  if (!target.apiKey) {
+    return { status: "error", message: "Radarr API key is not configured.", httpStatus: 400 };
+  }
+
+  try {
+    const listResponse = await radarrFetch(baseUrl, target.apiKey, `/api/v3/movie?tmdbId=${tmdbId}`);
+    if (!listResponse.ok) {
+      return {
+        status: "error",
+        message: errorMessageFromBody(await readBody(listResponse), "Unable to list movies from Radarr."),
+        httpStatus: listResponse.status,
+      };
+    }
+
+    const movies = (await listResponse.json()) as Array<{ id: number; tmdbId: number }>;
+    const match = Array.isArray(movies)
+      ? movies.find((m) => m.tmdbId === tmdbId)
+      : null;
+
+    if (!match) {
+      return {
+        status: "not_found",
+        message: "Movie not found in Radarr.",
+        httpStatus: 404,
+      };
+    }
+
+    const deleteResponse = await radarrFetch(
+      baseUrl,
+      target.apiKey,
+      `/api/v3/movie/${match.id}?deleteFiles=true&addExclusion=true`,
+      { method: "DELETE" },
+    );
+
+    if (deleteResponse.status === 404) {
+      return { status: "not_found", message: "Movie not found in Radarr.", httpStatus: 404 };
+    }
+    if (!deleteResponse.ok) {
+      return {
+        status: "error",
+        message: errorMessageFromBody(
+          await readBody(deleteResponse),
+          "Unable to delete movie from Radarr.",
+        ),
+        httpStatus: deleteResponse.status,
+      };
+    }
+
+    return { status: "deleted", message: "Movie removed from Radarr.", httpStatus: 200 };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "Unable to communicate with Radarr.",
+      httpStatus: 502,
+    };
+  }
+}
