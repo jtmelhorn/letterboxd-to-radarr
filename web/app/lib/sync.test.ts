@@ -156,11 +156,8 @@ describeWithSqlite("sync filtering", () => {
       syncInterval: "1d",
       requiresManualApproval: true,
       filters: {
-        version: 1,
-        rules: [
-          { type: "releaseYear", operator: "equals", value: 2026 },
-          { type: "genre", operator: "excludesAny", values: ["Documentary"] },
-        ],
+        year: { mode: "exact", exactYear: 2026 },
+        genres: { include: [], exclude: ["Documentary"] },
       },
       reviewerHandles: ["alice"],
     });
@@ -172,7 +169,7 @@ describeWithSqlite("sync filtering", () => {
     expect(summary.skipped).toBe(2);
     expect(addCalls).toBe(0);
     expect(summary.results.filter((result) => result.status === "skipped")).toHaveLength(2);
-    expect(summary.results.some((result) => result.message.includes("release year 2025 does not equal 2026"))).toBe(true);
+    expect(summary.results.some((result) => result.message.includes("release year 2025 does not match exact year 2026"))).toBe(true);
     expect(summary.results.some((result) => result.message.includes("genre Documentary is excluded"))).toBe(true);
 
     const docReview = getReviewRows(getOrCreateUser("alice").id).find((review) => review.title === "Future Doc");

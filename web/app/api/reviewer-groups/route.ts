@@ -7,6 +7,7 @@ import {
   listReviewerGroups,
   upsertReviewerGroup,
 } from "@/app/lib/repos/reviewerGroups";
+import { SyncFilterValidationError } from "@/app/lib/syncFilters";
 import type { SyncInterval } from "@/app/types/movie";
 
 export const runtime = "nodejs";
@@ -67,6 +68,9 @@ export async function POST(request: Request) {
     const group = upsertReviewerGroup(parseGroupBody(body));
     return NextResponse.json({ group, groups: listReviewerGroups() });
   } catch (error) {
+    if (error instanceof SyncFilterValidationError) {
+      return NextResponse.json({ message: error.message, errors: error.errors }, { status: 400 });
+    }
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Unable to save reviewer group." },
       { status: 400 },

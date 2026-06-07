@@ -37,23 +37,42 @@ export interface ReviewerDto {
   handle: string;
 }
 
-export interface ReleaseYearSyncFilterRule {
+export type SyncYearFilterMode = "any" | "exact" | "gte" | "lte" | "between";
+
+export interface SyncYearFilter {
+  mode: SyncYearFilterMode;
+  exactYear?: number;
+  minYear?: number;
+  maxYear?: number;
+}
+
+export interface SyncGenreFilters {
+  include: string[];
+  exclude: string[];
+}
+
+export interface SyncFilters {
+  year: SyncYearFilter;
+  genres: SyncGenreFilters;
+}
+
+export interface LegacyReleaseYearSyncFilterRule {
   type: "releaseYear";
   operator: "equals";
   value: number;
 }
 
-export interface GenreSyncFilterRule {
+export interface LegacyGenreSyncFilterRule {
   type: "genre";
   operator: "excludesAny";
   values: string[];
 }
 
-export type SyncFilterRule = ReleaseYearSyncFilterRule | GenreSyncFilterRule;
+export type LegacySyncFilterRule = LegacyReleaseYearSyncFilterRule | LegacyGenreSyncFilterRule;
 
-export interface SyncFilters {
+export interface LegacySyncFilters {
   version: 1;
-  rules: SyncFilterRule[];
+  rules: LegacySyncFilterRule[];
 }
 
 export interface ReviewerGroupDto {

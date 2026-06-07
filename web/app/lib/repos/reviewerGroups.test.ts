@@ -38,7 +38,10 @@ describeWithSqlite("reviewer group filters", () => {
 
     getOrCreateUser("alice");
 
-    expect(getReviewerGroup(1)?.filters).toEqual({ version: 1, rules: [] });
+    expect(getReviewerGroup(1)?.filters).toEqual({
+      year: { mode: "any" },
+      genres: { include: [], exclude: [] },
+    });
 
     const saved = upsertReviewerGroup({
       name: "2026 without docs",
@@ -46,21 +49,15 @@ describeWithSqlite("reviewer group filters", () => {
       syncInterval: "1d",
       requiresManualApproval: false,
       filters: {
-        version: 1,
-        rules: [
-          { type: "releaseYear", operator: "equals", value: 2026 },
-          { type: "genre", operator: "excludesAny", values: ["documentary", "Short"] },
-        ],
+        year: { mode: "gte", minYear: 2020 },
+        genres: { include: ["action"], exclude: ["documentary", "Short"] },
       },
       reviewerHandles: ["alice"],
     });
 
     expect(saved.filters).toEqual({
-      version: 1,
-      rules: [
-        { type: "releaseYear", operator: "equals", value: 2026 },
-        { type: "genre", operator: "excludesAny", values: ["Documentary", "Short"] },
-      ],
+      year: { mode: "gte", minYear: 2020 },
+      genres: { include: ["Action"], exclude: ["Documentary", "Short"] },
     });
 
     expect(getReviewerGroup(saved.id)?.filters).toEqual(saved.filters);
@@ -77,8 +74,8 @@ describeWithSqlite("reviewer group filters", () => {
       syncInterval: "1d",
       requiresManualApproval: false,
       filters: {
-        version: 1,
-        rules: [{ type: "releaseYear", operator: "equals", value: 2026 }],
+        year: { mode: "exact", exactYear: 2026 },
+        genres: { include: [], exclude: [] },
       },
       reviewerHandles: ["alice"],
     });
@@ -93,5 +90,60 @@ describeWithSqlite("reviewer group filters", () => {
     });
 
     expect(getReviewerGroup(saved.id)?.filters).toEqual(saved.filters);
+  });
+
+  it("rejects invalid filters on save", async () => {
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+
+    getOrCreateUser("alice");
+
+    expect(() =>
+      upsertReviewerGroup({
+        name: "Invalid range",
+        ratingThreshold: 4,
+        syncInterval: "1d",
+        requiresManualApproval: false,
+        filters: {
+          year: { mode: "between", minYear: 2026, maxYear: 2020 },
+          genres: { include: [], exclude: [] },
+        },
+        reviewerHandles: ["alice"],
+      }),
+    ).toThrow("Minimum year cannot be greater than maximum year.");
+  });
+
+  it("returns normalized filters when stored legacy filters are read", async () => {
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { getDb } = await import("@/app/lib/db");
+    const { reviewerGroups } = await import("@/app/lib/db/schema");
+    const { getReviewerGroup, upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+
+    getOrCreateUser("alice");
+    const saved = upsertReviewerGroup({
+      name: "Legacy filters",
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: false,
+      reviewerHandles: ["alice"],
+    });
+
+    getDb()
+      .update(reviewerGroups)
+      .set({
+        filtersJson: JSON.stringify({
+          version: 1,
+          rules: [
+            { type: "releaseYear", operator: "equals", value: 2026 },
+            { type: "genre", operator: "excludesAny", values: ["documentary"] },
+          ],
+        }),
+      })
+      .run();
+
+    expect(getReviewerGroup(saved.id)?.filters).toEqual({
+      year: { mode: "exact", exactYear: 2026 },
+      genres: { include: [], exclude: ["Documentary"] },
+    });
   });
 });

@@ -170,7 +170,7 @@ async function executeSyncScope(
     recordSyncResult({
       reviewId: representativeReview.id,
       status: "skipped",
-      message: `Skipped by ${filterGroup?.name ?? "sync"} filters: ${filterResult.reasons.join("; ")}.`,
+      message: `Skipped: ${filterResult.reasons.join("; ")} (${filterGroup?.name ?? "sync"} filters).`,
       auto: options.auto,
     });
     summary.skipped = (summary.skipped ?? 0) + 1;

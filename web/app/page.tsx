@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { DragEvent, FormEvent, ReactNode } from "react";
+import type { FormEvent, ReactNode } from "react";
 
 import { canCompleteSetup, ControlPanelForm } from "@/app/components/ControlPanelForm";
-import { normalizeGenreKey, normalizeGenreLabel, normalizeSyncFilters } from "@/app/lib/syncFilters";
+import { SyncConfigurationPanel } from "@/app/components/SyncConfigurationPanel";
+import { normalizeGenreKey, normalizeGenreLabel } from "@/app/lib/syncFilters";
 import type {
   AggregatedMovieDto,
   AuthStatusResponse,
@@ -15,7 +16,6 @@ import type {
   ReviewerDto,
   ReviewerGroupDto,
   ReviewerScope,
-  SyncFilters,
   SyncInterval,
   SyncResultItem,
   SyncRunSummary,
@@ -64,12 +64,6 @@ const syncIntervalOptions: Array<{ value: SyncInterval; label: string }> = [
   { value: "1d", label: "Daily" },
   { value: "1w", label: "Weekly" },
 ];
-
-interface DraggedReviewer {
-  handle: string;
-  source: "pool" | "group";
-  groupId?: number;
-}
 
 type BootPhase = "loading" | "needsPasswordSetup" | "needsLogin" | "needsSetup" | "ready";
 type ScopeSelection = "all" | `reviewer:${string}` | `group:${number}`;
@@ -149,32 +143,6 @@ function isAddedToRadarr(movie: AggregatedMovieDto, sendStates: Record<string, S
 
 function movieGenres(movie: AggregatedMovieDto): string[] {
   return movie.genres.length > 0 ? movie.genres.map(normalizeGenreLabel).filter(Boolean) : [UNKNOWN_GENRE];
-}
-
-function releaseYearFilterValue(filters: SyncFilters): number | "" {
-  const rule = normalizeSyncFilters(filters).rules.find(
-    (candidate) => candidate.type === "releaseYear" && candidate.operator === "equals",
-  );
-  return rule?.type === "releaseYear" ? rule.value : "";
-}
-
-function excludedGenreValues(filters: SyncFilters): string[] {
-  const rule = normalizeSyncFilters(filters).rules.find(
-    (candidate) => candidate.type === "genre" && candidate.operator === "excludesAny",
-  );
-  return rule?.type === "genre" ? rule.values : [];
-}
-
-function buildGroupFilters(input: { releaseYear: number | ""; excludedGenres: string[] }): SyncFilters {
-  const rules: SyncFilters["rules"] = [];
-  if (typeof input.releaseYear === "number" && Number.isInteger(input.releaseYear)) {
-    rules.push({ type: "releaseYear", operator: "equals", value: input.releaseYear });
-  }
-  const excludedGenres = input.excludedGenres.map(normalizeGenreLabel).filter(Boolean);
-  if (excludedGenres.length > 0) {
-    rules.push({ type: "genre", operator: "excludesAny", values: excludedGenres });
-  }
-  return normalizeSyncFilters({ version: 1, rules });
 }
 
 function statusToSendState(status: AggregatedMovieDto["status"]): SendState {
@@ -721,11 +689,6 @@ export default function Home() {
   const [reviewerGroups, setReviewerGroups] = useState<ReviewerGroupDto[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApprovalDto[]>([]);
   const [scopeSelection, setScopeSelection] = useState<ScopeSelection>("all");
-  const [newReviewerInput, setNewReviewerInput] = useState("");
-  const [newGroupName, setNewGroupName] = useState("");
-  const [newGroupThreshold, setNewGroupThreshold] = useState(4);
-  const [draggedReviewer, setDraggedReviewer] = useState<DraggedReviewer | null>(null);
-  const [activeDropZone, setActiveDropZone] = useState<"pool" | number | null>(null);
   const [isFetching, setIsFetching] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSyncedOpen, setIsSyncedOpen] = useState(false);
@@ -1243,9 +1206,9 @@ export default function Home() {
     }
   }
 
-  async function addReviewer() {
-    const handle = newReviewerInput.trim();
-    if (!handle) return;
+  async function addReviewer(handleInput: string): Promise<boolean> {
+    const handle = handleInput.trim();
+    if (!handle) return false;
     setSettingsError(null);
     try {
       const res = await fetch("/api/reviewers", {
@@ -1256,11 +1219,12 @@ export default function Home() {
       const body = (await res.json().catch(() => null)) as { reviewers?: ReviewerDto[]; message?: string } | null;
       if (!res.ok) throw new Error(apiMessage(body, "Unable to add reviewer."));
       setReviewers(body?.reviewers ?? []);
-      setNewReviewerInput("");
       await loadReviewerGroups();
       await loadPendingApprovals();
+      return true;
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : "Unable to add reviewer.");
+      return false;
     }
   }
 
@@ -1327,62 +1291,9 @@ export default function Home() {
     }
   }
 
-  function startReviewerDrag(event: DragEvent<HTMLElement>, payload: DraggedReviewer) {
-    setDraggedReviewer(payload);
-    event.dataTransfer.effectAllowed = payload.source === "pool" ? "copy" : "move";
-    event.dataTransfer.setData("application/json", JSON.stringify(payload));
-    event.dataTransfer.setData("text/plain", payload.handle);
-  }
-
-  function draggedReviewerFromEvent(event: DragEvent<HTMLElement>): DraggedReviewer | null {
-    if (draggedReviewer) return draggedReviewer;
-    try {
-      const data = event.dataTransfer.getData("application/json");
-      return data ? (JSON.parse(data) as DraggedReviewer) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  async function dropReviewerOnGroup(event: DragEvent<HTMLElement>, group: ReviewerGroupDto) {
-    event.preventDefault();
-    const payload = draggedReviewerFromEvent(event);
-    setActiveDropZone(null);
-    setDraggedReviewer(null);
-    if (!payload || group.id === 1) return;
-    if (payload.source === "group" && payload.groupId === group.id) return;
-
-    const targetSaved = group.reviewerHandles.includes(payload.handle)
-      ? true
-      : await saveReviewerGroup(group, { reviewerHandles: [...group.reviewerHandles, payload.handle] });
-    if (!targetSaved) return;
-
-    if (payload.source === "group" && typeof payload.groupId === "number") {
-      const sourceGroup = reviewerGroups.find((candidate) => candidate.id === payload.groupId);
-      if (sourceGroup && sourceGroup.id !== 1) {
-        await saveReviewerGroup(sourceGroup, {
-          reviewerHandles: sourceGroup.reviewerHandles.filter((handle) => handle !== payload.handle),
-        });
-      }
-    }
-  }
-
-  async function dropReviewerOnPool(event: DragEvent<HTMLElement>) {
-    event.preventDefault();
-    const payload = draggedReviewerFromEvent(event);
-    setActiveDropZone(null);
-    setDraggedReviewer(null);
-    if (!payload || payload.source !== "group" || payload.groupId === 1) return;
-    const group = reviewerGroups.find((candidate) => candidate.id === payload.groupId);
-    if (!group) return;
-    await saveReviewerGroup(group, {
-      reviewerHandles: group.reviewerHandles.filter((handle) => handle !== payload.handle),
-    });
-  }
-
-  async function createReviewerGroup() {
-    const name = newGroupName.trim();
-    if (!name) return;
+  async function createReviewerGroup(input: { name: string; ratingThreshold: number }): Promise<boolean> {
+    const name = input.name.trim();
+    if (!name) return false;
     setSettingsError(null);
     try {
       const res = await fetch("/api/reviewer-groups", {
@@ -1390,21 +1301,21 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
-          ratingThreshold: newGroupThreshold,
+          ratingThreshold: input.ratingThreshold,
           syncInterval: "1d",
           requiresManualApproval: false,
-          filters: buildGroupFilters({ releaseYear: "", excludedGenres: [] }),
+          filters: { year: { mode: "any" }, genres: { include: [], exclude: [] } },
           reviewerHandles: [],
         }),
       });
       const body = (await res.json().catch(() => null)) as { groups?: ReviewerGroupDto[]; message?: string } | null;
       if (!res.ok) throw new Error(apiMessage(body, "Unable to create reviewer group."));
       setReviewerGroups(body?.groups ?? []);
-      setNewGroupName("");
-      setNewGroupThreshold(4);
       await loadPendingApprovals();
+      return true;
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : "Unable to create reviewer group.");
+      return false;
     }
   }
 
@@ -2899,427 +2810,19 @@ export default function Home() {
             />
 
             <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
-              <section className="rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
-                <div className="mb-4 space-y-1">
-                  <h3 className="text-base font-extrabold tracking-tight text-cornsilk">Reviewers</h3>
-                  <p className="text-xs leading-relaxed text-cornsilk/65">
-                    Add public handles here, then assign them to sync groups below.
-                  </p>
-                </div>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-                    <input
-                      className={`${inputCls} w-full`}
-                      placeholder="letterboxd-handle"
-                      value={newReviewerInput}
-                      onChange={(event) => setNewReviewerInput(event.target.value)}
-                    />
-                    <button
-                      className={`${primaryBtnCls} h-11 w-full px-5 text-sm whitespace-nowrap sm:w-auto`}
-                      disabled={!newReviewerInput.trim()}
-                      onClick={() => void addReviewer()}
-                      type="button"
-                    >
-                      Add
-                    </button>
-                  </div>
-                  <div
-                    className={`min-h-20 rounded-[var(--radius-control)] border border-dashed p-3 transition ${
-                      activeDropZone === "pool"
-                        ? "border-pine/70 bg-pine/10"
-                        : "border-cornsilk/10 bg-black/15"
-                    }`}
-                    onDragLeave={() => setActiveDropZone(null)}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      setActiveDropZone("pool");
-                    }}
-                    onDrop={(event) => void dropReviewerOnPool(event)}
-                  >
-                    <div className="mb-2 flex items-center justify-between gap-3">
-                      <p className="text-xs font-extrabold uppercase tracking-wider text-cornsilk/55">
-                        Reviewer pool
-                      </p>
-                      {pendingApprovalCount > 0 && (
-                        <span className="rounded-full border border-gold/20 bg-gold/10 px-2 py-0.5 text-[10px] font-bold text-gold">
-                          {pendingApprovalCount} pending approval{pendingApprovalCount === 1 ? "" : "s"}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                    {reviewers.map((reviewer) => (
-                      <div
-                        key={reviewer.handle}
-                        className="group flex max-w-full cursor-grab items-center gap-1.5 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/25 px-2.5 py-1.5 text-xs font-bold text-cornsilk/80 active:cursor-grabbing"
-                        draggable
-                        onDragEnd={() => {
-                          setDraggedReviewer(null);
-                          setActiveDropZone(null);
-                        }}
-                        onDragStart={(event) =>
-                          startReviewerDrag(event, { handle: reviewer.handle, source: "pool" })
-                        }
-                      >
-                        <span className="truncate">@{reviewer.handle}</span>
-                        <button
-                          aria-label={`Remove @${reviewer.handle}`}
-                          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md text-cornsilk/45 transition hover:bg-rose-500/15 hover:text-rose-300"
-                          onClick={() => void removeReviewer(reviewer.handle)}
-                          type="button"
-                        >
-                          <XIcon className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
-                    {reviewers.length === 0 && (
-                      <span className="text-xs text-cornsilk/55">No reviewers added yet.</span>
-                    )}
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              <section className="rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
-                <div className="mb-4 space-y-1">
-                  <h3 className="text-base font-extrabold tracking-tight text-cornsilk">Sync groups</h3>
-                  <p className="text-xs leading-relaxed text-cornsilk/65">
-                    Groups control reviewer membership, sync timing, approval, and auto-sync filters together.
-                  </p>
-                </div>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto]">
-                    <input
-                      className={`${inputCls} w-full`}
-                      placeholder="Group name"
-                      value={newGroupName}
-                      onChange={(event) => setNewGroupName(event.target.value)}
-                    />
-                    <select
-                      className={`${inputCls} w-full sm:w-44`}
-                      value={newGroupThreshold}
-                      onChange={(event) => setNewGroupThreshold(Number(event.target.value))}
-                    >
-                      {groupRatingOptions.map((rating) => (
-                        <option key={rating} value={rating}>
-                          Avg ≥ {rating.toFixed(1)} ★
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      className={`${primaryBtnCls} h-11 px-4 text-sm whitespace-nowrap`}
-                      disabled={!newGroupName.trim()}
-                      onClick={() => void createReviewerGroup()}
-                      type="button"
-                    >
-                      Create group
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3">
-                    {reviewerGroups.map((group) => (
-                      <div
-                        key={group.id}
-                        className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 p-3 text-xs text-cornsilk/70"
-                      >
-                        <div className="flex flex-col gap-3">
-                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-                            <input
-                              aria-label={`${group.name} group name`}
-                              className={`${inputCls} h-9 w-full px-3 text-xs font-extrabold`}
-                              defaultValue={group.name}
-                              onBlur={(event) => {
-                                const name = event.target.value.trim();
-                                if (name && name !== group.name) {
-                                  void saveReviewerGroup(group, { name });
-                                } else {
-                                  event.target.value = group.name;
-                                }
-                              }}
-                            />
-                            <button
-                              aria-label={`Delete ${group.name}`}
-                              className="flex h-9 w-full items-center justify-center gap-2 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/65 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto"
-                              disabled={group.id === 1}
-                              onClick={() => void deleteGroup(group)}
-                              type="button"
-                            >
-                              <TrashIcon className="h-3.5 w-3.5" />
-                              Delete
-                            </button>
-                          </div>
-
-                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                            <label className="space-y-1">
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
-                                Threshold
-                              </span>
-                              <select
-                                className={`${inputCls} h-9 w-full px-3 text-xs`}
-                                value={group.ratingThreshold ?? group.autoThreshold}
-                                onChange={(event) =>
-                                  void saveReviewerGroup(group, { ratingThreshold: Number(event.target.value) })
-                                }
-                              >
-                                {groupRatingOptions.map((rating) => (
-                                  <option key={rating} value={rating}>
-                                    Avg ≥ {rating.toFixed(1)} stars
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label className="space-y-1">
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
-                                Sync timing
-                              </span>
-                              <select
-                                className={`${inputCls} h-9 w-full px-3 text-xs`}
-                                value={group.syncInterval}
-                                onChange={(event) =>
-                                  void saveReviewerGroup(group, {
-                                    syncInterval: event.target.value as SyncInterval,
-                                  })
-                                }
-                              >
-                                {syncIntervalOptions.map((option) => (
-                                  <option key={option.value} value={option.value}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 sm:mt-5">
-                              <input
-                                checked={group.requiresManualApproval}
-                                className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                                onChange={(event) =>
-                                  void saveReviewerGroup(group, {
-                                    requiresManualApproval: event.target.checked,
-                                  })
-                                }
-                                type="checkbox"
-                              />
-                              <span className="text-xs font-bold text-cornsilk/75">Require approval</span>
-                            </label>
-                          </div>
-
-                          <div className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 p-3">
-                            <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                              <div>
-                                <p className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
-                                  Auto-sync filters
-                                </p>
-                                <p className="mt-1 text-[11px] leading-relaxed text-cornsilk/50">
-                                  Filters apply before approvals or Radarr adds for this group.
-                                </p>
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[180px_minmax(0,1fr)]">
-                              <label className="space-y-1">
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
-                                  Release year
-                                </span>
-                                <input
-                                  aria-label={`${group.name} release year filter`}
-                                  className={`${inputCls} h-9 w-full px-3 text-xs`}
-                                  defaultValue={releaseYearFilterValue(group.filters)}
-                                  inputMode="numeric"
-                                  max={2200}
-                                  min={1888}
-                                  onBlur={(event) => {
-                                    const raw = event.target.value.trim();
-                                    const year = raw ? Number(raw) : "";
-                                    if (
-                                      raw &&
-                                      (typeof year !== "number" ||
-                                        !Number.isInteger(year) ||
-                                        year < 1888 ||
-                                        year > 2200)
-                                    ) {
-                                      event.target.value = String(releaseYearFilterValue(group.filters));
-                                      return;
-                                    }
-                                    void saveReviewerGroup(group, {
-                                      filters: buildGroupFilters({
-                                        releaseYear: year,
-                                        excludedGenres: excludedGenreValues(group.filters),
-                                      }),
-                                    });
-                                  }}
-                                  placeholder="All years"
-                                  type="number"
-                                />
-                              </label>
-                              <div className="space-y-2">
-                                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                                  <label className="min-w-0 flex-1 space-y-1">
-                                    <span className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
-                                      Excluded genres
-                                    </span>
-                                    <select
-                                      aria-label={`Add excluded genre for ${group.name}`}
-                                      className={`${inputCls} h-9 w-full px-3 text-xs`}
-                                      value=""
-                                      onChange={(event) => {
-                                        const genre = event.target.value;
-                                        const excludedGenres = excludedGenreValues(group.filters);
-                                        if (!genre) return;
-                                        void saveReviewerGroup(group, {
-                                          filters: buildGroupFilters({
-                                            releaseYear: releaseYearFilterValue(group.filters),
-                                            excludedGenres: [...excludedGenres, genre],
-                                          }),
-                                        });
-                                      }}
-                                    >
-                                      <option value="">Add excluded genre…</option>
-                                      {groupGenreOptions
-                                        .filter(
-                                          (genre) =>
-                                            !excludedGenreValues(group.filters).some(
-                                              (excluded) => normalizeGenreKey(excluded) === normalizeGenreKey(genre),
-                                            ),
-                                        )
-                                        .map((genre) => (
-                                          <option key={genre} value={genre}>
-                                            {genre}
-                                          </option>
-                                        ))}
-                                    </select>
-                                  </label>
-                                </div>
-                                <div className="flex min-h-8 flex-wrap gap-2">
-                                  {excludedGenreValues(group.filters).map((genre) => (
-                                    <span
-                                      key={genre}
-                                      className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--radius-control)] border border-gold/20 bg-gold/10 px-2.5 py-1 text-[11px] font-bold text-gold"
-                                    >
-                                      <span className="truncate">{genre}</span>
-                                      <button
-                                        aria-label={`Allow ${genre} in ${group.name}`}
-                                        className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-gold/70 transition hover:bg-gold/15 hover:text-gold"
-                                        onClick={() =>
-                                          void saveReviewerGroup(group, {
-                                            filters: buildGroupFilters({
-                                              releaseYear: releaseYearFilterValue(group.filters),
-                                              excludedGenres: excludedGenreValues(group.filters).filter(
-                                                (candidate) =>
-                                                  normalizeGenreKey(candidate) !== normalizeGenreKey(genre),
-                                              ),
-                                            }),
-                                          })
-                                        }
-                                        type="button"
-                                      >
-                                        <XIcon className="h-3 w-3" />
-                                      </button>
-                                    </span>
-                                  ))}
-                                  {excludedGenreValues(group.filters).length === 0 && (
-                                    <span className="text-[11px] font-semibold text-cornsilk/45">
-                                      No genres excluded
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div
-                            className={`min-h-20 rounded-[var(--radius-control)] border border-dashed p-3 transition ${
-                              activeDropZone === group.id
-                                ? "border-pine/70 bg-pine/10"
-                                : "border-cornsilk/10 bg-black/20"
-                            } ${group.id === 1 ? "opacity-85" : ""}`}
-                            onDragLeave={() => setActiveDropZone(null)}
-                            onDragOver={(event) => {
-                              event.preventDefault();
-                              setActiveDropZone(group.id);
-                            }}
-                            onDrop={(event) => void dropReviewerOnGroup(event, group)}
-                          >
-                            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                              <p className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
-                                Reviewers
-                              </p>
-                              {group.id !== 1 && reviewers.length > 0 && (
-                                <select
-                                  aria-label={`Add reviewer to ${group.name}`}
-                                  className={`${inputCls} h-8 w-full px-2 text-xs sm:w-48`}
-                                  value=""
-                                  onChange={(event) => {
-                                    const handle = event.target.value;
-                                    if (handle && !group.reviewerHandles.includes(handle)) {
-                                      void saveReviewerGroup(group, {
-                                        reviewerHandles: [...group.reviewerHandles, handle],
-                                      });
-                                    }
-                                  }}
-                                >
-                                  <option value="">Add reviewer…</option>
-                                  {reviewers
-                                    .filter((reviewer) => !group.reviewerHandles.includes(reviewer.handle))
-                                    .map((reviewer) => (
-                                      <option key={reviewer.handle} value={reviewer.handle}>
-                                        @{reviewer.handle}
-                                      </option>
-                                    ))}
-                                </select>
-                              )}
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {group.reviewerHandles.map((handle) => (
-                                <div
-                                  key={handle}
-                                  className="flex max-w-full cursor-grab items-center gap-1.5 rounded-[var(--radius-control)] border border-cornsilk/10 bg-ink/70 px-2.5 py-1.5 text-xs font-bold text-cornsilk/80 active:cursor-grabbing"
-                                  draggable={group.id !== 1}
-                                  onDragEnd={() => {
-                                    setDraggedReviewer(null);
-                                    setActiveDropZone(null);
-                                  }}
-                                  onDragStart={(event) =>
-                                    startReviewerDrag(event, {
-                                      handle,
-                                      source: "group",
-                                      groupId: group.id,
-                                    })
-                                  }
-                                >
-                                  <span className="truncate">@{handle}</span>
-                                  {group.id !== 1 && (
-                                    <button
-                                      aria-label={`Remove @${handle} from ${group.name}`}
-                                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md text-cornsilk/45 transition hover:bg-rose-500/15 hover:text-rose-300"
-                                      onClick={() =>
-                                        void saveReviewerGroup(group, {
-                                          reviewerHandles: group.reviewerHandles.filter(
-                                            (candidate) => candidate !== handle,
-                                          ),
-                                        })
-                                      }
-                                      type="button"
-                                    >
-                                      <XIcon className="h-3 w-3" />
-                                    </button>
-                                  )}
-                                </div>
-                              ))}
-                              {group.reviewerHandles.length === 0 && (
-                                <span className="text-xs font-semibold text-cornsilk/45">
-                                  Drag reviewers here
-                                </span>
-                              )}
-                            </div>
-                            {group.id === 1 && (
-                              <p className="mt-2 text-[11px] text-cornsilk/45">
-                                The default group includes every reviewer automatically.
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </section>
+              <SyncConfigurationPanel
+                genreOptions={groupGenreOptions}
+                pendingApprovalCount={pendingApprovalCount}
+                ratingOptions={groupRatingOptions}
+                reviewerGroups={reviewerGroups}
+                reviewers={reviewers}
+                syncIntervalOptions={syncIntervalOptions}
+                onAddReviewer={addReviewer}
+                onCreateGroup={createReviewerGroup}
+                onDeleteGroup={deleteGroup}
+                onRemoveReviewer={removeReviewer}
+                onSaveGroup={saveReviewerGroup}
+              />
 
               {(hasManualApprovalGroups || pendingApprovalCount > 0) && (
                 <section className="rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
