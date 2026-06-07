@@ -766,6 +766,22 @@ export default function Home() {
     return { type: "all" };
   }, [scopeSelection]);
 
+  // Mirror display filters from active sync group when scoped to a group
+  useEffect(() => {
+    if (currentScope.type === "group" && typeof currentScope.groupId === "number") {
+      const group = reviewerGroups.find((g) => g.id === currentScope.groupId);
+      if (group) {
+        setMinimumRating(group.ratingThreshold ?? 0);
+        setSelectedGenres(
+          (group.filters?.genres?.include ?? []).map(normalizeGenreLabel).filter(Boolean),
+        );
+        return;
+      }
+    }
+    setMinimumRating(0);
+    setSelectedGenres([]);
+  }, [currentScope, reviewerGroups]);
+
   const scopeQuery = useCallback(
     (extra = "") => {
       const params = new URLSearchParams();
@@ -1978,108 +1994,116 @@ export default function Home() {
                       ))}
                     </select>
                   </div>
-                  <span className="group relative flex items-center gap-1.5">
-                    <label className="text-xs font-bold uppercase tracking-wider text-cornsilk/55">
-                      Min. rating ≥
-                    </label>
-                    <span className="text-cornsilk/45 transition-colors hover:text-cornsilk/80" tabIndex={0}>
-                      <InfoIcon className="h-3.5 w-3.5" />
+                  {currentScope.type === "group" ? (
+                    <span className="rounded-full border border-pine/20 bg-pine/10 px-2.5 py-1 text-[10px] font-bold text-chartreuse">
+                      Using group filters
                     </span>
-                    <span
-                      className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-60 rounded-lg border border-cornsilk/10 bg-ink px-3 py-2 text-[11px] font-medium leading-relaxed text-cornsilk/80 opacity-0 shadow-xl transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
-                      role="tooltip"
-                    >
-                      Filter which movies appear in the grid. Auto-sync to Radarr uses thresholds in Sync
-                      groups.
-                    </span>
-                  </span>
-                  <div className="flex h-9 rounded-[var(--radius-control)] border border-white/10 bg-black/20 p-0.5">
-                    <button
-                      className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
-                        minimumRating === 0 ? "bg-pine text-ink shadow" : "text-cornsilk/65 hover:text-cornsilk"
-                      }`}
-                      onClick={() => setMinimumRating(0)}
-                      type="button"
-                    >
-                      All
-                    </button>
-                    {[3.0, 3.5, 4.0, 4.5, 5.0].map((val) => (
-                      <button
-                        key={val}
-                        className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
-                          minimumRating === val ? "bg-pine text-ink shadow" : "text-cornsilk/65 hover:text-cornsilk"
-                        }`}
-                        onClick={() => setMinimumRating(val)}
-                        type="button"
-                      >
-                        {val.toFixed(1)}★
-                      </button>
-                    ))}
-                  </div>
+                  ) : (
+                    <>
+                      <span className="group relative flex items-center gap-1.5">
+                        <label className="text-xs font-bold uppercase tracking-wider text-cornsilk/55">
+                          Min. rating ≥
+                        </label>
+                        <span className="text-cornsilk/45 transition-colors hover:text-cornsilk/80" tabIndex={0}>
+                          <InfoIcon className="h-3.5 w-3.5" />
+                        </span>
+                        <span
+                          className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-60 rounded-lg border border-cornsilk/10 bg-ink px-3 py-2 text-[11px] font-medium leading-relaxed text-cornsilk/80 opacity-0 shadow-xl transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
+                          role="tooltip"
+                        >
+                          Filter which movies appear in the grid. Auto-sync to Radarr uses thresholds in Sync
+                          groups.
+                        </span>
+                      </span>
+                      <div className="flex h-9 rounded-[var(--radius-control)] border border-white/10 bg-black/20 p-0.5">
+                        <button
+                          className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
+                            minimumRating === 0 ? "bg-pine text-ink shadow" : "text-cornsilk/65 hover:text-cornsilk"
+                          }`}
+                          onClick={() => setMinimumRating(0)}
+                          type="button"
+                        >
+                          All
+                        </button>
+                        {[3.0, 3.5, 4.0, 4.5, 5.0].map((val) => (
+                          <button
+                            key={val}
+                            className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
+                              minimumRating === val ? "bg-pine text-ink shadow" : "text-cornsilk/65 hover:text-cornsilk"
+                            }`}
+                            onClick={() => setMinimumRating(val)}
+                            type="button"
+                          >
+                            {val.toFixed(1)}★
+                          </button>
+                        ))}
+                      </div>
 
-                  <div className="relative">
-                    <button
-                      className="flex h-9 min-w-32 items-center justify-between gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-white/20 hover:text-cornsilk"
-                      onClick={() => setIsGenreFilterOpen((open) => !open)}
-                      type="button"
-                    >
-                      <span className="truncate">{genreFilterLabel}</span>
-                      <span className="text-cornsilk/45">▼</span>
-                    </button>
-                    {isGenreFilterOpen && (
-                      <div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border border-cornsilk/10 bg-ink p-2 shadow-2xl">
-                        <div className="flex items-center justify-between gap-2 border-b border-cornsilk/10 px-2 pb-2">
-                          <span className="text-xs font-extrabold text-cornsilk">Genres</span>
-                          {selectedGenres.length > 0 && (
-                            <button
-                              className="text-xs font-bold text-pine transition hover:text-chartreuse"
-                              onClick={() => setSelectedGenres([])}
-                              type="button"
-                            >
-                              Clear
-                            </button>
-                          )}
-                        </div>
-                        <div className="max-h-64 overflow-y-auto py-1">
-                          <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]">
-                            <input
-                              checked={selectedGenres.length === 0}
-                              className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                              onChange={() => setSelectedGenres([])}
-                              type="checkbox"
-                            />
-                            All genres
-                          </label>
-                          {genreOptions.length === 0 ? (
-                            <p className="px-2 py-3 text-xs leading-relaxed text-cornsilk/55">
-                              Cached genres will appear after metadata refresh.
-                            </p>
-                          ) : (
-                            genreOptions.map((genre) => (
-                              <label
-                                key={genre}
-                                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]"
-                              >
+                      <div className="relative">
+                        <button
+                          className="flex h-9 min-w-32 items-center justify-between gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-white/20 hover:text-cornsilk"
+                          onClick={() => setIsGenreFilterOpen((open) => !open)}
+                          type="button"
+                        >
+                          <span className="truncate">{genreFilterLabel}</span>
+                          <span className="text-cornsilk/45">▼</span>
+                        </button>
+                        {isGenreFilterOpen && (
+                          <div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border border-cornsilk/10 bg-ink p-2 shadow-2xl">
+                            <div className="flex items-center justify-between gap-2 border-b border-cornsilk/10 px-2 pb-2">
+                              <span className="text-xs font-extrabold text-cornsilk">Genres</span>
+                              {selectedGenres.length > 0 && (
+                                <button
+                                  className="text-xs font-bold text-pine transition hover:text-chartreuse"
+                                  onClick={() => setSelectedGenres([])}
+                                  type="button"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                            </div>
+                            <div className="max-h-64 overflow-y-auto py-1">
+                              <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]">
                                 <input
-                                  checked={selectedGenres.includes(genre)}
+                                  checked={selectedGenres.length === 0}
                                   className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                                  onChange={(e) =>
-                                    setSelectedGenres((current) =>
-                                      e.target.checked
-                                        ? [...new Set([...current, genre])]
-                                        : current.filter((item) => item !== genre),
-                                    )
-                                  }
+                                  onChange={() => setSelectedGenres([])}
                                   type="checkbox"
                                 />
-                                <span className="truncate">{genre}</span>
+                                All genres
                               </label>
-                            ))
-                          )}
-                        </div>
+                              {genreOptions.length === 0 ? (
+                                <p className="px-2 py-3 text-xs leading-relaxed text-cornsilk/55">
+                                  Cached genres will appear after metadata refresh.
+                                </p>
+                              ) : (
+                                genreOptions.map((genre) => (
+                                  <label
+                                    key={genre}
+                                    className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]"
+                                  >
+                                    <input
+                                      checked={selectedGenres.includes(genre)}
+                                      className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                                      onChange={(e) =>
+                                        setSelectedGenres((current) =>
+                                          e.target.checked
+                                            ? [...new Set([...current, genre])]
+                                            : current.filter((item) => item !== genre),
+                                        )
+                                      }
+                                      type="checkbox"
+                                    />
+                                    <span className="truncate">{genre}</span>
+                                  </label>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
+                    </>
+                  )}
 
                   <label className="flex h-9 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3">
                     <input
