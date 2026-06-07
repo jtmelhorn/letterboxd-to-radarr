@@ -11,6 +11,7 @@ import type { MetadataLookupStatus, MetadataMediaType } from "@/app/types/movie"
 
 export interface CachedMovieMetadata {
   filmId: string;
+  year: number | null;
   genres: string[];
   metadataSource: string | null;
   metadataId: string | null;
@@ -73,6 +74,7 @@ function mediaType(value: string | null): MetadataMediaType | null {
 function toCachedMetadata(row: MovieMetadataRow): CachedMovieMetadata {
   return {
     filmId: row.filmId,
+    year: row.year,
     genres: parseGenres(row.genresJson),
     metadataSource: row.metadataSource,
     metadataId: row.metadataId,
@@ -165,7 +167,7 @@ async function lookupAndStore(row: ReviewRow): Promise<CachedMovieMetadata> {
       return upsertMovieMetadata({
         filmId,
         title: row.title,
-        year: row.year,
+        year: result.show.year ?? row.year,
         genres: result.show.genres,
         metadataSource: "tvmaze",
         metadataId: String(result.show.id),
@@ -207,7 +209,7 @@ async function lookupAndStore(row: ReviewRow): Promise<CachedMovieMetadata> {
     return upsertMovieMetadata({
       filmId,
       title: row.title,
-      year: row.year,
+      year: result.movie.year,
       genres: result.movie.genres,
       metadataSource: "radarr",
       metadataId: String(result.movie.tmdbId),

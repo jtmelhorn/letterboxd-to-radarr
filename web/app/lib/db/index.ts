@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS reviewer_groups (
   auto_threshold REAL NOT NULL DEFAULT 4,
   sync_interval TEXT NOT NULL DEFAULT '1d',
   requires_manual_approval INTEGER NOT NULL DEFAULT 0,
+  filters_json TEXT NOT NULL DEFAULT '{"version":1,"rules":[]}',
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
@@ -92,7 +93,6 @@ CREATE TABLE IF NOT EXISTS movie_metadata (
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
-CREATE INDEX IF NOT EXISTS movie_metadata_title_year_idx ON movie_metadata(normalized_title, year);
 CREATE INDEX IF NOT EXISTS movie_metadata_status_idx ON movie_metadata(metadata_lookup_status);
 
 CREATE TABLE IF NOT EXISTS sync_results (
@@ -159,6 +159,12 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
   );
   ensureColumn(
     sqlite,
+    "reviewer_groups",
+    "filters_json",
+    `filters_json TEXT NOT NULL DEFAULT '{"version":1,"rules":[]}'`,
+  );
+  ensureColumn(
+    sqlite,
     "radarr_targets",
     "auto_fetch_metadata",
     "auto_fetch_metadata INTEGER NOT NULL DEFAULT 1",
@@ -166,6 +172,10 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
   ensureColumn(sqlite, "reviews", "backdrop_url", "backdrop_url TEXT");
   ensureColumn(sqlite, "reviews", "tmdb_movie_id", "tmdb_movie_id INTEGER");
   ensureColumn(sqlite, "reviews", "tmdb_tv_id", "tmdb_tv_id INTEGER");
+  ensureColumn(sqlite, "movie_metadata", "year", "year INTEGER");
+  sqlite
+    .prepare("CREATE INDEX IF NOT EXISTS movie_metadata_title_year_idx ON movie_metadata(normalized_title, year)")
+    .run();
 
   // Ensure the singleton settings row exists.
   sqlite

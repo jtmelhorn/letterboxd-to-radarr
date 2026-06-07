@@ -22,6 +22,7 @@ export const reviewerGroups = sqliteTable("reviewer_groups", {
   autoThreshold: real("auto_threshold").notNull().default(4),
   syncInterval: text("sync_interval").notNull().default("1d"),
   requiresManualApproval: integer("requires_manual_approval", { mode: "boolean" }).notNull().default(false),
+  filtersJson: text("filters_json").notNull().default('{"version":1,"rules":[]}'),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),

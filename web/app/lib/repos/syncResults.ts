@@ -7,7 +7,7 @@ import type { SyncResultItem } from "@/app/types/movie";
 
 export interface RecordSyncInput {
   reviewId: number;
-  status: "added" | "exists" | "error";
+  status: "added" | "exists" | "error" | "skipped";
   radarrTmdbId?: number | null;
   message: string;
   auto: boolean;

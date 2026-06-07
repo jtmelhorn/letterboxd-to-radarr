@@ -37,6 +37,25 @@ export interface ReviewerDto {
   handle: string;
 }
 
+export interface ReleaseYearSyncFilterRule {
+  type: "releaseYear";
+  operator: "equals";
+  value: number;
+}
+
+export interface GenreSyncFilterRule {
+  type: "genre";
+  operator: "excludesAny";
+  values: string[];
+}
+
+export type SyncFilterRule = ReleaseYearSyncFilterRule | GenreSyncFilterRule;
+
+export interface SyncFilters {
+  version: 1;
+  rules: SyncFilterRule[];
+}
+
 export interface ReviewerGroupDto {
   id: number;
   name: string;
@@ -45,6 +64,7 @@ export interface ReviewerGroupDto {
   ratingThreshold: number;
   syncInterval: SyncInterval;
   requiresManualApproval: boolean;
+  filters: SyncFilters;
   reviewerHandles: string[];
 }
 
@@ -193,6 +213,7 @@ export interface SyncRunSummary {
   exists: number;
   failed: number;
   pending?: number;
+  skipped?: number;
   threshold: number;
   results: SyncResultItem[];
 }

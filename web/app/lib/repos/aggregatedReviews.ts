@@ -129,6 +129,7 @@ export function getAggregatedMovies(
     const filmId = canonicalFilmGuid(row);
     const status = statusMap.get(row.id) ?? null;
     const metadata = metadataMap.get(filmId);
+    const year = row.year ?? metadata?.year ?? null;
     const posterUrl = row.posterUrl ?? metadata?.posterUrl ?? undefined;
     const backdropUrl = row.backdropUrl ?? metadata?.backdropUrl ?? undefined;
     const review: AggregatedReviewDto = {
@@ -136,7 +137,7 @@ export function getAggregatedMovies(
       reviewerId: row.userId,
       reviewerHandle: row.reviewerHandle,
       title: row.title,
-      year: row.year,
+      year,
       rating: row.rating,
       guid: row.guid,
       status,
@@ -160,7 +161,7 @@ export function getAggregatedMovies(
       grouped.set(filmId, {
         id: filmId,
         title: row.title,
-        year: row.year,
+        year,
         averageRating: row.rating,
         latestReviewedAt: row.reviewedAt ?? undefined,
         posterUrl,
@@ -197,7 +198,7 @@ export function getAggregatedMovies(
     if (reviewTime(row.reviewedAt) > reviewTime(existing.latestReviewedAt)) {
       existing.latestReviewedAt = row.reviewedAt ?? undefined;
       existing.title = row.title;
-      existing.year = row.year;
+      existing.year = year;
     }
   }
 

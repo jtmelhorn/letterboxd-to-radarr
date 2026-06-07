@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent, FormEvent, ReactNode } from "react";
 
 import { canCompleteSetup, ControlPanelForm } from "@/app/components/ControlPanelForm";
+import { normalizeGenreKey, normalizeGenreLabel, normalizeSyncFilters } from "@/app/lib/syncFilters";
 import type {
   AggregatedMovieDto,
   AuthStatusResponse,
@@ -14,6 +15,7 @@ import type {
   ReviewerDto,
   ReviewerGroupDto,
   ReviewerScope,
+  SyncFilters,
   SyncInterval,
   SyncResultItem,
   SyncRunSummary,
@@ -25,7 +27,7 @@ interface LocalConfig {
 
 type SendState = "idle" | "loading" | "added" | "error";
 
-type ActivityStatus = "added" | "exists" | "error";
+type ActivityStatus = "added" | "exists" | "error" | "skipped";
 
 interface ActivityEntry {
   id: string;
@@ -33,7 +35,7 @@ interface ActivityEntry {
   title: string;
   year: number | null;
   status: ActivityStatus;
-  outcome: "added" | "error";
+  outcome: "added" | "error" | "skipped";
   message: string;
   at: number;
   auto: boolean;
@@ -53,6 +55,7 @@ const LEGACY_STORAGE_KEY = "letterboxd-to-radarr-local-config";
 const UNKNOWN_GENRE = "Unknown genre";
 const ratingOptions = Array.from({ length: 9 }, (_, i) => 1 + i * 0.5);
 const groupRatingOptions = [3, 3.5, 4, 4.5, 5];
+const commonExcludedGenreOptions = ["Documentary", "Short", "Reality", "TV Movie"];
 const syncIntervalOptions: Array<{ value: SyncInterval; label: string }> = [
   { value: "manual", label: "Manual only" },
   { value: "30m", label: "Every 30 minutes" },
@@ -145,7 +148,33 @@ function isAddedToRadarr(movie: AggregatedMovieDto, sendStates: Record<string, S
 }
 
 function movieGenres(movie: AggregatedMovieDto): string[] {
-  return movie.genres.length > 0 ? movie.genres : [UNKNOWN_GENRE];
+  return movie.genres.length > 0 ? movie.genres.map(normalizeGenreLabel).filter(Boolean) : [UNKNOWN_GENRE];
+}
+
+function releaseYearFilterValue(filters: SyncFilters): number | "" {
+  const rule = normalizeSyncFilters(filters).rules.find(
+    (candidate) => candidate.type === "releaseYear" && candidate.operator === "equals",
+  );
+  return rule?.type === "releaseYear" ? rule.value : "";
+}
+
+function excludedGenreValues(filters: SyncFilters): string[] {
+  const rule = normalizeSyncFilters(filters).rules.find(
+    (candidate) => candidate.type === "genre" && candidate.operator === "excludesAny",
+  );
+  return rule?.type === "genre" ? rule.values : [];
+}
+
+function buildGroupFilters(input: { releaseYear: number | ""; excludedGenres: string[] }): SyncFilters {
+  const rules: SyncFilters["rules"] = [];
+  if (typeof input.releaseYear === "number" && Number.isInteger(input.releaseYear)) {
+    rules.push({ type: "releaseYear", operator: "equals", value: input.releaseYear });
+  }
+  const excludedGenres = input.excludedGenres.map(normalizeGenreLabel).filter(Boolean);
+  if (excludedGenres.length > 0) {
+    rules.push({ type: "genre", operator: "excludesAny", values: excludedGenres });
+  }
+  return normalizeSyncFilters({ version: 1, rules });
 }
 
 function statusToSendState(status: AggregatedMovieDto["status"]): SendState {
@@ -156,14 +185,20 @@ function statusToSendState(status: AggregatedMovieDto["status"]): SendState {
 
 function syncResultToActivity(item: SyncResultItem): ActivityEntry {
   const status: ActivityStatus =
-    item.status === "error" ? "error" : item.status === "exists" ? "exists" : "added";
+    item.status === "error"
+      ? "error"
+      : item.status === "skipped"
+        ? "skipped"
+        : item.status === "exists"
+          ? "exists"
+          : "added";
   return {
     id: String(item.id),
     reviewId: item.reviewId,
     title: item.title,
     year: item.year,
     status,
-    outcome: status === "error" ? "error" : "added",
+    outcome: status === "error" ? "error" : status === "skipped" ? "skipped" : "added",
     message: item.message,
     at: item.at,
     auto: item.auto,
@@ -1007,7 +1042,7 @@ export default function Home() {
     const genres = new Set<string>();
     for (const movie of movies) {
       for (const genre of movieGenres(movie)) {
-        genres.add(genre);
+        genres.add(normalizeGenreLabel(genre));
       }
     }
     return Array.from(genres).sort((a, b) => {
@@ -1016,6 +1051,17 @@ export default function Home() {
       return a.localeCompare(b);
     });
   }, [movies]);
+
+  const groupGenreOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const genre of [...commonExcludedGenreOptions, ...genreOptions]) {
+      if (genre === UNKNOWN_GENRE) continue;
+      const label = normalizeGenreLabel(genre);
+      const key = normalizeGenreKey(label);
+      if (key) options.set(key, label);
+    }
+    return Array.from(options.values()).sort((a, b) => a.localeCompare(b));
+  }, [genreOptions]);
 
   const genreFilterLabel =
     selectedGenres.length === 0
@@ -1233,14 +1279,20 @@ export default function Home() {
 
   async function saveReviewerGroup(
     group: ReviewerGroupDto,
-    update: Partial<Pick<ReviewerGroupDto, "name" | "ratingThreshold" | "syncInterval" | "requiresManualApproval" | "reviewerHandles">>,
-  ) {
+    update: Partial<
+      Pick<
+        ReviewerGroupDto,
+        "name" | "ratingThreshold" | "syncInterval" | "requiresManualApproval" | "filters" | "reviewerHandles"
+      >
+    >,
+  ): Promise<boolean> {
     const next = {
       id: group.id,
       name: update.name ?? group.name,
       ratingThreshold: update.ratingThreshold ?? group.ratingThreshold ?? group.autoThreshold,
       syncInterval: update.syncInterval ?? group.syncInterval,
       requiresManualApproval: update.requiresManualApproval ?? group.requiresManualApproval,
+      filters: update.filters ?? group.filters,
       reviewerHandles: update.reviewerHandles ?? group.reviewerHandles,
     };
     setSettingsError(null);
@@ -1254,8 +1306,10 @@ export default function Home() {
       if (!res.ok) throw new Error(apiMessage(body, "Unable to save reviewer group."));
       setReviewerGroups(body?.groups ?? []);
       await loadPendingApprovals();
+      return true;
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : "Unable to save reviewer group.");
+      return false;
     }
   }
 
@@ -1295,8 +1349,22 @@ export default function Home() {
     const payload = draggedReviewerFromEvent(event);
     setActiveDropZone(null);
     setDraggedReviewer(null);
-    if (!payload || group.id === 1 || group.reviewerHandles.includes(payload.handle)) return;
-    await saveReviewerGroup(group, { reviewerHandles: [...group.reviewerHandles, payload.handle] });
+    if (!payload || group.id === 1) return;
+    if (payload.source === "group" && payload.groupId === group.id) return;
+
+    const targetSaved = group.reviewerHandles.includes(payload.handle)
+      ? true
+      : await saveReviewerGroup(group, { reviewerHandles: [...group.reviewerHandles, payload.handle] });
+    if (!targetSaved) return;
+
+    if (payload.source === "group" && typeof payload.groupId === "number") {
+      const sourceGroup = reviewerGroups.find((candidate) => candidate.id === payload.groupId);
+      if (sourceGroup && sourceGroup.id !== 1) {
+        await saveReviewerGroup(sourceGroup, {
+          reviewerHandles: sourceGroup.reviewerHandles.filter((handle) => handle !== payload.handle),
+        });
+      }
+    }
   }
 
   async function dropReviewerOnPool(event: DragEvent<HTMLElement>) {
@@ -1325,6 +1393,7 @@ export default function Home() {
           ratingThreshold: newGroupThreshold,
           syncInterval: "1d",
           requiresManualApproval: false,
+          filters: buildGroupFilters({ releaseYear: "", excludedGenres: [] }),
           reviewerHandles: [],
         }),
       });
@@ -2642,11 +2711,15 @@ export default function Home() {
                         className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${
                           entry.outcome === "added"
                             ? "bg-pine/20 text-cornsilk"
-                            : "bg-rose-500/15 text-rose-400"
+                            : entry.outcome === "skipped"
+                              ? "bg-azure/15 text-azure"
+                              : "bg-rose-500/15 text-rose-400"
                         }`}
                       >
                         {entry.outcome === "added" ? (
                           <CheckIcon className="h-3.5 w-3.5" />
+                        ) : entry.outcome === "skipped" ? (
+                          <InfoIcon className="h-3.5 w-3.5" />
                         ) : (
                           <ExclamationIcon className="h-3.5 w-3.5" />
                         )}
@@ -2662,7 +2735,11 @@ export default function Home() {
                         </div>
                         <p
                           className={`mt-0.5 line-clamp-2 text-xs leading-relaxed ${
-                            entry.outcome === "added" ? "text-cornsilk/60" : "text-rose-400/80"
+                            entry.outcome === "added"
+                              ? "text-cornsilk/60"
+                              : entry.outcome === "skipped"
+                                ? "text-azure/80"
+                                : "text-rose-400/80"
                           }`}
                         >
                           {entry.message}
@@ -2670,12 +2747,14 @@ export default function Home() {
                         <div className="mt-1.5 flex items-center gap-2">
                           <span
                             className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
-                              entry.auto
+                              entry.outcome === "skipped"
+                                ? "bg-azure/10 text-azure border border-azure/20"
+                                : entry.auto
                                 ? "bg-granite/20 text-cornsilk/70 border border-granite/30"
                                 : "bg-cornsilk/5 text-cornsilk/60 border border-cornsilk/5"
                             }`}
                           >
-                            {entry.auto ? "Auto" : "Manual"}
+                            {entry.outcome === "skipped" ? "Skipped" : entry.auto ? "Auto" : "Manual"}
                           </span>
                           <span className="text-[10px] text-cornsilk/55">{formatRelativeTime(entry.at)}</span>
                           {entry.outcome === "error" && entry.reviewId != null && (
@@ -2808,23 +2887,23 @@ export default function Home() {
           <div
             aria-labelledby="settings-title"
             aria-modal="true"
-            className="glass-modal flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-3xl border border-cornsilk/10 shadow-2xl sm:max-w-2xl sm:rounded-[var(--radius-card)]"
+            className="glass-modal flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-3xl border border-cornsilk/10 shadow-2xl sm:max-w-4xl sm:rounded-[var(--radius-card)]"
             role="dialog"
           >
             <ModalHeader
               closeLabel="Close settings"
               eyebrow="Control panel"
               onClose={() => setIsSettingsOpen(false)}
-              title="Application Settings"
+              title="Sync Configuration"
               titleId="settings-title"
             />
 
             <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
               <section className="rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
                 <div className="mb-4 space-y-1">
-                  <h3 className="text-base font-extrabold tracking-tight text-cornsilk">Letterboxd reviewers</h3>
+                  <h3 className="text-base font-extrabold tracking-tight text-cornsilk">Reviewers</h3>
                   <p className="text-xs leading-relaxed text-cornsilk/65">
-                    Add public handles, then drag reviewers from the pool into custom sync groups.
+                    Add public handles here, then assign them to sync groups below.
                   </p>
                 </div>
                 <div className="space-y-4">
@@ -2902,9 +2981,9 @@ export default function Home() {
 
               <section className="rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
                 <div className="mb-4 space-y-1">
-                  <h3 className="text-base font-extrabold tracking-tight text-cornsilk">Reviewer groups</h3>
+                  <h3 className="text-base font-extrabold tracking-tight text-cornsilk">Sync groups</h3>
                   <p className="text-xs leading-relaxed text-cornsilk/65">
-                    Groups use the average score from their reviewers for scheduled Radarr sync.
+                    Groups control reviewer membership, sync timing, approval, and auto-sync filters together.
                   </p>
                 </div>
                 <div className="space-y-4">
@@ -3020,6 +3099,128 @@ export default function Home() {
                               />
                               <span className="text-xs font-bold text-cornsilk/75">Require approval</span>
                             </label>
+                          </div>
+
+                          <div className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 p-3">
+                            <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                              <div>
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
+                                  Auto-sync filters
+                                </p>
+                                <p className="mt-1 text-[11px] leading-relaxed text-cornsilk/50">
+                                  Filters apply before approvals or Radarr adds for this group.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[180px_minmax(0,1fr)]">
+                              <label className="space-y-1">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
+                                  Release year
+                                </span>
+                                <input
+                                  aria-label={`${group.name} release year filter`}
+                                  className={`${inputCls} h-9 w-full px-3 text-xs`}
+                                  defaultValue={releaseYearFilterValue(group.filters)}
+                                  inputMode="numeric"
+                                  max={2200}
+                                  min={1888}
+                                  onBlur={(event) => {
+                                    const raw = event.target.value.trim();
+                                    const year = raw ? Number(raw) : "";
+                                    if (
+                                      raw &&
+                                      (typeof year !== "number" ||
+                                        !Number.isInteger(year) ||
+                                        year < 1888 ||
+                                        year > 2200)
+                                    ) {
+                                      event.target.value = String(releaseYearFilterValue(group.filters));
+                                      return;
+                                    }
+                                    void saveReviewerGroup(group, {
+                                      filters: buildGroupFilters({
+                                        releaseYear: year,
+                                        excludedGenres: excludedGenreValues(group.filters),
+                                      }),
+                                    });
+                                  }}
+                                  placeholder="All years"
+                                  type="number"
+                                />
+                              </label>
+                              <div className="space-y-2">
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                                  <label className="min-w-0 flex-1 space-y-1">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
+                                      Excluded genres
+                                    </span>
+                                    <select
+                                      aria-label={`Add excluded genre for ${group.name}`}
+                                      className={`${inputCls} h-9 w-full px-3 text-xs`}
+                                      value=""
+                                      onChange={(event) => {
+                                        const genre = event.target.value;
+                                        const excludedGenres = excludedGenreValues(group.filters);
+                                        if (!genre) return;
+                                        void saveReviewerGroup(group, {
+                                          filters: buildGroupFilters({
+                                            releaseYear: releaseYearFilterValue(group.filters),
+                                            excludedGenres: [...excludedGenres, genre],
+                                          }),
+                                        });
+                                      }}
+                                    >
+                                      <option value="">Add excluded genre…</option>
+                                      {groupGenreOptions
+                                        .filter(
+                                          (genre) =>
+                                            !excludedGenreValues(group.filters).some(
+                                              (excluded) => normalizeGenreKey(excluded) === normalizeGenreKey(genre),
+                                            ),
+                                        )
+                                        .map((genre) => (
+                                          <option key={genre} value={genre}>
+                                            {genre}
+                                          </option>
+                                        ))}
+                                    </select>
+                                  </label>
+                                </div>
+                                <div className="flex min-h-8 flex-wrap gap-2">
+                                  {excludedGenreValues(group.filters).map((genre) => (
+                                    <span
+                                      key={genre}
+                                      className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--radius-control)] border border-gold/20 bg-gold/10 px-2.5 py-1 text-[11px] font-bold text-gold"
+                                    >
+                                      <span className="truncate">{genre}</span>
+                                      <button
+                                        aria-label={`Allow ${genre} in ${group.name}`}
+                                        className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-gold/70 transition hover:bg-gold/15 hover:text-gold"
+                                        onClick={() =>
+                                          void saveReviewerGroup(group, {
+                                            filters: buildGroupFilters({
+                                              releaseYear: releaseYearFilterValue(group.filters),
+                                              excludedGenres: excludedGenreValues(group.filters).filter(
+                                                (candidate) =>
+                                                  normalizeGenreKey(candidate) !== normalizeGenreKey(genre),
+                                              ),
+                                            }),
+                                          })
+                                        }
+                                        type="button"
+                                      >
+                                        <XIcon className="h-3 w-3" />
+                                      </button>
+                                    </span>
+                                  ))}
+                                  {excludedGenreValues(group.filters).length === 0 && (
+                                    <span className="text-[11px] font-semibold text-cornsilk/45">
+                                      No genres excluded
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
                           </div>
 
                           <div

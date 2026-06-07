@@ -42,9 +42,9 @@ async function runScheduledSync(): Promise<void> {
         { type: "group", groupId: group.id },
         { auto: true, threshold: group.ratingThreshold },
       );
-      if (summary.added > 0 || summary.failed > 0 || (summary.pending ?? 0) > 0) {
+      if (summary.added > 0 || summary.failed > 0 || (summary.pending ?? 0) > 0 || (summary.skipped ?? 0) > 0) {
         console.info(
-          `[scheduler] ${group.name}: +${summary.added} added, ${summary.exists} existing, ${summary.failed} failed, ${summary.pending ?? 0} pending`,
+          `[scheduler] ${group.name}: +${summary.added} added, ${summary.exists} existing, ${summary.failed} failed, ${summary.pending ?? 0} pending, ${summary.skipped ?? 0} skipped`,
         );
       }
     } catch (error) {
@@ -62,9 +62,9 @@ async function runScheduledInterval(interval: keyof typeof intervalSchedules): P
         { type: "group", groupId: group.id },
         { auto: true, threshold: group.ratingThreshold },
       );
-      if (summary.added > 0 || summary.failed > 0 || (summary.pending ?? 0) > 0) {
+      if (summary.added > 0 || summary.failed > 0 || (summary.pending ?? 0) > 0 || (summary.skipped ?? 0) > 0) {
         console.info(
-          `[scheduler] ${group.name}: +${summary.added} added, ${summary.exists} existing, ${summary.failed} failed, ${summary.pending ?? 0} pending`,
+          `[scheduler] ${group.name}: +${summary.added} added, ${summary.exists} existing, ${summary.failed} failed, ${summary.pending ?? 0} pending, ${summary.skipped ?? 0} skipped`,
         );
       }
     } catch (error) {

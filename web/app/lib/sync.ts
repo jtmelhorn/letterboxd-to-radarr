@@ -7,11 +7,21 @@ import { getAggregatedMovies } from "@/app/lib/repos/aggregatedReviews";
 import { enrichReviewsWithMetadata } from "@/app/lib/repos/movieMetadata";
 import { createPendingApproval } from "@/app/lib/repos/pendingApprovals";
 import { getReviewRows, upsertReviews } from "@/app/lib/repos/reviews";
-import { getReviewerGroup, listReviewerGroups } from "@/app/lib/repos/reviewerGroups";
+import {
+  DEFAULT_REVIEWER_GROUP_ID,
+  getReviewerGroup,
+  listReviewerGroups,
+} from "@/app/lib/repos/reviewerGroups";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
 import { getRecentSyncResults, recordSyncResult } from "@/app/lib/repos/syncResults";
 import { findUser, getOrCreateUser, listUsers } from "@/app/lib/repos/users";
-import type { ReviewerScope, ResolvedRadarrTarget, SyncRunSummary } from "@/app/types/movie";
+import { evaluateSyncFilters } from "@/app/lib/syncFilters";
+import type {
+  AggregatedMovieDto,
+  ReviewerScope,
+  ResolvedRadarrTarget,
+  SyncRunSummary,
+} from "@/app/types/movie";
 
 const MAX_ATTEMPTS = 3;
 const RADARR_CONCURRENCY = 3;
@@ -83,6 +93,16 @@ function thresholdForScope(scope: ReviewerScope, explicit?: number): number {
   return listReviewerGroups()[0]?.ratingThreshold ?? getRadarrTarget().autoThreshold;
 }
 
+function filterGroupForScope(scope: ReviewerScope) {
+  if (scope.type === "group" && typeof scope.groupId === "number") {
+    return getReviewerGroup(scope.groupId);
+  }
+  if (scope.type === "all") {
+    return getReviewerGroup(DEFAULT_REVIEWER_GROUP_ID);
+  }
+  return null;
+}
+
 async function refreshHandles(handles: string[]): Promise<number> {
   let fetched = 0;
   for (const handle of handles) {
@@ -113,6 +133,7 @@ async function executeSyncScope(
     exists: 0,
     failed: 0,
     pending: 0,
+    skipped: 0,
     threshold,
     results: [],
   };
@@ -125,17 +146,38 @@ async function executeSyncScope(
     return summary;
   }
 
+  const group =
+    scope.type === "group" && typeof scope.groupId === "number" ? getReviewerGroup(scope.groupId) : null;
+  const filterGroup = filterGroupForScope(scope);
   const candidates = getAggregatedMovies(scope).filter((movie) => {
     if (movie.averageRating < threshold) return false;
     if (options.force) return true;
     return movie.status !== "added" && movie.status !== "exists";
   });
 
-  const group =
-    scope.type === "group" && typeof scope.groupId === "number" ? getReviewerGroup(scope.groupId) : null;
+  const allowedCandidates: AggregatedMovieDto[] = [];
+  for (const movie of candidates) {
+    const representativeReview = movie.reviews[0];
+    if (!representativeReview) continue;
+    const filterResult = filterGroup
+      ? evaluateSyncFilters(movie, filterGroup.filters)
+      : { allowed: true, reasons: [] };
+    if (filterResult.allowed) {
+      allowedCandidates.push(movie);
+      continue;
+    }
+
+    recordSyncResult({
+      reviewId: representativeReview.id,
+      status: "skipped",
+      message: `Skipped by ${filterGroup?.name ?? "sync"} filters: ${filterResult.reasons.join("; ")}.`,
+      auto: options.auto,
+    });
+    summary.skipped = (summary.skipped ?? 0) + 1;
+  }
 
   if (group?.requiresManualApproval) {
-    for (const movie of candidates) {
+    for (const movie of allowedCandidates) {
       const representativeReview = movie.reviews[0];
       if (!representativeReview) continue;
       const pending = createPendingApproval({
@@ -156,7 +198,7 @@ async function executeSyncScope(
   const limit = pLimit(RADARR_CONCURRENCY);
 
   await Promise.all(
-    candidates.map((movie) =>
+    allowedCandidates.map((movie) =>
       limit(async () => {
         const representativeReview = movie.reviews[0];
         if (!representativeReview) return;

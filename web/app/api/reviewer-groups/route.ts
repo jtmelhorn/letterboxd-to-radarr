@@ -18,6 +18,7 @@ interface ReviewerGroupRequestBody {
   ratingThreshold?: unknown;
   syncInterval?: unknown;
   requiresManualApproval?: unknown;
+  filters?: unknown;
   reviewerHandles?: unknown;
 }
 
@@ -39,7 +40,7 @@ function parseGroupBody(body: ReviewerGroupRequestBody) {
     ? body.reviewerHandles.filter((h): h is string => typeof h === "string")
     : [];
 
-  return { id, name, ratingThreshold, syncInterval, requiresManualApproval, reviewerHandles };
+  return { id, name, ratingThreshold, syncInterval, requiresManualApproval, filters: body.filters, reviewerHandles };
 }
 
 export async function GET(request: Request) {
