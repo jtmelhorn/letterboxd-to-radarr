@@ -441,10 +441,12 @@ function PosterRadarrAction({
   movie,
   sendState,
   onSend,
+  onRemove,
 }: {
   movie: AggregatedMovieDto;
   sendState: SendState;
   onSend: (movie: AggregatedMovieDto) => void;
+  onRemove?: (movie: AggregatedMovieDto) => void;
 }) {
   if (sendState === "loading") {
     return (
@@ -486,7 +488,7 @@ function PosterRadarrAction({
           </div>
         )}
       </div>
-      <div className="absolute right-0 top-0 opacity-0 transition-opacity duration-200 pointer-events-none sm:group-hover:pointer-events-auto sm:group-hover:opacity-100 sm:group-focus-within:pointer-events-auto sm:group-focus-within:opacity-100">
+      <div className="absolute right-0 top-0 flex gap-1 opacity-0 transition-opacity duration-200 pointer-events-none sm:group-hover:pointer-events-auto sm:group-hover:opacity-100 sm:group-focus-within:pointer-events-auto sm:group-focus-within:opacity-100">
         <button
           aria-label={sendState === "added" ? `Resend ${movie.title} to Radarr` : `Retry sending ${movie.title} to Radarr`}
           className="poster-action-btn"
@@ -499,6 +501,20 @@ function PosterRadarrAction({
         >
           <ArrowPathIcon className="h-3.5 w-3.5" />
         </button>
+        {sendState === "added" && onRemove && (
+          <button
+            aria-label={`Remove ${movie.title} from Radarr`}
+            className="poster-action-btn border-rose-500/30 hover:bg-rose-500/15 hover:text-rose-300"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onRemove(movie);
+            }}
+            type="button"
+          >
+            <TrashIcon className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -2199,6 +2215,7 @@ export default function Home() {
                           <PosterRadarrAction
                             movie={movie}
                             onSend={(m) => void sendToRadarr(m)}
+                            onRemove={(m) => setRemovingMovie(m)}
                             sendState={sendState}
                           />
                         </div>
@@ -2566,6 +2583,14 @@ export default function Home() {
                         >
                           <ArrowPathIcon className="h-4 w-4" />
                           Resend to Radarr
+                        </button>
+                        <button
+                          className="flex w-full items-center justify-center gap-2 rounded-xl border border-rose-500/20 bg-rose-500/10 py-3 text-sm font-bold text-rose-300 transition hover:border-rose-500/40 hover:bg-rose-500/20 focus:outline-none focus:ring-2 focus:ring-rose-500/40"
+                          onClick={() => setRemovingMovie(activeMovie)}
+                          type="button"
+                        >
+                          <TrashIcon className="h-4 w-4" />
+                          Remove from Radarr
                         </button>
                       </div>
                     ) : (
