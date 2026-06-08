@@ -149,10 +149,6 @@ CREATE TABLE IF NOT EXISTS movie_blocklist (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS movie_blocklist_tmdb_idx ON movie_blocklist(tmdb_id) WHERE tmdb_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS movie_blocklist_imdb_idx ON movie_blocklist(imdb_id);
-CREATE INDEX IF NOT EXISTS movie_blocklist_title_year_idx ON movie_blocklist(normalized_title, year);
-CREATE INDEX IF NOT EXISTS movie_blocklist_film_idx ON movie_blocklist(film_id);
 `;
 
 function ensureColumn(sqlite: Database.Database, table: string, column: string, ddl: string): boolean {
@@ -224,8 +220,12 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
     .run();
   sqlite.prepare("CREATE INDEX IF NOT EXISTS movie_blocklist_imdb_idx ON movie_blocklist(imdb_id)").run();
   sqlite
+    .prepare("CREATE UNIQUE INDEX IF NOT EXISTS movie_blocklist_tmdb_idx ON movie_blocklist(tmdb_id) WHERE tmdb_id IS NOT NULL")
+    .run();
+  sqlite
     .prepare("CREATE INDEX IF NOT EXISTS movie_blocklist_title_year_idx ON movie_blocklist(normalized_title, year)")
     .run();
+  sqlite.prepare("CREATE INDEX IF NOT EXISTS movie_blocklist_film_idx ON movie_blocklist(film_id)").run();
 
   // Ensure the singleton settings row exists.
   sqlite
