@@ -10,8 +10,8 @@ import {
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  if (!isRequestAuthorized({ headers: new Headers() } as Request)) {
+export async function GET(request: Request) {
+  if (!isRequestAuthorized(request)) {
     return NextResponse.json({ message: "Unauthorized." }, { status: 401 });
   }
 
@@ -25,6 +25,8 @@ export async function POST(request: Request) {
 
   let body: {
     tmdbId?: number | null;
+    imdbId?: string | null;
+    radarrMovieId?: number | null;
     title?: string;
     year?: number | null;
     filmId?: string;
@@ -44,6 +46,8 @@ export async function POST(request: Request) {
 
   addToBlocklist({
     tmdbId: body.tmdbId ?? null,
+    imdbId: body.imdbId ?? null,
+    radarrMovieId: body.radarrMovieId ?? null,
     title: body.title,
     year: body.year ?? null,
     filmId: body.filmId,

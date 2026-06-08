@@ -1,5 +1,13 @@
 export type MetadataLookupStatus = "pending" | "matched" | "not_found" | "error";
 export type MetadataMediaType = "movie" | "tv";
+export type SyncMovieStatus =
+  | "added"
+  | "exists"
+  | "error"
+  | "skipped"
+  | "removed"
+  | "blocklisted"
+  | "failed_remove";
 
 export interface MovieReview {
   title: string;
@@ -11,6 +19,7 @@ export interface MovieReview {
   reviewText?: string;
   letterboxdUrl?: string;
   tmdbMovieId?: number;
+  imdbId?: string;
   tmdbTvId?: number;
   genres?: string[];
   metadataSource?: string | null;
@@ -29,7 +38,7 @@ export interface LetterboxdResponse {
 /** A stored review enriched with its id and latest Radarr sync status. */
 export interface ReviewDto extends MovieReview {
   id: number;
-  status: "added" | "exists" | "error" | null;
+  status: SyncMovieStatus | null;
 }
 
 export interface ReviewerDto {
@@ -109,7 +118,7 @@ export interface AggregatedReviewDto extends MovieReview {
   id: number;
   reviewerId: number;
   reviewerHandle: string;
-  status: "added" | "exists" | "error" | null;
+  status: SyncMovieStatus | null;
 }
 
 export interface AggregatedMovieDto {
@@ -122,6 +131,7 @@ export interface AggregatedMovieDto {
   backdropUrl?: string;
   letterboxdUrl?: string;
   tmdbMovieId?: number;
+  imdbId?: string;
   tmdbTvId?: number;
   genres: string[];
   metadataSource: string | null;
@@ -132,7 +142,7 @@ export interface AggregatedMovieDto {
   reviewerCount: number;
   reviewerHandles: string[];
   reviews: AggregatedReviewDto[];
-  status: "added" | "exists" | "error" | null;
+  status: SyncMovieStatus | null;
 }
 
 export interface RadarrAddRequest {
@@ -150,6 +160,7 @@ export interface RadarrAddResponse {
     title: string;
     year: number;
     tmdbId: number;
+    radarrMovieId?: number | null;
   };
 }
 
@@ -219,6 +230,7 @@ export interface SyncResultItem {
   title: string;
   year: number | null;
   status: string;
+  radarrMovieId?: number | null;
   message: string;
   auto: boolean;
   at: number;
@@ -244,6 +256,8 @@ export interface ReviewerScope {
 export interface BlocklistedMovieDto {
   id: number;
   tmdbId: number | null;
+  imdbId: string | null;
+  radarrMovieId: number | null;
   title: string;
   year: number | null;
   filmId: string;

@@ -3,12 +3,13 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/app/lib/db";
 import { reviews, syncResults } from "@/app/lib/db/schema";
 import { canonicalFilmGuid } from "@/app/lib/filmIdentity";
-import type { SyncResultItem } from "@/app/types/movie";
+import type { SyncMovieStatus, SyncResultItem } from "@/app/types/movie";
 
 export interface RecordSyncInput {
   reviewId: number;
-  status: "added" | "exists" | "error" | "skipped";
+  status: SyncMovieStatus;
   radarrTmdbId?: number | null;
+  radarrMovieId?: number | null;
   message: string;
   auto: boolean;
 }
@@ -20,6 +21,7 @@ export function recordSyncResult(input: RecordSyncInput): void {
       reviewId: input.reviewId,
       status: input.status,
       radarrTmdbId: input.radarrTmdbId ?? null,
+      radarrMovieId: input.radarrMovieId ?? null,
       message: input.message,
       auto: input.auto,
       createdAt: new Date().toISOString(),
@@ -34,6 +36,7 @@ export function getRecentSyncResults(userId?: number, limit = 100): SyncResultIt
       id: syncResults.id,
       reviewId: syncResults.reviewId,
       status: syncResults.status,
+      radarrMovieId: syncResults.radarrMovieId,
       message: syncResults.message,
       auto: syncResults.auto,
       createdAt: syncResults.createdAt,
@@ -58,10 +61,64 @@ export function getRecentSyncResults(userId?: number, limit = 100): SyncResultIt
     title: row.title,
     year: row.year,
     status: row.status,
+    radarrMovieId: row.radarrMovieId ?? null,
     message: row.message,
     auto: row.auto,
     at: Date.parse(row.createdAt) || Date.now(),
   }));
+}
+
+export interface LatestSyncResultForFilm {
+  reviewId: number;
+  status: SyncMovieStatus;
+  radarrTmdbId: number | null;
+  radarrMovieId: number | null;
+  message: string;
+  createdAt: string;
+}
+
+export function getLatestSyncResultForFilmId(filmId: string): LatestSyncResultForFilm | null {
+  const db = getDb();
+  const rows = db
+    .select({
+      reviewId: syncResults.reviewId,
+      status: syncResults.status,
+      radarrTmdbId: syncResults.radarrTmdbId,
+      radarrMovieId: syncResults.radarrMovieId,
+      message: syncResults.message,
+      createdAt: syncResults.createdAt,
+      title: reviews.title,
+      year: reviews.year,
+      letterboxdUrl: reviews.letterboxdUrl,
+      guid: reviews.guid,
+    })
+    .from(syncResults)
+    .innerJoin(reviews, eq(syncResults.reviewId, reviews.id))
+    .orderBy(desc(syncResults.createdAt))
+    .all();
+
+  const row = rows.find((item) => canonicalFilmGuid(item) === filmId);
+  if (!row || !isSyncMovieStatus(row.status)) return null;
+  return {
+    reviewId: row.reviewId,
+    status: row.status,
+    radarrTmdbId: row.radarrTmdbId ?? null,
+    radarrMovieId: row.radarrMovieId ?? null,
+    message: row.message,
+    createdAt: row.createdAt,
+  };
+}
+
+export function isSyncMovieStatus(status: string): status is SyncMovieStatus {
+  return (
+    status === "added" ||
+    status === "exists" ||
+    status === "error" ||
+    status === "skipped" ||
+    status === "removed" ||
+    status === "blocklisted" ||
+    status === "failed_remove"
+  );
 }
 
 export function clearSyncResultsForUser(userId: number): number {
@@ -85,14 +142,5 @@ export function clearSyncResultsForUser(userId: number): number {
 export function clearAllSyncResults(): number {
   const db = getDb();
   const result = db.delete(syncResults).run();
-  return result.changes ?? 0;
-}
-
-export function clearSyncResultForReview(reviewId: number): number {
-  const db = getDb();
-  const result = db
-    .delete(syncResults)
-    .where(eq(syncResults.reviewId, reviewId))
-    .run();
   return result.changes ?? 0;
 }

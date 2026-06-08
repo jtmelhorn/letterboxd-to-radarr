@@ -141,6 +141,7 @@ export const syncResults = sqliteTable(
       .references(() => reviews.id, { onDelete: "cascade" }),
     status: text("status").notNull(),
     radarrTmdbId: integer("radarr_tmdb_id"),
+    radarrMovieId: integer("radarr_movie_id"),
     message: text("message").notNull().default(""),
     attempts: integer("attempts").notNull().default(1),
     auto: integer("auto", { mode: "boolean" }).notNull().default(false),
@@ -196,7 +197,10 @@ export const movieBlocklist = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     tmdbId: integer("tmdb_id"),
+    imdbId: text("imdb_id"),
+    radarrMovieId: integer("radarr_movie_id"),
     title: text("title").notNull(),
+    normalizedTitle: text("normalized_title").notNull().default(""),
     year: integer("year"),
     filmId: text("film_id").notNull(),
     source: text("source").notNull().default("manually_blocked"),
@@ -207,6 +211,8 @@ export const movieBlocklist = sqliteTable(
   },
   (table) => [
     uniqueIndex("movie_blocklist_tmdb_idx").on(table.tmdbId).where(sql`tmdb_id IS NOT NULL`),
+    index("movie_blocklist_imdb_idx").on(table.imdbId),
+    index("movie_blocklist_title_year_idx").on(table.normalizedTitle, table.year),
     index("movie_blocklist_film_idx").on(table.filmId),
   ],
 );

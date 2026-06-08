@@ -276,4 +276,379 @@ describeWithSqlite("sync filtering", () => {
     expect(summary.skipped).toBe(1);
     expect(lookupCalls).toBe(0);
   });
+
+  it("runs freshly pulled reviews through sync groups from the reviews refresh endpoint", async () => {
+    let addCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const request = input instanceof Request ? input : null;
+        const url = request?.url ?? String(input);
+        const method = init?.method ?? request?.method ?? "GET";
+
+        if (url === "https://letterboxd.com/alice/rss/") {
+          return new Response(rss, {
+            status: 200,
+            headers: { "Content-Type": "application/rss+xml" },
+          });
+        }
+
+        if (url.startsWith("http://radarr.local/api/v3/movie/lookup")) {
+          const term = new URL(url).searchParams.get("term") ?? "";
+          const tmdbId = term.startsWith("tmdb:") ? term.slice("tmdb:".length) : "100";
+          const movie = lookupMovies.get(tmdbId);
+          return Response.json(movie ? [movie] : []);
+        }
+
+        if (url === "http://radarr.local/api/v3/movie" && method === "POST") {
+          addCalls += 1;
+          return Response.json(
+            { id: 900 + addCalls, title: "Action Future", year: 2026, tmdbId: 100 },
+            { status: 201 },
+          );
+        }
+
+        return Response.json({ message: `Unexpected request: ${method} ${url}` }, { status: 500 });
+      }),
+    );
+
+    const { buildSessionToken, SESSION_COOKIE } = await import("@/app/lib/auth");
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+    const { saveSettings } = await import("@/app/lib/repos/settings");
+    const { getRecentSyncResults } = await import("@/app/lib/repos/syncResults");
+    const { GET } = await import("@/app/api/reviews/route");
+
+    getOrCreateUser("alice");
+    saveSettings({
+      radarrUrl: "http://radarr.local",
+      radarrApiKey: "secret",
+      qualityProfileId: 1,
+      rootFolderPath: "/movies",
+    });
+    upsertReviewerGroup({
+      name: "Action fans",
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: false,
+      filters: {
+        year: { mode: "exact", exactYear: 2026 },
+        genres: { include: [], exclude: [] },
+      },
+      reviewerHandles: ["alice"],
+    });
+
+    const response = await GET(
+      new Request("http://localhost/api/reviews?refresh=1&scope=reviewer&reviewer=alice", {
+        headers: {
+          cookie: `${SESSION_COOKIE}=${encodeURIComponent(buildSessionToken())}`,
+        },
+      }),
+    );
+    const body = (await response.json()) as {
+      reviews?: Array<{ title: string; status: string | null }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(addCalls).toBe(1);
+    expect(body.reviews?.find((movie) => movie.title === "Action Future")?.status).toBe("added");
+    expect(getRecentSyncResults(undefined, 10).filter((result) => result.status === "added")).toHaveLength(
+      1,
+    );
+  });
+
+  it("removes a synced movie by exact Radarr id without deleting files or blocklisting", async () => {
+    let deleteUrl = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const request = input instanceof Request ? input : null;
+        const url = request?.url ?? String(input);
+        const method = init?.method ?? request?.method ?? "GET";
+        if (method === "DELETE" && url.startsWith("http://radarr.local/api/v3/movie/777")) {
+          deleteUrl = url;
+          return new Response(null, { status: 200 });
+        }
+        return Response.json({ message: `Unexpected request: ${method} ${url}` }, { status: 500 });
+      }),
+    );
+
+    const { buildSessionToken, SESSION_COOKIE } = await import("@/app/lib/auth");
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviews } = await import("@/app/lib/repos/reviews");
+    const { saveSettings } = await import("@/app/lib/repos/settings");
+    const { recordSyncResult } = await import("@/app/lib/repos/syncResults");
+    const { getAggregatedMovies } = await import("@/app/lib/repos/aggregatedReviews");
+    const { listBlocklistedMovies } = await import("@/app/lib/repos/movieBlocklist");
+    const { POST } = await import("@/app/api/movies/[id]/remove/route");
+
+    const user = getOrCreateUser("alice");
+    upsertReviews(user.id, [
+      {
+        title: "Delete Me",
+        year: 2026,
+        rating: 5,
+        letterboxdUrl: "https://letterboxd.com/alice/film/delete-me/",
+        tmdbMovieId: 700,
+      },
+    ]);
+    const movie = getAggregatedMovies()[0];
+    recordSyncResult({
+      reviewId: movie.reviews[0]!.id,
+      status: "added",
+      radarrTmdbId: 700,
+      radarrMovieId: 777,
+      message: "Movie added to Radarr.",
+      auto: false,
+    });
+    saveSettings({
+      radarrUrl: "http://radarr.local",
+      radarrApiKey: "secret",
+      qualityProfileId: 1,
+      rootFolderPath: "/movies",
+    });
+
+    const response = await POST(
+      new Request(`http://localhost/api/movies/${encodeURIComponent(movie.id)}/remove`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          cookie: `${SESSION_COOKIE}=${encodeURIComponent(buildSessionToken())}`,
+        },
+        body: JSON.stringify({ deleteFiles: false, blockFutureSync: false }),
+      }),
+      { params: Promise.resolve({ id: encodeURIComponent(movie.id) }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(deleteUrl).toBe("http://radarr.local/api/v3/movie/777");
+    expect(getAggregatedMovies(undefined, { onlySynced: true })).toHaveLength(0);
+    expect(listBlocklistedMovies()).toHaveLength(0);
+  });
+
+  it("passes explicit deleteFiles and blocklists after removal", async () => {
+    let deleteUrl = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const request = input instanceof Request ? input : null;
+        const url = request?.url ?? String(input);
+        const method = init?.method ?? request?.method ?? "GET";
+        if (method === "DELETE" && url.startsWith("http://radarr.local/api/v3/movie/778")) {
+          deleteUrl = url;
+          return new Response(null, { status: 200 });
+        }
+        return Response.json({ message: `Unexpected request: ${method} ${url}` }, { status: 500 });
+      }),
+    );
+
+    const { buildSessionToken, SESSION_COOKIE } = await import("@/app/lib/auth");
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviews } = await import("@/app/lib/repos/reviews");
+    const { saveSettings } = await import("@/app/lib/repos/settings");
+    const { recordSyncResult } = await import("@/app/lib/repos/syncResults");
+    const { getAggregatedMovies } = await import("@/app/lib/repos/aggregatedReviews");
+    const { listBlocklistedMovies } = await import("@/app/lib/repos/movieBlocklist");
+    const { POST } = await import("@/app/api/movies/[id]/remove/route");
+
+    const user = getOrCreateUser("alice");
+    upsertReviews(user.id, [
+      {
+        title: "Delete Files",
+        year: 2026,
+        rating: 5,
+        letterboxdUrl: "https://letterboxd.com/alice/film/delete-files/",
+        tmdbMovieId: 701,
+      },
+    ]);
+    const movie = getAggregatedMovies()[0];
+    recordSyncResult({
+      reviewId: movie.reviews[0]!.id,
+      status: "added",
+      radarrTmdbId: 701,
+      radarrMovieId: 778,
+      message: "Movie added to Radarr.",
+      auto: false,
+    });
+    saveSettings({
+      radarrUrl: "http://radarr.local",
+      radarrApiKey: "secret",
+      qualityProfileId: 1,
+      rootFolderPath: "/movies",
+    });
+
+    const response = await POST(
+      new Request(`http://localhost/api/movies/${encodeURIComponent(movie.id)}/remove`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          cookie: `${SESSION_COOKIE}=${encodeURIComponent(buildSessionToken())}`,
+        },
+        body: JSON.stringify({ deleteFiles: true, blockFutureSync: true }),
+      }),
+      { params: Promise.resolve({ id: encodeURIComponent(movie.id) }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(deleteUrl).toBe("http://radarr.local/api/v3/movie/778?deleteFiles=true");
+    expect(listBlocklistedMovies()).toEqual([
+      expect.objectContaining({ tmdbId: 701, radarrMovieId: 778, source: "removed_from_radarr" }),
+    ]);
+  });
+
+  it("records failed_remove and keeps failed removals in the synced list", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ message: "Radarr refused deletion." }, { status: 500 })),
+    );
+
+    const { buildSessionToken, SESSION_COOKIE } = await import("@/app/lib/auth");
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviews } = await import("@/app/lib/repos/reviews");
+    const { saveSettings } = await import("@/app/lib/repos/settings");
+    const { recordSyncResult } = await import("@/app/lib/repos/syncResults");
+    const { getAggregatedMovies } = await import("@/app/lib/repos/aggregatedReviews");
+    const { POST } = await import("@/app/api/movies/[id]/remove/route");
+
+    const user = getOrCreateUser("alice");
+    upsertReviews(user.id, [
+      {
+        title: "Still There",
+        year: 2026,
+        rating: 5,
+        letterboxdUrl: "https://letterboxd.com/alice/film/still-there/",
+        tmdbMovieId: 702,
+      },
+    ]);
+    const movie = getAggregatedMovies()[0];
+    recordSyncResult({
+      reviewId: movie.reviews[0]!.id,
+      status: "added",
+      radarrTmdbId: 702,
+      radarrMovieId: 779,
+      message: "Movie added to Radarr.",
+      auto: false,
+    });
+    saveSettings({
+      radarrUrl: "http://radarr.local",
+      radarrApiKey: "secret",
+      qualityProfileId: 1,
+      rootFolderPath: "/movies",
+    });
+
+    const response = await POST(
+      new Request(`http://localhost/api/movies/${encodeURIComponent(movie.id)}/remove`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          cookie: `${SESSION_COOKIE}=${encodeURIComponent(buildSessionToken())}`,
+        },
+        body: JSON.stringify({ deleteFiles: false, blockFutureSync: true }),
+      }),
+      { params: Promise.resolve({ id: encodeURIComponent(movie.id) }) },
+    );
+
+    expect(response.status).toBe(500);
+    expect(getAggregatedMovies(undefined, { onlySynced: true })).toEqual([
+      expect.objectContaining({ title: "Still There", status: "failed_remove" }),
+    ]);
+  });
+
+  it("matches blocklist entries by tmdb id, imdb id, and title/year fallback", async () => {
+    const { addToBlocklist, isMovieBlocklisted } = await import("@/app/lib/repos/movieBlocklist");
+
+    addToBlocklist({
+      tmdbId: 800,
+      title: "TMDB Block",
+      year: 2026,
+      filmId: "film:tmdb-block",
+      source: "manually_blocked",
+    });
+    addToBlocklist({
+      imdbId: "tt1234567",
+      title: "IMDb Block",
+      year: 2025,
+      filmId: "film:imdb-block",
+      source: "manually_blocked",
+    });
+    addToBlocklist({
+      title: "Fallback Block",
+      year: 2024,
+      filmId: "film:fallback-block",
+      source: "manually_blocked",
+    });
+
+    expect(isMovieBlocklisted({ tmdbId: 800, title: "Anything", year: 1999 })).toBe(true);
+    expect(isMovieBlocklisted({ imdbId: "tt1234567", title: "Anything", year: 1999 })).toBe(true);
+    expect(isMovieBlocklisted({ title: "fallback block", year: 2024 })).toBe(true);
+    expect(isMovieBlocklisted({ tmdbId: 801, title: "Fallback Block", year: 2024 })).toBe(false);
+  });
+
+  it("refuses to approve a pending movie when it is blocklisted", async () => {
+    const fetchSpy = vi.fn(async () => Response.json({ message: "Unexpected request" }, { status: 500 }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const { buildSessionToken, SESSION_COOKIE } = await import("@/app/lib/auth");
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviews } = await import("@/app/lib/repos/reviews");
+    const { saveSettings } = await import("@/app/lib/repos/settings");
+    const { upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+    const { createPendingApproval } = await import("@/app/lib/repos/pendingApprovals");
+    const { addToBlocklist } = await import("@/app/lib/repos/movieBlocklist");
+    const { getAggregatedMovies } = await import("@/app/lib/repos/aggregatedReviews");
+    const { POST } = await import("@/app/api/pending-approvals/[id]/approve/route");
+
+    const user = getOrCreateUser("alice");
+    upsertReviews(user.id, [
+      {
+        title: "Blocked Approval",
+        year: 2026,
+        rating: 5,
+        letterboxdUrl: "https://letterboxd.com/alice/film/blocked-approval/",
+        tmdbMovieId: 900,
+      },
+    ]);
+    const movie = getAggregatedMovies()[0];
+    const group = upsertReviewerGroup({
+      name: "Approvals",
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: true,
+      reviewerHandles: ["alice"],
+    });
+    const pending = createPendingApproval({
+      groupId: group.id,
+      reviewId: movie.reviews[0]!.id,
+      filmId: movie.id,
+      title: movie.title,
+      year: movie.year,
+      averageRating: movie.averageRating,
+    });
+    addToBlocklist({
+      tmdbId: 900,
+      title: movie.title,
+      year: movie.year,
+      filmId: movie.id,
+      source: "manually_blocked",
+    });
+    saveSettings({
+      radarrUrl: "http://radarr.local",
+      radarrApiKey: "secret",
+      qualityProfileId: 1,
+      rootFolderPath: "/movies",
+    });
+
+    const response = await POST(
+      new Request(`http://localhost/api/pending-approvals/${pending!.id}/approve`, {
+        method: "POST",
+        headers: {
+          cookie: `${SESSION_COOKIE}=${encodeURIComponent(buildSessionToken())}`,
+        },
+      }),
+      { params: Promise.resolve({ id: String(pending!.id) }) },
+    );
+
+    expect(response.status).toBe(409);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

@@ -5,10 +5,11 @@ import type { FormEvent, ReactNode } from "react";
 
 import { canCompleteSetup, ControlPanelForm } from "@/app/components/ControlPanelForm";
 import { SyncConfigurationPanel } from "@/app/components/SyncConfigurationPanel";
-import { normalizeGenreKey, normalizeGenreLabel } from "@/app/lib/syncFilters";
+import { evaluateSyncFilters, normalizeGenreKey, normalizeGenreLabel } from "@/app/lib/syncFilters";
 import type {
   AggregatedMovieDto,
   AuthStatusResponse,
+  BlocklistedMovieDto,
   PendingApprovalDto,
   PublicSettings,
   RadarrAddResponse,
@@ -28,7 +29,7 @@ interface LocalConfig {
 
 type SendState = "idle" | "loading" | "added" | "error";
 
-type ActivityStatus = "added" | "exists" | "error" | "skipped";
+type ActivityStatus = "added" | "exists" | "error" | "skipped" | "removed" | "blocklisted" | "failed_remove";
 
 interface ActivityEntry {
   id: string;
@@ -145,6 +146,55 @@ function movieGenres(movie: AggregatedMovieDto): string[] {
   return movie.genres.length > 0 ? movie.genres.map(normalizeGenreLabel).filter(Boolean) : [UNKNOWN_GENRE];
 }
 
+function searchText(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function movieMatchesSearch(movie: AggregatedMovieDto, query: string): boolean {
+  const q = searchText(query);
+  if (!q) return true;
+  return (
+    movie.title.toLowerCase().includes(q) ||
+    (typeof movie.year === "number" && String(movie.year).includes(q)) ||
+    movie.reviewerHandles.some((handle) => handle.toLowerCase().includes(q)) ||
+    movie.genres.some((genre) => genre.toLowerCase().includes(q)) ||
+    movie.id.toLowerCase().includes(q)
+  );
+}
+
+function pendingApprovalMatchesSearch(approval: PendingApprovalDto, query: string): boolean {
+  const q = searchText(query);
+  if (!q) return true;
+  return (
+    approval.title.toLowerCase().includes(q) ||
+    (typeof approval.year === "number" && String(approval.year).includes(q)) ||
+    approval.groupName.toLowerCase().includes(q)
+  );
+}
+
+function activityMatchesSearch(entry: ActivityEntry, query: string): boolean {
+  const q = searchText(query);
+  if (!q) return true;
+  return (
+    entry.title.toLowerCase().includes(q) ||
+    (typeof entry.year === "number" && String(entry.year).includes(q)) ||
+    entry.message.toLowerCase().includes(q) ||
+    entry.status.toLowerCase().includes(q)
+  );
+}
+
+function blocklistMatchesSearch(movie: BlocklistedMovieDto, query: string): boolean {
+  const q = searchText(query);
+  if (!q) return true;
+  return (
+    movie.title.toLowerCase().includes(q) ||
+    (typeof movie.year === "number" && String(movie.year).includes(q)) ||
+    movie.source.toLowerCase().includes(q) ||
+    (movie.imdbId?.toLowerCase().includes(q) ?? false) ||
+    (typeof movie.tmdbId === "number" && String(movie.tmdbId).includes(q))
+  );
+}
+
 function statusToSendState(status: AggregatedMovieDto["status"]): SendState {
   if (status === "added" || status === "exists") return "added";
   if (status === "error") return "error";
@@ -159,14 +209,25 @@ function syncResultToActivity(item: SyncResultItem): ActivityEntry {
         ? "skipped"
         : item.status === "exists"
           ? "exists"
-          : "added";
+          : item.status === "removed"
+            ? "removed"
+            : item.status === "blocklisted"
+              ? "blocklisted"
+              : item.status === "failed_remove"
+                ? "failed_remove"
+                : "added";
   return {
     id: String(item.id),
     reviewId: item.reviewId,
     title: item.title,
     year: item.year,
     status,
-    outcome: status === "error" ? "error" : status === "skipped" ? "skipped" : "added",
+    outcome:
+      status === "error" || status === "failed_remove"
+        ? "error"
+        : status === "skipped" || status === "removed" || status === "blocklisted"
+          ? "skipped"
+          : "added",
     message: item.message,
     at: item.at,
     auto: item.auto,
@@ -701,6 +762,7 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [movies, setMovies] = useState<AggregatedMovieDto[]>([]);
   const [syncedMovies, setSyncedMovies] = useState<AggregatedMovieDto[]>([]);
+  const [blocklistedMovies, setBlocklistedMovies] = useState<BlocklistedMovieDto[]>([]);
   const [reviewers, setReviewers] = useState<ReviewerDto[]>([]);
   const [reviewerGroups, setReviewerGroups] = useState<ReviewerGroupDto[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApprovalDto[]>([]);
@@ -714,6 +776,9 @@ export default function Home() {
   const [deleteFiles, setDeleteFiles] = useState(false);
   const [blockFutureSync, setBlockFutureSync] = useState(true);
   const [syncedSearch, setSyncedSearch] = useState("");
+  const [activitySearch, setActivitySearch] = useState("");
+  const [pendingSearch, setPendingSearch] = useState("");
+  const [blocklistSearch, setBlocklistSearch] = useState("");
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sendStates, setSendStates] = useState<Record<string, SendState>>({});
   const [sendMessages, setSendMessages] = useState<Record<string, string>>({});
@@ -788,21 +853,26 @@ export default function Home() {
     return { type: "all" };
   }, [scopeSelection]);
 
+  const activeReviewerGroup = useMemo(
+    () =>
+      currentScope.type === "group" && typeof currentScope.groupId === "number"
+        ? (reviewerGroups.find((group) => group.id === currentScope.groupId) ?? null)
+        : null,
+    [currentScope, reviewerGroups],
+  );
+
   // Mirror display filters from active sync group when scoped to a group
   useEffect(() => {
-    if (currentScope.type === "group" && typeof currentScope.groupId === "number") {
-      const group = reviewerGroups.find((g) => g.id === currentScope.groupId);
-      if (group) {
-        setMinimumRating(group.ratingThreshold ?? 0);
-        setSelectedGenres(
-          (group.filters?.genres?.include ?? []).map(normalizeGenreLabel).filter(Boolean),
-        );
-        return;
-      }
+    if (activeReviewerGroup) {
+      setMinimumRating(activeReviewerGroup.ratingThreshold ?? 0);
+      setSelectedGenres(
+        (activeReviewerGroup.filters?.genres?.include ?? []).map(normalizeGenreLabel).filter(Boolean),
+      );
+      return;
     }
     setMinimumRating(0);
     setSelectedGenres([]);
-  }, [currentScope, reviewerGroups]);
+  }, [activeReviewerGroup]);
 
   const scopeQuery = useCallback(
     (extra = "") => {
@@ -862,6 +932,17 @@ export default function Home() {
       if (!res.ok) return;
       const body = (await res.json()) as { pendingApprovals?: PendingApprovalDto[] };
       setPendingApprovals(body.pendingApprovals ?? []);
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
+  const loadBlocklist = useCallback(async () => {
+    try {
+      const res = await fetch("/api/blocklist", { cache: "no-store" });
+      if (!res.ok) return;
+      const body = (await res.json()) as { blocklist?: BlocklistedMovieDto[] };
+      setBlocklistedMovies(body.blocklist ?? []);
     } catch {
       // non-fatal
     }
@@ -947,11 +1028,10 @@ export default function Home() {
     }
     setIsRemoving(true);
     try {
-      const res = await fetch("/api/radarr", {
-        method: "DELETE",
+      const res = await fetch(`/api/movies/${encodeURIComponent(removingMovie.id)}/remove`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          reviewId: representative.id,
           deleteFiles,
           blockFutureSync,
         }),
@@ -959,6 +1039,7 @@ export default function Home() {
       const body = (await res.json().catch(() => null)) as { message?: string } | null;
       if (res.ok) {
         setSyncedMovies((current) => current.filter((m) => m.id !== removingMovie.id));
+        await Promise.all([loadActivity(), loadBlocklist(), loadReviews(false)]);
       } else {
         alert(body?.message ?? "Failed to remove movie from Radarr.");
       }
@@ -970,7 +1051,7 @@ export default function Home() {
       setDeleteFiles(false);
       setBlockFutureSync(true);
     }
-  }, [removingMovie, deleteFiles, blockFutureSync]);
+  }, [removingMovie, deleteFiles, blockFutureSync, loadActivity, loadBlocklist, loadReviews]);
 
   const loadSettings = useCallback(async () => {
     try {
@@ -985,7 +1066,7 @@ export default function Home() {
       if (body.reviewer) {
         setConfig((current) => (current.username.trim() ? current : { username: body.reviewer }));
       }
-      await Promise.all([loadReviewers(), loadReviewerGroups(), loadPendingApprovals()]);
+      await Promise.all([loadReviewers(), loadReviewerGroups(), loadPendingApprovals(), loadBlocklist()]);
       setSettingsDraft({
         radarrUrl: body.radarrUrl,
         radarrApiKey: "",
@@ -998,7 +1079,7 @@ export default function Home() {
       setSettingsError(err instanceof Error ? err.message : "Unable to load settings.");
       return null;
     }
-  }, [loadPendingApprovals, loadReviewerGroups, loadReviewers]);
+  }, [loadBlocklist, loadPendingApprovals, loadReviewerGroups, loadReviewers]);
 
   const refreshBootPhase = useCallback(async () => {
     try {
@@ -1111,9 +1192,14 @@ export default function Home() {
     () =>
       sortMoviesByRating(
         movies.filter((m) => {
-          if (minimumRating > 0 && m.averageRating < minimumRating) return false;
+          if (activeReviewerGroup) {
+            if (m.averageRating < activeReviewerGroup.ratingThreshold) return false;
+            if (!evaluateSyncFilters(m, activeReviewerGroup.filters).allowed) return false;
+          } else if (minimumRating > 0 && m.averageRating < minimumRating) {
+            return false;
+          }
           if (hideAdded && isAddedToRadarr(m, sendStates)) return false;
-          if (selectedGenres.length > 0) {
+          if (!activeReviewerGroup && selectedGenres.length > 0) {
             const genres = movieGenres(m);
             if (!selectedGenres.some((genre) => genres.includes(genre))) return false;
           }
@@ -1129,7 +1215,27 @@ export default function Home() {
           return true;
         }),
       ),
-    [hideAdded, minimumRating, movies, selectedGenres, searchQuery, sendStates],
+    [activeReviewerGroup, hideAdded, minimumRating, movies, selectedGenres, searchQuery, sendStates],
+  );
+
+  const filteredSyncedMovies = useMemo(
+    () => syncedMovies.filter((movie) => movieMatchesSearch(movie, syncedSearch)),
+    [syncedMovies, syncedSearch],
+  );
+
+  const filteredActivityLog = useMemo(
+    () => activityLog.filter((entry) => activityMatchesSearch(entry, activitySearch)),
+    [activityLog, activitySearch],
+  );
+
+  const filteredPendingApprovals = useMemo(
+    () => pendingApprovals.filter((approval) => pendingApprovalMatchesSearch(approval, pendingSearch)),
+    [pendingApprovals, pendingSearch],
+  );
+
+  const filteredBlocklistedMovies = useMemo(
+    () => blocklistedMovies.filter((movie) => blocklistMatchesSearch(movie, blocklistSearch)),
+    [blocklistedMovies, blocklistSearch],
   );
 
   const activeMovie = useMemo(
@@ -1306,6 +1412,7 @@ export default function Home() {
       setReviewers(body?.reviewers ?? []);
       await loadReviewerGroups();
       await loadPendingApprovals();
+      await loadBlocklist();
       return true;
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : "Unable to add reviewer.");
@@ -1549,6 +1656,17 @@ export default function Home() {
     const movie = movies.find((m) => m.reviews.some((review) => review.id === reviewId));
     if (!movie) return;
     await sendToRadarr(movie);
+  }
+
+  async function unblockMovie(blocklistId: number) {
+    try {
+      const res = await fetch(`/api/blocklist/${blocklistId}`, { method: "DELETE" });
+      const body = (await res.json().catch(() => null)) as { message?: string } | null;
+      if (!res.ok) throw new Error(apiMessage(body, "Unable to unblock movie."));
+      await loadBlocklist();
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : "Unable to unblock movie.");
+    }
   }
 
   async function sendToRadarr(movie: AggregatedMovieDto) {
@@ -1986,7 +2104,9 @@ export default function Home() {
                 />
                 <StatCard
                   detail={`${stats.filtered} shown ${
-                    minimumRating > 0
+                    activeReviewerGroup
+                      ? "(group filters)"
+                      : minimumRating > 0
                       ? `(≥${minimumRating.toFixed(1)}★${selectedGenres.length ? ", genre filtered" : ""})`
                       : selectedGenres.length
                         ? "(genre filtered)"
@@ -1998,8 +2118,8 @@ export default function Home() {
                 />
               </div>
 
-              <div className="flex shrink-0 flex-col gap-3 rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
-                <div className="flex items-center gap-2 text-sm text-cornsilk/60">
+              <div className="flex shrink-0 flex-col gap-3 rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] px-3 py-3 sm:px-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex shrink-0 items-center gap-2 text-sm text-cornsilk/60">
                   <span>Displaying</span>
                   <strong className="text-cornsilk font-extrabold">{stats.filtered}</strong>
                   <span>of</span>
@@ -2007,154 +2127,158 @@ export default function Home() {
                   <span>cached movies.</span>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="relative">
-                    <select
-                      aria-label="Reviewer scope"
-                      className="h-9 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 pr-8 text-xs font-bold text-cornsilk focus:outline-none focus:ring-2 focus:ring-gold/30"
-                      value={scopeSelection}
-                      onChange={(event) => {
-                        setScopeSelection(event.target.value as ScopeSelection);
-                        setHasAutoFetched(false);
-                      }}
-                    >
-                      <option value="all">All enabled groups</option>
-                      {reviewers.map((reviewer) => (
-                        <option key={reviewer.handle} value={`reviewer:${reviewer.handle}`}>
-                          @{reviewer.handle}
-                        </option>
-                      ))}
-                      {reviewerGroups.map((group) => (
-                        <option key={group.id} value={`group:${group.id}`}>
-                          Group: {group.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  {currentScope.type === "group" ? (
-                    <span className="rounded-full border border-pine/20 bg-pine/10 px-2.5 py-1 text-[10px] font-bold text-chartreuse">
-                      Using group filters
-                    </span>
-                  ) : (
-                    <>
-                      <span className="group relative flex items-center gap-1.5">
-                        <label className="text-xs font-bold uppercase tracking-wider text-cornsilk/55">
-                          Min. rating ≥
-                        </label>
-                        <span className="text-cornsilk/45 transition-colors hover:text-cornsilk/80" tabIndex={0}>
-                          <InfoIcon className="h-3.5 w-3.5" />
-                        </span>
-                        <span
-                          className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-60 rounded-lg border border-cornsilk/10 bg-ink px-3 py-2 text-[11px] font-medium leading-relaxed text-cornsilk/80 opacity-0 shadow-xl transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
-                          role="tooltip"
-                        >
-                          Filter which movies appear in the grid. Auto-sync to Radarr uses thresholds in Sync
-                          groups.
-                        </span>
+                <div className="flex w-full flex-col gap-3 lg:w-auto lg:flex-row lg:items-center">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="relative">
+                      <select
+                        aria-label="Reviewer scope"
+                        className="h-9 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 pr-8 text-xs font-bold text-cornsilk focus:outline-none focus:ring-2 focus:ring-gold/30"
+                        value={scopeSelection}
+                        onChange={(event) => {
+                          setScopeSelection(event.target.value as ScopeSelection);
+                          setHasAutoFetched(false);
+                        }}
+                      >
+                        <option value="all">All enabled groups</option>
+                        {reviewers.map((reviewer) => (
+                          <option key={reviewer.handle} value={`reviewer:${reviewer.handle}`}>
+                            @{reviewer.handle}
+                          </option>
+                        ))}
+                        {reviewerGroups.map((group) => (
+                          <option key={group.id} value={`group:${group.id}`}>
+                            Group: {group.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {currentScope.type === "group" ? (
+                      <span className="rounded-full border border-pine/20 bg-pine/10 px-2.5 py-1 text-[10px] font-bold text-chartreuse">
+                        Using group filters
                       </span>
-                      <div className="flex h-9 rounded-[var(--radius-control)] border border-white/10 bg-black/20 p-0.5">
-                        <button
-                          className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
-                            minimumRating === 0 ? "bg-pine text-ink shadow" : "text-cornsilk/65 hover:text-cornsilk"
-                          }`}
-                          onClick={() => setMinimumRating(0)}
-                          type="button"
-                        >
-                          All
-                        </button>
-                        {[3.0, 3.5, 4.0, 4.5, 5.0].map((val) => (
+                    ) : (
+                      <>
+                        <span className="group relative flex items-center gap-1.5">
+                          <label className="text-xs font-bold uppercase tracking-wider text-cornsilk/55">
+                            Min. rating ≥
+                          </label>
+                          <span className="text-cornsilk/45 transition-colors hover:text-cornsilk/80" tabIndex={0}>
+                            <InfoIcon className="h-3.5 w-3.5" />
+                          </span>
+                          <span
+                            className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-60 rounded-lg border border-cornsilk/10 bg-ink px-3 py-2 text-[11px] font-medium leading-relaxed text-cornsilk/80 opacity-0 shadow-xl transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
+                            role="tooltip"
+                          >
+                            Filter which movies appear in the grid. Auto-sync to Radarr uses thresholds in Sync
+                            groups.
+                          </span>
+                        </span>
+                        <div className="flex h-9 rounded-[var(--radius-control)] border border-white/10 bg-black/20 p-0.5">
                           <button
-                            key={val}
                             className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
-                              minimumRating === val ? "bg-pine text-ink shadow" : "text-cornsilk/65 hover:text-cornsilk"
+                              minimumRating === 0 ? "bg-pine text-ink shadow" : "text-cornsilk/65 hover:text-cornsilk"
                             }`}
-                            onClick={() => setMinimumRating(val)}
+                            onClick={() => setMinimumRating(0)}
                             type="button"
                           >
-                            {val.toFixed(1)}★
+                            All
                           </button>
-                        ))}
-                      </div>
+                          {[3.0, 3.5, 4.0, 4.5, 5.0].map((val) => (
+                            <button
+                              key={val}
+                              className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
+                                minimumRating === val
+                                  ? "bg-pine text-ink shadow"
+                                  : "text-cornsilk/65 hover:text-cornsilk"
+                              }`}
+                              onClick={() => setMinimumRating(val)}
+                              type="button"
+                            >
+                              {val.toFixed(1)}★
+                            </button>
+                          ))}
+                        </div>
 
-                      <div className="relative">
-                        <button
-                          className="flex h-9 min-w-32 items-center justify-between gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-white/20 hover:text-cornsilk"
-                          onClick={() => setIsGenreFilterOpen((open) => !open)}
-                          type="button"
-                        >
-                          <span className="truncate">{genreFilterLabel}</span>
-                          <span className="text-cornsilk/45">▼</span>
-                        </button>
-                        {isGenreFilterOpen && (
-                          <div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border border-cornsilk/10 bg-ink p-2 shadow-2xl">
-                            <div className="flex items-center justify-between gap-2 border-b border-cornsilk/10 px-2 pb-2">
-                              <span className="text-xs font-extrabold text-cornsilk">Genres</span>
-                              {selectedGenres.length > 0 && (
-                                <button
-                                  className="text-xs font-bold text-pine transition hover:text-chartreuse"
-                                  onClick={() => setSelectedGenres([])}
-                                  type="button"
-                                >
-                                  Clear
-                                </button>
-                              )}
-                            </div>
-                            <div className="max-h-64 overflow-y-auto py-1">
-                              <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]">
-                                <input
-                                  checked={selectedGenres.length === 0}
-                                  className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                                  onChange={() => setSelectedGenres([])}
-                                  type="checkbox"
-                                />
-                                All genres
-                              </label>
-                              {genreOptions.length === 0 ? (
-                                <p className="px-2 py-3 text-xs leading-relaxed text-cornsilk/55">
-                                  Cached genres will appear after metadata refresh.
-                                </p>
-                              ) : (
-                                genreOptions.map((genre) => (
-                                  <label
-                                    key={genre}
-                                    className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]"
+                        <div className="relative">
+                          <button
+                            className="flex h-9 min-w-32 items-center justify-between gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-white/20 hover:text-cornsilk"
+                            onClick={() => setIsGenreFilterOpen((open) => !open)}
+                            type="button"
+                          >
+                            <span className="truncate">{genreFilterLabel}</span>
+                            <span className="text-cornsilk/45">▼</span>
+                          </button>
+                          {isGenreFilterOpen && (
+                            <div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border border-cornsilk/10 bg-ink p-2 shadow-2xl">
+                              <div className="flex items-center justify-between gap-2 border-b border-cornsilk/10 px-2 pb-2">
+                                <span className="text-xs font-extrabold text-cornsilk">Genres</span>
+                                {selectedGenres.length > 0 && (
+                                  <button
+                                    className="text-xs font-bold text-pine transition hover:text-chartreuse"
+                                    onClick={() => setSelectedGenres([])}
+                                    type="button"
                                   >
-                                    <input
-                                      checked={selectedGenres.includes(genre)}
-                                      className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                                      onChange={(e) =>
-                                        setSelectedGenres((current) =>
-                                          e.target.checked
-                                            ? [...new Set([...current, genre])]
-                                            : current.filter((item) => item !== genre),
-                                        )
-                                      }
-                                      type="checkbox"
-                                    />
-                                    <span className="truncate">{genre}</span>
-                                  </label>
-                                ))
-                              )}
+                                    Clear
+                                  </button>
+                                )}
+                              </div>
+                              <div className="max-h-64 overflow-y-auto py-1">
+                                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]">
+                                  <input
+                                    checked={selectedGenres.length === 0}
+                                    className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                                    onChange={() => setSelectedGenres([])}
+                                    type="checkbox"
+                                  />
+                                  All genres
+                                </label>
+                                {genreOptions.length === 0 ? (
+                                  <p className="px-2 py-3 text-xs leading-relaxed text-cornsilk/55">
+                                    Cached genres will appear after metadata refresh.
+                                  </p>
+                                ) : (
+                                  genreOptions.map((genre) => (
+                                    <label
+                                      key={genre}
+                                      className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]"
+                                    >
+                                      <input
+                                        checked={selectedGenres.includes(genre)}
+                                        className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                                        onChange={(e) =>
+                                          setSelectedGenres((current) =>
+                                            e.target.checked
+                                              ? [...new Set([...current, genre])]
+                                              : current.filter((item) => item !== genre),
+                                          )
+                                        }
+                                        type="checkbox"
+                                      />
+                                      <span className="truncate">{genre}</span>
+                                    </label>
+                                  ))
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
+                          )}
+                        </div>
+                      </>
+                    )}
 
-                  <label className="flex h-9 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3">
-                    <input
-                      checked={hideAdded}
-                      className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                      onChange={(e) => setHideAdded(e.target.checked)}
-                      type="checkbox"
-                    />
-                    <span className="text-xs font-bold text-cornsilk/70 whitespace-nowrap">Hide in Radarr</span>
-                  </label>
+                    <label className="flex h-9 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3">
+                      <input
+                        checked={hideAdded}
+                        className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                        onChange={(e) => setHideAdded(e.target.checked)}
+                        type="checkbox"
+                      />
+                      <span className="text-xs font-bold text-cornsilk/70 whitespace-nowrap">Hide in Radarr</span>
+                    </label>
+                  </div>
 
                   <input
                     aria-label="Search movies"
-                    className="h-9 w-full max-w-xs rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
+                    className="h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25 lg:w-64 xl:w-80"
                     placeholder="Search movies, year, reviewer, or genre…"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -2719,6 +2843,16 @@ export default function Home() {
               </div>
             </div>
 
+            <div className="px-4 pb-1 pt-3">
+              <input
+                aria-label="Search sync activity"
+                className="h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
+                placeholder="Search movies, year, reviewer, or genre…"
+                value={activitySearch}
+                onChange={(e) => setActivitySearch(e.target.value)}
+              />
+            </div>
+
             <div className="flex-1 overflow-y-auto px-4 py-4">
               {activityLog.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center px-6 text-center">
@@ -2730,9 +2864,19 @@ export default function Home() {
                     Sync results appear here. The badge only highlights new failures that need attention.
                   </p>
                 </div>
+              ) : filteredActivityLog.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-ink text-cornsilk/55">
+                    <ClockIcon className="h-6 w-6" />
+                  </div>
+                  <h3 className="text-base font-extrabold text-cornsilk">No activity matches</h3>
+                  <p className="mt-1 max-w-xs text-xs text-cornsilk/55">
+                    Try a different movie, year, status, or message.
+                  </p>
+                </div>
               ) : (
                 <ul className="space-y-2">
-                  {activityLog.map((entry) => (
+                  {filteredActivityLog.map((entry) => (
                     <li
                       key={entry.id}
                       className="flex items-start gap-3 rounded-xl border border-cornsilk/5 bg-ink/30 p-3"
@@ -2858,7 +3002,7 @@ export default function Home() {
               <input
                 aria-label="Search synced movies"
                 className="h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
-                placeholder="Search synced movies…"
+                placeholder="Search movies, year, reviewer, or genre…"
                 value={syncedSearch}
                 onChange={(e) => setSyncedSearch(e.target.value)}
               />
@@ -2875,17 +3019,19 @@ export default function Home() {
                     Movies successfully added to Radarr will appear here.
                   </p>
                 </div>
+              ) : filteredSyncedMovies.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-ink text-cornsilk/55">
+                    <FilmIcon className="h-6 w-6" />
+                  </div>
+                  <h3 className="text-base font-extrabold text-cornsilk">No synced movies match</h3>
+                  <p className="mt-1 max-w-xs text-xs text-cornsilk/55">
+                    Try a different title, year, reviewer, or genre.
+                  </p>
+                </div>
               ) : (
                 <ul className="space-y-2">
-                  {syncedMovies.filter((m) => {
-                    if (!syncedSearch.trim()) return true;
-                    const q = syncedSearch.trim().toLowerCase();
-                    return (
-                      m.title.toLowerCase().includes(q) ||
-                      (typeof m.year === "number" && String(m.year).includes(q)) ||
-                      m.reviewerHandles.some((h) => h.toLowerCase().includes(q))
-                    );
-                  }).map((movie) => (
+                  {filteredSyncedMovies.map((movie) => (
                     <li key={movie.id} className="group relative">
                       <button
                         className="flex w-full items-center gap-3 rounded-xl border border-cornsilk/5 bg-ink/30 p-3 text-left transition hover:border-gold/20 hover:bg-ink/45"
@@ -3058,8 +3204,15 @@ export default function Home() {
                       {pendingApprovalCount} pending
                     </span>
                   </div>
+                  <input
+                    aria-label="Search pending approvals"
+                    className="mb-3 h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
+                    placeholder="Search movies, year, reviewer, or genre…"
+                    value={pendingSearch}
+                    onChange={(e) => setPendingSearch(e.target.value)}
+                  />
                   <div className="space-y-2">
-                    {pendingApprovals.map((approval) => (
+                    {filteredPendingApprovals.map((approval) => (
                       <div
                         key={approval.id}
                         className="flex flex-col gap-3 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 p-3 sm:flex-row sm:items-center sm:justify-between"
@@ -3098,9 +3251,75 @@ export default function Home() {
                         No movies are waiting for approval.
                       </p>
                     )}
+                    {pendingApprovals.length > 0 && filteredPendingApprovals.length === 0 && (
+                      <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/55">
+                        No pending approvals match your search.
+                      </p>
+                    )}
                   </div>
                 </section>
               )}
+
+              <section className="rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
+                <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-1">
+                    <h3 className="text-base font-extrabold tracking-tight text-cornsilk">
+                      Blocklisted movies
+                    </h3>
+                    <p className="text-xs leading-relaxed text-cornsilk/65">
+                      Movies listed here are skipped before approvals or Radarr adds.
+                    </p>
+                  </div>
+                  <span className="w-fit rounded-full border border-rose-500/20 bg-rose-500/10 px-2.5 py-1 text-xs font-bold text-rose-200">
+                    {blocklistedMovies.length} blocked
+                  </span>
+                </div>
+                <input
+                  aria-label="Search blocklisted movies"
+                  className="mb-3 h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
+                  placeholder="Search movies, year, reviewer, or genre…"
+                  value={blocklistSearch}
+                  onChange={(e) => setBlocklistSearch(e.target.value)}
+                />
+                <div className="space-y-2">
+                  {filteredBlocklistedMovies.map((movie) => (
+                    <div
+                      key={movie.id}
+                      className="flex flex-col gap-3 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 p-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-extrabold text-cornsilk">
+                          {movie.title}
+                          {movie.year != null && (
+                            <span className="ml-1 font-medium text-cornsilk/55">{movie.year}</span>
+                          )}
+                        </p>
+                        <p className="mt-1 text-xs text-cornsilk/60">
+                          {movie.source === "removed_from_radarr" ? "Removed from Radarr" : "Manually blocked"}
+                          {movie.tmdbId != null && <span> · TMDB {movie.tmdbId}</span>}
+                        </p>
+                      </div>
+                      <button
+                        className="h-9 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/70 transition hover:border-pine/30 hover:bg-pine/10 hover:text-cornsilk"
+                        onClick={() => void unblockMovie(movie.id)}
+                        type="button"
+                      >
+                        Unblock
+                      </button>
+                    </div>
+                  ))}
+                  {blocklistedMovies.length === 0 && (
+                    <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/55">
+                      No movies are blocklisted.
+                    </p>
+                  )}
+                  {blocklistedMovies.length > 0 && filteredBlocklistedMovies.length === 0 && (
+                    <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/55">
+                      No blocklisted movies match your search.
+                    </p>
+                  )}
+                </div>
+              </section>
 
               <ControlPanelForm
                 connectionDot={connectionDot}

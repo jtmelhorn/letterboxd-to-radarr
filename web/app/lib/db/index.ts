@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS sync_results (
   review_id INTEGER NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
   status TEXT NOT NULL,
   radarr_tmdb_id INTEGER,
+  radarr_movie_id INTEGER,
   message TEXT NOT NULL DEFAULT '',
   attempts INTEGER NOT NULL DEFAULT 1,
   auto INTEGER NOT NULL DEFAULT 0,
@@ -137,7 +138,10 @@ CREATE TABLE IF NOT EXISTS app_state (
 CREATE TABLE IF NOT EXISTS movie_blocklist (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tmdb_id INTEGER,
+  imdb_id TEXT,
+  radarr_movie_id INTEGER,
   title TEXT NOT NULL,
+  normalized_title TEXT NOT NULL DEFAULT '',
   year INTEGER,
   film_id TEXT NOT NULL,
   source TEXT NOT NULL DEFAULT 'manually_blocked',
@@ -146,6 +150,8 @@ CREATE TABLE IF NOT EXISTS movie_blocklist (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS movie_blocklist_tmdb_idx ON movie_blocklist(tmdb_id) WHERE tmdb_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS movie_blocklist_imdb_idx ON movie_blocklist(imdb_id);
+CREATE INDEX IF NOT EXISTS movie_blocklist_title_year_idx ON movie_blocklist(normalized_title, year);
 CREATE INDEX IF NOT EXISTS movie_blocklist_film_idx ON movie_blocklist(film_id);
 `;
 
@@ -198,9 +204,27 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
   ensureColumn(sqlite, "reviews", "backdrop_url", "backdrop_url TEXT");
   ensureColumn(sqlite, "reviews", "tmdb_movie_id", "tmdb_movie_id INTEGER");
   ensureColumn(sqlite, "reviews", "tmdb_tv_id", "tmdb_tv_id INTEGER");
+  ensureColumn(sqlite, "sync_results", "radarr_movie_id", "radarr_movie_id INTEGER");
   ensureColumn(sqlite, "movie_metadata", "year", "year INTEGER");
+  ensureColumn(sqlite, "movie_blocklist", "imdb_id", "imdb_id TEXT");
+  ensureColumn(sqlite, "movie_blocklist", "radarr_movie_id", "radarr_movie_id INTEGER");
+  const addedBlocklistNormalizedTitle = ensureColumn(
+    sqlite,
+    "movie_blocklist",
+    "normalized_title",
+    "normalized_title TEXT NOT NULL DEFAULT ''",
+  );
+  if (addedBlocklistNormalizedTitle) {
+    sqlite
+      .prepare("UPDATE movie_blocklist SET normalized_title = lower(trim(title)) WHERE normalized_title = ''")
+      .run();
+  }
   sqlite
     .prepare("CREATE INDEX IF NOT EXISTS movie_metadata_title_year_idx ON movie_metadata(normalized_title, year)")
+    .run();
+  sqlite.prepare("CREATE INDEX IF NOT EXISTS movie_blocklist_imdb_idx ON movie_blocklist(imdb_id)").run();
+  sqlite
+    .prepare("CREATE INDEX IF NOT EXISTS movie_blocklist_title_year_idx ON movie_blocklist(normalized_title, year)")
     .run();
 
   // Ensure the singleton settings row exists.

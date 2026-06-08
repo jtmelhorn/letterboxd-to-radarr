@@ -9,12 +9,22 @@ interface RadarrImage {
 }
 
 interface RadarrLookupMovie {
+  id?: number;
   title?: string;
   titleSlug?: string;
   year?: number;
   tmdbId?: number;
+  imdbId?: string;
   genres?: string[];
   images?: RadarrImage[];
+}
+
+interface RadarrStoredMovie {
+  id?: number;
+  title?: string;
+  year?: number;
+  tmdbId?: number;
+  imdbId?: string;
 }
 
 interface RadarrQualityProfile {
@@ -31,6 +41,7 @@ export interface AddMovieInput {
   title: string;
   year: number | null;
   tmdbId?: number | null;
+  imdbId?: string | null;
 }
 
 export interface MovieMetadataLookupInput {
@@ -57,7 +68,7 @@ export interface AddMovieResult {
   status: "added" | "exists" | "not_found" | "error";
   message: string;
   httpStatus: number;
-  movie?: { title: string; year: number; tmdbId: number };
+  movie?: { title: string; year: number; tmdbId: number; radarrMovieId?: number | null };
 }
 
 export class RadarrError extends Error {
@@ -118,6 +129,12 @@ function errorMessageFromBody(body: unknown, fallback: string): string {
 
 function isAlreadyExistsMessage(message: string): boolean {
   return /already|exists|has been added/i.test(message);
+}
+
+function movieFromRadarrBody(body: unknown): RadarrStoredMovie | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const item = body as RadarrStoredMovie;
+  return typeof item.id === "number" ? item : null;
 }
 
 function normalizeLookupTitle(title: string): string {
@@ -271,6 +288,32 @@ function pickBestMatch(
   const byTitle = valid.find((r) => r.title?.trim().toLowerCase() === titleLower);
   const normalizedByTitle = valid.find((r) => normalizeLookupTitle(r.title ?? "") === normalizedTitle);
   return byTitle ?? normalizedByTitle ?? valid[0];
+}
+
+async function findExistingRadarrMovie(
+  baseUrl: string,
+  apiKey: string,
+  input: Pick<AddMovieInput, "tmdbId" | "imdbId">,
+): Promise<RadarrStoredMovie | null> {
+  const query =
+    input.tmdbId && Number.isFinite(input.tmdbId)
+      ? `tmdbId=${encodeURIComponent(String(input.tmdbId))}`
+      : input.imdbId
+        ? `imdbId=${encodeURIComponent(input.imdbId)}`
+        : "";
+  if (!query) return null;
+
+  const response = await radarrFetch(baseUrl, apiKey, `/api/v3/movie?${query}`);
+  if (!response.ok) return null;
+  const movies = (await response.json().catch(() => null)) as RadarrStoredMovie[] | null;
+  if (!Array.isArray(movies)) return null;
+  if (input.tmdbId) {
+    return movies.find((movie) => movie.tmdbId === input.tmdbId && typeof movie.id === "number") ?? null;
+  }
+  if (input.imdbId) {
+    return movies.find((movie) => movie.imdbId === input.imdbId && typeof movie.id === "number") ?? null;
+  }
+  return null;
 }
 
 /**
@@ -440,21 +483,37 @@ export async function addMovie(
   if (!addResponse.ok) {
     const message = errorMessageFromBody(addBody, "Unable to add movie to Radarr.");
     if (isAlreadyExistsMessage(message)) {
+      const existing = await findExistingRadarrMovie(baseUrl, target.apiKey, {
+        tmdbId: match.tmdbId,
+        imdbId: match.imdbId ?? input.imdbId ?? null,
+      });
       return {
         status: "exists",
         message: "Already exists in Radarr.",
         httpStatus: 200,
-        movie: { title: match.title, year: match.year, tmdbId: match.tmdbId },
+        movie: {
+          title: existing?.title ?? match.title,
+          year: existing?.year ?? match.year,
+          tmdbId: existing?.tmdbId ?? match.tmdbId,
+          radarrMovieId: existing?.id ?? null,
+        },
       };
     }
     return { status: "error", message, httpStatus: addResponse.status };
   }
 
+  const added = movieFromRadarrBody(addBody);
+
   return {
     status: "added",
     message: "Movie added to Radarr.",
     httpStatus: 200,
-    movie: { title: match.title, year: match.year, tmdbId: match.tmdbId },
+    movie: {
+      title: added?.title ?? match.title,
+      year: added?.year ?? match.year,
+      tmdbId: added?.tmdbId ?? match.tmdbId,
+      radarrMovieId: added?.id ?? null,
+    },
   };
 }
 
@@ -464,10 +523,10 @@ export interface DeleteMovieResult {
   httpStatus: number;
 }
 
-export async function deleteMovie(
+export async function deleteMovieByRadarrId(
   target: ResolvedRadarrTarget,
-  tmdbId: number,
-  options: { deleteFiles?: boolean; addExclusion?: boolean } = {},
+  radarrMovieId: number,
+  options: { deleteFiles?: boolean } = {},
 ): Promise<DeleteMovieResult> {
   const baseUrl = normalizeRadarrUrl(target.baseUrl);
   if (!baseUrl) {
@@ -476,42 +535,19 @@ export async function deleteMovie(
   if (!target.apiKey) {
     return { status: "error", message: "Radarr API key is not configured.", httpStatus: 400 };
   }
+  if (!Number.isInteger(radarrMovieId) || radarrMovieId <= 0) {
+    return { status: "error", message: "A valid Radarr movie ID is required.", httpStatus: 400 };
+  }
 
-  const deleteFiles = options.deleteFiles ?? false;
-  const addExclusion = options.addExclusion ?? false;
+  const params = new URLSearchParams();
+  if (options.deleteFiles ?? false) params.set("deleteFiles", "true");
+  const queryString = params.toString() ? `?${params.toString()}` : "";
 
   try {
-    const listResponse = await radarrFetch(baseUrl, target.apiKey, `/api/v3/movie?tmdbId=${tmdbId}`);
-    if (!listResponse.ok) {
-      return {
-        status: "error",
-        message: errorMessageFromBody(await readBody(listResponse), "Unable to list movies from Radarr."),
-        httpStatus: listResponse.status,
-      };
-    }
-
-    const movies = (await listResponse.json()) as Array<{ id: number; tmdbId: number }>;
-    const match = Array.isArray(movies)
-      ? movies.find((m) => m.tmdbId === tmdbId)
-      : null;
-
-    if (!match) {
-      return {
-        status: "not_found",
-        message: "Movie not found in Radarr.",
-        httpStatus: 404,
-      };
-    }
-
-    const params = new URLSearchParams();
-    if (deleteFiles) params.set("deleteFiles", "true");
-    if (addExclusion) params.set("addExclusion", "true");
-    const queryString = params.toString() ? `?${params.toString()}` : "";
-
     const deleteResponse = await radarrFetch(
       baseUrl,
       target.apiKey,
-      `/api/v3/movie/${match.id}${queryString}`,
+      `/api/v3/movie/${radarrMovieId}${queryString}`,
       { method: "DELETE" },
     );
 

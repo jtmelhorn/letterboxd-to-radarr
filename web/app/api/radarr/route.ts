@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { isRequestAuthorized } from "@/app/lib/auth";
-import { addMovie, deleteMovie } from "@/app/lib/radarr";
+import { addMovie, deleteMovieByRadarrId } from "@/app/lib/radarr";
 import { addToBlocklist } from "@/app/lib/repos/movieBlocklist";
 import { getReviewById } from "@/app/lib/repos/reviews";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
-import { clearSyncResultForReview, recordSyncResult } from "@/app/lib/repos/syncResults";
+import { getLatestSyncResultForFilmId, recordSyncResult } from "@/app/lib/repos/syncResults";
 import { canonicalFilmGuid } from "@/app/lib/filmIdentity";
 import type { RadarrAddRequest, RadarrAddResponse } from "@/app/types/movie";
 
@@ -52,6 +52,7 @@ export async function POST(request: Request) {
         reviewId: review.id,
         status: result.status,
         radarrTmdbId: result.movie?.tmdbId ?? null,
+        radarrMovieId: result.movie?.radarrMovieId ?? null,
         message: result.message,
         auto: false,
       });
@@ -101,9 +102,9 @@ export async function DELETE(request: Request) {
 
   const reviewId = typeof body.reviewId === "number" ? body.reviewId : null;
   const review = reviewId ? getReviewById(reviewId) : null;
-  if (!review || !review.tmdbMovieId) {
+  if (!review) {
     return NextResponse.json(
-      { message: "A valid reviewId with TMDB metadata is required." },
+      { message: "A valid reviewId is required." },
       { status: 400 },
     );
   }
@@ -118,24 +119,54 @@ export async function DELETE(request: Request) {
 
   const deleteFiles = body.deleteFiles ?? false;
   const blockFutureSync = body.blockFutureSync ?? true;
+  const filmId = canonicalFilmGuid(review);
+  const latestSync = getLatestSyncResultForFilmId(filmId);
+  const radarrMovieId = latestSync?.radarrMovieId ?? null;
+  if (!radarrMovieId) {
+    return NextResponse.json(
+      {
+        message:
+          "Cannot safely remove this movie because this app does not have the exact Radarr movie ID. Re-sync the movie first, then try again.",
+      },
+      { status: 409 },
+    );
+  }
 
-  const result = await deleteMovie(target, review.tmdbMovieId, {
+  const result = await deleteMovieByRadarrId(target, radarrMovieId, {
     deleteFiles,
-    addExclusion: blockFutureSync,
   });
 
   if (result.status === "deleted" || result.status === "not_found") {
-    clearSyncResultForReview(review.id);
     if (blockFutureSync) {
       addToBlocklist({
         tmdbId: review.tmdbMovieId,
+        radarrMovieId,
         title: review.title,
         year: review.year,
-        filmId: canonicalFilmGuid(review),
+        filmId,
         source: "removed_from_radarr",
         message: `Removed from Radarr${result.status === "not_found" ? " (already missing)" : ""}.`,
       });
     }
+    recordSyncResult({
+      reviewId: review.id,
+      status: blockFutureSync ? "blocklisted" : "removed",
+      radarrTmdbId: review.tmdbMovieId ?? latestSync?.radarrTmdbId ?? null,
+      radarrMovieId,
+      message: blockFutureSync
+        ? "Removed from Radarr and blocked from future auto-sync."
+        : "Removed from Radarr.",
+      auto: false,
+    });
+  } else {
+    recordSyncResult({
+      reviewId: review.id,
+      status: "failed_remove",
+      radarrTmdbId: review.tmdbMovieId ?? latestSync?.radarrTmdbId ?? null,
+      radarrMovieId,
+      message: result.message,
+      auto: false,
+    });
   }
 
   const httpStatus = result.status === "deleted" || result.status === "not_found" ? 200 : result.httpStatus;

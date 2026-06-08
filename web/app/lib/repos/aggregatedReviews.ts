@@ -5,6 +5,7 @@ import { reviews, syncResults, users } from "@/app/lib/db/schema";
 import { canonicalFilmGuid } from "@/app/lib/filmIdentity";
 import { metadataForFilmIds } from "@/app/lib/repos/movieMetadata";
 import { getReviewerGroup } from "@/app/lib/repos/reviewerGroups";
+import { isSyncMovieStatus } from "@/app/lib/repos/syncResults";
 import { findUser, listUsers } from "@/app/lib/repos/users";
 import type {
   AggregatedMovieDto,
@@ -39,14 +40,15 @@ function reviewTime(reviewedAt: string | null | undefined): number {
 }
 
 function normalizeStatus(status: string): SyncStatus {
-  if (status === "added" || status === "exists" || status === "error") return status;
-  return null;
+  return isSyncMovieStatus(status) ? status : null;
 }
 
 function statusRank(status: SyncStatus): number {
+  if (status === "failed_remove") return 4;
   if (status === "added") return 3;
   if (status === "exists") return 2;
-  if (status === "error") return 1;
+  if (status === "blocklisted" || status === "removed") return 1;
+  if (status === "error" || status === "skipped") return 1;
   return 0;
 }
 
@@ -80,10 +82,9 @@ function syncStatusByReview(reviewIds: number[]): Map<number, SyncStatus> {
     .all();
 
   for (const row of rows) {
-    const current = map.get(row.reviewId);
-    if (current === "added" || current === "exists") continue;
+    if (map.has(row.reviewId)) continue;
     const normalized = normalizeStatus(row.status);
-    if (normalized) map.set(row.reviewId, normalized);
+    map.set(row.reviewId, normalized);
   }
   return map;
 }
@@ -205,7 +206,7 @@ export function getAggregatedMovies(
   return Array.from(grouped.values())
     .filter((movie) => {
       if (!options.onlySynced) return true;
-      return movie.status === "added" || movie.status === "exists";
+      return movie.status === "added" || movie.status === "exists" || movie.status === "failed_remove";
     })
     .map((movie) => ({
       ...movie,

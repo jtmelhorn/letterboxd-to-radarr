@@ -14,7 +14,7 @@ import {
 } from "@/app/lib/repos/reviewerGroups";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
 import { getRecentSyncResults, recordSyncResult } from "@/app/lib/repos/syncResults";
-import { findUser, getOrCreateUser } from "@/app/lib/repos/users";
+import { findUser, getOrCreateUser, listUsers } from "@/app/lib/repos/users";
 import { isMovieBlocklisted } from "@/app/lib/repos/movieBlocklist";
 import { evaluateSyncFilters, syncFiltersNeedGenreMetadata } from "@/app/lib/syncFilters";
 import type {
@@ -158,6 +158,40 @@ function syncRunsForScope(scope: ReviewerScope): GroupSyncRun[] {
     .filter((run) => run.handles.length > 0);
 }
 
+function cachedSyncRunsForRefreshedScope(scope: ReviewerScope): GroupSyncRun[] {
+  if (scope.type === "group" && typeof scope.groupId === "number") {
+    const group = getReviewerGroup(scope.groupId);
+    if (!group?.enabled) return [];
+    return handlesForGroup(group).length > 0
+      ? [{ group, handles: [], aggregationScope: { type: "group", groupId: group.id } }]
+      : [];
+  }
+
+  if (scope.type === "reviewer" && scope.reviewer) {
+    const handle = scope.reviewer.trim().toLowerCase();
+    if (!handle) return [];
+    return listReviewerGroups()
+      .filter((group) => group.enabled && groupCoversReviewer(group, handle) && handlesForGroup(group).length > 0)
+      .map(
+        (group): GroupSyncRun => ({
+          group,
+          handles: [],
+          aggregationScope: { type: "group", groupId: group.id },
+        }),
+      );
+  }
+
+  return listReviewerGroups()
+    .filter((group) => group.enabled && handlesForGroup(group).length > 0)
+    .map(
+      (group): GroupSyncRun => ({
+        group,
+        handles: [],
+        aggregationScope: { type: "group", groupId: group.id },
+      }),
+    );
+}
+
 function combineSummaries(summaries: SyncRunSummary[], threshold: number): SyncRunSummary {
   return {
     fetched: summaries.reduce((sum, item) => sum + item.fetched, 0),
@@ -207,6 +241,20 @@ async function executeGroupSync(
   const fetched = await refreshHandles(run.handles, {
     fetchMetadata: syncFiltersNeedGenreMetadata(group.filters),
   });
+  return syncCachedGroup(run, options, fetched);
+}
+
+async function syncCachedGroup(
+  run: GroupSyncRun,
+  options: SyncOptions,
+  fetched: number,
+): Promise<SyncRunSummary> {
+  const { group } = run;
+  const threshold = typeof options.threshold === "number" ? options.threshold : group.ratingThreshold;
+  if (options.auto && group.syncInterval === "manual") {
+    return emptySummary(threshold);
+  }
+
   const target = getRadarrTarget();
 
   const summary: SyncRunSummary = {
@@ -231,7 +279,7 @@ async function executeGroupSync(
   const candidates = getAggregatedMovies(run.aggregationScope).filter((movie) => {
     if (movie.averageRating < threshold) return false;
     if (options.force) return true;
-    return movie.status !== "added" && movie.status !== "exists";
+    return movie.status !== "added" && movie.status !== "exists" && movie.status !== "failed_remove";
   });
 
   const allowedCandidates: AggregatedMovieDto[] = [];
@@ -239,7 +287,15 @@ async function executeGroupSync(
     const representativeReview = movie.reviews[0];
     if (!representativeReview) continue;
 
-    if (isMovieBlocklisted({ tmdbId: movie.tmdbMovieId, filmId: movie.id })) {
+    if (
+      isMovieBlocklisted({
+        tmdbId: movie.tmdbMovieId,
+        imdbId: movie.imdbId,
+        filmId: movie.id,
+        title: movie.title,
+        year: movie.year,
+      })
+    ) {
       recordSyncResult({
         reviewId: representativeReview.id,
         status: "skipped",
@@ -317,6 +373,7 @@ async function executeGroupSync(
           reviewId: representativeReview.id,
           status,
           radarrTmdbId: result.movie?.tmdbId ?? null,
+          radarrMovieId: result.movie?.radarrMovieId ?? null,
           message: result.message,
           auto: options.auto,
         });
@@ -346,6 +403,63 @@ export function runSyncScope(scope: ReviewerScope, options: SyncOptions): Promis
 
 export function runSync(handle: string, options: SyncOptions): Promise<SyncRunSummary> {
   return runSyncScope({ type: "reviewer", reviewer: handle }, options);
+}
+
+export async function refreshScopeReviews(scope: ReviewerScope): Promise<number> {
+  if (scope.type === "reviewer" && scope.reviewer) {
+    return refreshReviewer(scope.reviewer, { fetchMetadata: scopeNeedsGenreMetadata(scope) });
+  }
+  if (scope.type === "group" && typeof scope.groupId === "number") {
+    const group = getReviewerGroup(scope.groupId);
+    return refreshHandles(group?.reviewerHandles ?? [], { fetchMetadata: scopeNeedsGenreMetadata(scope) });
+  }
+
+  return refreshHandles(
+    listUsers().map((reviewer) => reviewer.handle),
+    { fetchMetadata: scopeNeedsGenreMetadata(scope) },
+  );
+}
+
+export async function syncRefreshedScope(
+  scope: ReviewerScope,
+  options: SyncOptions,
+  fetched: number,
+): Promise<SyncRunSummary> {
+  const runs = cachedSyncRunsForRefreshedScope(scope);
+  const threshold = typeof options.threshold === "number" ? options.threshold : fallbackThresholdForScope(scope);
+  if (runs.length === 0) {
+    return emptySummary(threshold);
+  }
+
+  if (runs.length > 1) {
+    const summaries: SyncRunSummary[] = [];
+    for (const [index, run] of runs.entries()) {
+      summaries.push(await syncCachedGroup(run, options, index === 0 ? fetched : 0));
+    }
+    return combineSummaries(summaries, threshold);
+  }
+
+  return syncCachedGroup(runs[0], options, fetched);
+}
+
+function scopeNeedsGenreMetadata(scope: ReviewerScope): boolean {
+  if (scope.type === "group" && typeof scope.groupId === "number") {
+    const group = getReviewerGroup(scope.groupId);
+    return Boolean(group?.enabled && syncFiltersNeedGenreMetadata(group.filters));
+  }
+
+  if (scope.type === "reviewer" && scope.reviewer) {
+    return listReviewerGroups().some(
+      (group) =>
+        group.enabled &&
+        groupCoversReviewer(group, scope.reviewer ?? "") &&
+        syncFiltersNeedGenreMetadata(group.filters),
+    );
+  }
+
+  return listReviewerGroups().some(
+    (group) => group.enabled && syncFiltersNeedGenreMetadata(group.filters),
+  );
 }
 
 export async function refreshReviewer(
