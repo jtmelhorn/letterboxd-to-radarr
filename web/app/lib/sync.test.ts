@@ -279,6 +279,7 @@ describeWithSqlite("sync filtering", () => {
 
   it("runs freshly pulled reviews through sync groups from the reviews refresh endpoint", async () => {
     let addCalls = 0;
+    const addedTitles: string[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -301,9 +302,15 @@ describeWithSqlite("sync filtering", () => {
         }
 
         if (url === "http://radarr.local/api/v3/movie" && method === "POST") {
+          const payload = JSON.parse(String(init?.body ?? "{}")) as {
+            title?: string;
+            year?: number;
+            tmdbId?: number;
+          };
           addCalls += 1;
+          if (payload.title) addedTitles.push(payload.title);
           return Response.json(
-            { id: 900 + addCalls, title: "Action Future", year: 2026, tmdbId: 100 },
+            { id: 900 + addCalls, title: payload.title, year: payload.year, tmdbId: payload.tmdbId },
             { status: 201 },
           );
         }
@@ -333,7 +340,7 @@ describeWithSqlite("sync filtering", () => {
       requiresManualApproval: false,
       filters: {
         year: { mode: "exact", exactYear: 2026 },
-        genres: { include: [], exclude: [] },
+        genres: { include: [], exclude: ["Documentary"] },
       },
       reviewerHandles: ["alice"],
     });
@@ -351,10 +358,83 @@ describeWithSqlite("sync filtering", () => {
 
     expect(response.status).toBe(200);
     expect(addCalls).toBe(1);
+    expect(addedTitles).toEqual(["Action Future"]);
     expect(body.reviews?.find((movie) => movie.title === "Action Future")?.status).toBe("added");
+    expect(body.reviews?.find((movie) => movie.title === "Future Doc")?.status).not.toBe("added");
     expect(getRecentSyncResults(undefined, 10).filter((result) => result.status === "added")).toHaveLength(
       1,
     );
+  });
+
+  it("adds both 2026 films when a group has no genre exclusions", async () => {
+    const addedTitles: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const request = input instanceof Request ? input : null;
+        const url = request?.url ?? String(input);
+        const method = init?.method ?? request?.method ?? "GET";
+
+        if (url === "https://letterboxd.com/alice/rss/") {
+          return new Response(rss, {
+            status: 200,
+            headers: { "Content-Type": "application/rss+xml" },
+          });
+        }
+
+        if (url.startsWith("http://radarr.local/api/v3/movie/lookup")) {
+          const term = new URL(url).searchParams.get("term") ?? "";
+          const tmdbId = term.startsWith("tmdb:") ? term.slice("tmdb:".length) : "100";
+          const movie = lookupMovies.get(tmdbId);
+          return Response.json(movie ? [movie] : []);
+        }
+
+        if (url === "http://radarr.local/api/v3/movie" && method === "POST") {
+          const payload = JSON.parse(String(init?.body ?? "{}")) as {
+            title?: string;
+            year?: number;
+            tmdbId?: number;
+          };
+          if (payload.title) addedTitles.push(payload.title);
+          return Response.json(
+            { id: 950 + addedTitles.length, title: payload.title, year: payload.year, tmdbId: payload.tmdbId },
+            { status: 201 },
+          );
+        }
+
+        return Response.json({ message: `Unexpected request: ${method} ${url}` }, { status: 500 });
+      }),
+    );
+
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+    const { saveSettings } = await import("@/app/lib/repos/settings");
+    const { runSyncScope } = await import("@/app/lib/sync");
+
+    getOrCreateUser("alice");
+    saveSettings({
+      radarrUrl: "http://radarr.local",
+      radarrApiKey: "secret",
+      qualityProfileId: 1,
+      rootFolderPath: "/movies",
+    });
+    const group = upsertReviewerGroup({
+      name: "All 2026",
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: false,
+      filters: {
+        year: { mode: "exact", exactYear: 2026 },
+        genres: { include: [], exclude: [] },
+      },
+      reviewerHandles: ["alice"],
+    });
+
+    const summary = await runSyncScope({ type: "group", groupId: group.id }, { auto: true });
+
+    expect(summary.added).toBe(2);
+    expect(summary.skipped).toBe(1);
+    expect(addedTitles.sort()).toEqual(["Action Future", "Future Doc"]);
   });
 
   it("removes a synced movie by exact Radarr id without deleting files or blocklisting", async () => {

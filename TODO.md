@@ -23,7 +23,9 @@ Letterboxdarr reads public Letterboxd RSS feeds, stores reviews in SQLite, and a
 
 ## P0 - Bugs, broken flows, and confusing behavior
 
-### [ ] P0-1: Fix the failing sync test and pin the refresh-add contract
+### [x] P0-1: Fix the failing sync test and pin the refresh-add contract
+
+> **Completed:** 2026-06-09 — dev / no PR — No spec deviation; local SQLite-backed Vitest suites were skipped by the existing harness.
 
 **Problem:**
 `cd web && npm test` fails on `dev`. `web/app/lib/sync.test.ts` > "runs freshly pulled reviews through sync groups from the reviews refresh endpoint" expects 1 Radarr add after `GET /api/reviews?refresh=1`, but gets 2. The test's "Action fans" group filters only on `year exact 2026` with no genre excludes, and the RSS fixture contains two 2026 films ("Action Future" and "Future Doc"), so two adds is what the current code does. Either the test expectation is stale relative to commit `a5869b3` ("Apply group filters to displayed movies") or a regression doubled adds.
