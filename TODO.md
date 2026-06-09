@@ -1001,7 +1001,9 @@ AA-compliant text contrast for functional text, informative poster labels, hones
 
 ---
 
-### [ ] P2-6: Mobile and touch usability
+### [x] P2-6: Mobile and touch usability
+
+> **Completed:** 2026-06-09 — dev / no PR — Tooltip popover was already done in P2-4; stat cards use a 2×2 grid below sm; manual responsive pass at the listed widths not performed (no confirmed local run workflow).
 
 **Problem:**
 - The dashboard locks to `h-[100dvh]` with `overflow-hidden` (`<main>` in `page.tsx`) and the whole header stack (banners + 4 stat cards + filter bar) is `shrink-0`; on a 667px-tall phone the poster grid gets a sliver of scrollable space.

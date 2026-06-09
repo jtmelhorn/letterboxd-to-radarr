@@ -525,7 +525,7 @@ function PosterRadarrAction({
 
   if (sendState === "idle") {
     return (
-      <div className="opacity-100 transition-opacity duration-200 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+      <div className="poster-reveal transition-opacity duration-200">
         <button
           aria-label={`Send ${movie.title} to Radarr`}
           className="poster-action-btn"
@@ -544,7 +544,7 @@ function PosterRadarrAction({
 
   return (
     <div className="relative">
-      <div className="transition-opacity duration-200 sm:group-hover:opacity-0 sm:group-hover:pointer-events-none sm:group-focus-within:opacity-0">
+      <div className="poster-swap-out transition-opacity duration-200">
         {sendState === "added" ? (
           <div className="flex h-5 w-5 items-center justify-center rounded-full bg-chartreuse/90 border border-chartreuse/40">
             <CheckIcon className="h-3 w-3 text-ink" />
@@ -555,7 +555,7 @@ function PosterRadarrAction({
           </div>
         )}
       </div>
-      <div className="absolute right-0 top-0 flex gap-1 opacity-0 transition-opacity duration-200 pointer-events-none sm:group-hover:pointer-events-auto sm:group-hover:opacity-100 sm:group-focus-within:pointer-events-auto sm:group-focus-within:opacity-100">
+      <div className="poster-hover-only absolute right-0 top-0 flex gap-1 transition-opacity duration-200">
         <button
           aria-label={sendState === "added" ? `Resend ${movie.title} to Radarr` : `Retry sending ${movie.title} to Radarr`}
           className="poster-action-btn"
@@ -662,7 +662,7 @@ function StatCard({
   if (onClick) {
     return (
       <button
-        className="glass-card rounded-[var(--radius-card)] p-4 text-left transition hover:border-gold/25 hover:bg-white/[0.055]"
+        className="glass-card rounded-[var(--radius-card)] p-3 text-left transition hover:border-gold/25 hover:bg-white/[0.055] sm:p-4"
         onClick={onClick}
         type="button"
       >
@@ -672,7 +672,7 @@ function StatCard({
   }
 
   return (
-    <div className="glass-card rounded-[var(--radius-card)] p-4">
+    <div className="glass-card rounded-[var(--radius-card)] p-3 sm:p-4">
       {content}
     </div>
   );
@@ -798,6 +798,7 @@ export default function Home() {
   const [isActivityOpen, setIsActivityOpen] = useState(false);
   const [isClearActivityConfirmOpen, setIsClearActivityConfirmOpen] = useState(false);
   const [isRatingTooltipOpen, setIsRatingTooltipOpen] = useState(false);
+  const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
 
   const movieModalRef = useRef<HTMLDivElement>(null);
   const activityPanelRef = useRef<HTMLElement>(null);
@@ -2101,9 +2102,10 @@ export default function Home() {
       </nav>
 
       {/* ── Main Dashboard Layout ────────────────────────────────────────── */}
-      <main className="flex h-[100dvh] flex-col overflow-hidden pt-16">
+      {/* Below sm the page scrolls naturally; from sm: up the dashboard keeps the locked-viewport layout. */}
+      <main className="flex min-h-[100dvh] flex-col pt-16 sm:h-[100dvh] sm:min-h-0 sm:overflow-hidden">
         {movies.length > 0 ? (
-          <div className="content-shell flex h-full min-h-0 flex-col gap-3 overflow-hidden py-3">
+          <div className="content-shell flex flex-col gap-3 py-3 sm:h-full sm:min-h-0 sm:overflow-hidden">
             <div className="shrink-0 flex flex-col gap-3">
               {autoSyncSummary && (
                 <AlertBanner
@@ -2142,7 +2144,7 @@ export default function Home() {
                 </AlertBanner>
               )}
 
-              <div className="grid shrink-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid shrink-0 grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
                 <StatCard
                   detail={`${stats.total} total films found`}
                   icon={<UserIcon className="h-5 w-5" />}
@@ -2228,6 +2230,22 @@ export default function Home() {
                       ))}
                     </select>
                   </div>
+                  <button
+                    aria-expanded={isMobileFiltersOpen}
+                    className="flex h-10 flex-[0_0_auto] items-center gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-white/20 hover:text-cornsilk lg:hidden"
+                    onClick={() => setIsMobileFiltersOpen((open) => !open)}
+                    type="button"
+                  >
+                    Filters
+                    <span aria-hidden="true" className="text-cornsilk/45">
+                      {isMobileFiltersOpen ? "▲" : "▼"}
+                    </span>
+                  </button>
+                  <div
+                    className={`${
+                      isMobileFiltersOpen ? "flex" : "hidden"
+                    } w-full flex-wrap items-center gap-2 sm:gap-3 lg:flex lg:w-auto`}
+                  >
                   {currentScope.type === "group" ? (
                     <span className="flex h-10 flex-[0_0_auto] items-center rounded-[var(--radius-control)] border border-pine/20 bg-pine/10 px-3 text-xs font-bold text-chartreuse">
                       Using group filters
@@ -2361,6 +2379,7 @@ export default function Home() {
                     />
                     <span className="text-xs font-bold text-cornsilk/70 whitespace-nowrap">Hide movies already in Radarr</span>
                   </label>
+                  </div>
                 </div>
 
                 <div className="min-w-[min(100%,260px)] flex-[1_1_280px] lg:ml-auto lg:max-w-sm xl:max-w-md">
@@ -2396,7 +2415,7 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className="min-h-0 flex-1 sm:overflow-y-auto">
                 <div className="poster-grid animate-fade-in">
                   {filteredMovies.map((movie) => {
                     const key = movieKey(movie);
@@ -2472,7 +2491,7 @@ export default function Home() {
             )}
           </div>
         ) : (
-        <div className="content-shell flex h-full min-h-0 flex-col py-3">
+        <div className="content-shell flex flex-col py-3 sm:h-full sm:min-h-0">
           {fetchError && (
             <AlertBanner title="Unable to sync feed" tone="error">
               {fetchError}

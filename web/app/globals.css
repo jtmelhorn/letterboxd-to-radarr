@@ -121,6 +121,44 @@ textarea {
   );
 }
 
+/* ── Poster action visibility ──────────────────────────── */
+/* Touch / no-hover pointers: the add button stays visible (dimmed) and
+   retry/remove stay hidden — the detail modal covers those actions.
+   Hover-capable pointers get the hover/focus reveal behavior. */
+.poster-reveal {
+  opacity: 0.9;
+}
+
+.poster-hover-only {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (hover: hover) {
+  .poster-reveal {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .poster-card:hover .poster-reveal,
+  .poster-card:focus-within .poster-reveal {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .poster-card:hover .poster-hover-only,
+  .poster-card:focus-within .poster-hover-only {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .poster-card:hover .poster-swap-out,
+  .poster-card:focus-within .poster-swap-out {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
 .poster-action-btn {
   pointer-events: auto;
   display: flex;
