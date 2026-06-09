@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 
 import { configuredAppPassword } from "@/app/lib/config";
 import { sign, verifyPasswordHash, verifySignature } from "@/app/lib/crypto";
-import { getAppState, hasStoredAdminPassword, isSetupComplete } from "@/app/lib/repos/appState";
+import { getAppState, getSessionEpoch, hasStoredAdminPassword, isSetupComplete } from "@/app/lib/repos/appState";
 
 export const SESSION_COOKIE = "lb_session";
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
@@ -15,7 +15,7 @@ export interface AuthStatus {
 }
 
 export function buildSessionToken(): string {
-  const payload = String(Date.now());
+  const payload = `${getSessionEpoch()}.${Date.now()}`;
   return `${payload}.${sign(payload)}`;
 }
 
@@ -28,8 +28,14 @@ export function verifySessionToken(token: string | undefined | null): boolean {
   const signature = token.slice(idx + 1);
   if (!verifySignature(payload, signature)) return false;
 
-  const issuedAt = Number.parseInt(payload, 10);
-  if (!Number.isFinite(issuedAt)) return false;
+  // Payload is "<epoch>.<issuedAt>"; tokens issued before the epoch field
+  // existed carry only "<issuedAt>" and count as epoch 0, so they stay valid
+  // until the first password change bumps the stored epoch.
+  const dotIdx = payload.indexOf(".");
+  const epoch = dotIdx > 0 ? Number.parseInt(payload.slice(0, dotIdx), 10) : 0;
+  const issuedAt = Number.parseInt(dotIdx > 0 ? payload.slice(dotIdx + 1) : payload, 10);
+  if (!Number.isFinite(epoch) || !Number.isFinite(issuedAt)) return false;
+  if (epoch < getSessionEpoch()) return false;
 
   const ageSeconds = (Date.now() - issuedAt) / 1000;
   return ageSeconds >= 0 && ageSeconds <= SESSION_MAX_AGE;

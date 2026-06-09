@@ -1124,7 +1124,9 @@ Setup can be completed with reviewer-only configuration; Radarr details can be f
 
 ---
 
-### [ ] P2-9: Auth hardening (login rate limit, session invalidation)
+### [x] P2-9: Auth hardening (login rate limit, session invalidation)
+
+> **Completed:** 2026-06-09 — dev / no PR — Rate limit counts failed attempts (cleared on success); limiter unit-tested locally, epoch/session tests SQLite-guarded for CI; no other spec deviation.
 
 **Problem:**
 - `POST /api/auth/login` has no rate limiting or lockout — unlimited password guesses.

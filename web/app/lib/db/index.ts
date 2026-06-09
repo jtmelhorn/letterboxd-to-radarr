@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS app_state (
   admin_password_hash TEXT NOT NULL DEFAULT '',
   setup_completed_at TEXT,
   default_group_id INTEGER REFERENCES reviewer_groups(id) ON DELETE SET NULL,
+  session_epoch INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
@@ -293,6 +294,7 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
     "default_group_id",
     "default_group_id INTEGER REFERENCES reviewer_groups(id) ON DELETE SET NULL",
   );
+  ensureColumn(sqlite, "app_state", "session_epoch", "session_epoch INTEGER NOT NULL DEFAULT 0");
   ensureColumn(sqlite, "movie_blocklist", "imdb_id", "imdb_id TEXT");
   ensureColumn(sqlite, "movie_blocklist", "radarr_movie_id", "radarr_movie_id INTEGER");
   const addedBlocklistNormalizedTitle = ensureColumn(
