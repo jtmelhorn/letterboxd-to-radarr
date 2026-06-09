@@ -2330,7 +2330,7 @@ export default function Home() {
                   <input
                     aria-label="Search movies"
                     className="h-10 w-full min-w-0 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
-                    placeholder="Search movies, year, reviewer, or group"
+                    placeholder="Search movies, year, reviewer, or genre…"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
@@ -2898,7 +2898,7 @@ export default function Home() {
               <input
                 aria-label="Search sync activity"
                 className="h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
-                placeholder="Search movies, year, reviewer, or genre…"
+                placeholder="Search by title, year, status, or message…"
                 value={activitySearch}
                 onChange={(e) => setActivitySearch(e.target.value)}
               />
@@ -3292,7 +3292,7 @@ export default function Home() {
                   <input
                     aria-label="Search pending approvals"
                     className="mb-3 h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
-                    placeholder="Search movies, year, reviewer, or genre…"
+                    placeholder="Search by title, year, or group…"
                     value={pendingSearch}
                     onChange={(e) => setPendingSearch(e.target.value)}
                   />
@@ -3369,7 +3369,7 @@ export default function Home() {
                 <input
                   aria-label="Search blocklisted movies"
                   className="mb-3 h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
-                  placeholder="Search movies, year, reviewer, or genre…"
+                  placeholder="Search by title, year, source, or TMDB/IMDb id…"
                   value={blocklistSearch}
                   onChange={(e) => setBlocklistSearch(e.target.value)}
                 />

@@ -845,7 +845,9 @@ Retry shows busy state and reports when the film can't be resolved in the curren
 
 ---
 
-### [ ] P2-2: Truthful search placeholders and copy
+### [x] P2-2: Truthful search placeholders and copy
+
+> **Completed:** 2026-06-09 — dev / no PR — Also corrected the main-grid placeholder ("or group" → "or genre…") since its matcher checks genres, not groups; synced panel placeholder kept as-is per spec.
 
 **Problem:**
 The placeholder "Search movies, year, reviewer, or genre…" is copy-pasted onto four search inputs in `page.tsx`, but: activity search matches title/year/message/status (not reviewer/genre); blocklist search matches title/year/source/tmdb/imdb; approvals search matches title/year/group name.
