@@ -50,6 +50,123 @@ describeWithSqlite("reviewer group filters", () => {
     expect(getReviewerGroup(saved.id)).toMatchObject({ enabled: false, reviewerHandles: ["alice"] });
   });
 
+  it("seeds the default group and adds new reviewers to it", async () => {
+    const { getDefaultReviewerGroupId } = await import("@/app/lib/repos/appState");
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { getDefaultReviewerGroup, listReviewerGroups, upsertReviewerGroup } = await import(
+      "@/app/lib/repos/reviewerGroups"
+    );
+
+    const defaultGroup = getDefaultReviewerGroup();
+    expect(defaultGroup).toMatchObject({
+      name: "All reviewers",
+      enabled: true,
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      reviewerHandles: [],
+    });
+    expect(getDefaultReviewerGroupId()).toBe(defaultGroup?.id);
+    expect(listReviewerGroups()).toHaveLength(1);
+
+    getOrCreateUser("Alice");
+
+    expect(getDefaultReviewerGroup()?.reviewerHandles).toEqual(["alice"]);
+
+    upsertReviewerGroup({
+      id: defaultGroup!.id,
+      name: defaultGroup!.name,
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: false,
+      reviewerHandles: [],
+    });
+
+    expect(getDefaultReviewerGroup()?.reviewerHandles).toEqual(["alice"]);
+  });
+
+  it("prevents deleting the default group while still allowing it to be disabled", async () => {
+    const { getDefaultReviewerGroup, deleteReviewerGroup, upsertReviewerGroup } = await import(
+      "@/app/lib/repos/reviewerGroups"
+    );
+
+    const defaultGroup = getDefaultReviewerGroup();
+    expect(defaultGroup).not.toBeNull();
+
+    expect(() => deleteReviewerGroup(defaultGroup!.id)).toThrow("cannot be deleted");
+
+    upsertReviewerGroup({
+      id: defaultGroup!.id,
+      name: defaultGroup!.name,
+      enabled: false,
+      ratingThreshold: defaultGroup!.ratingThreshold,
+      syncInterval: defaultGroup!.syncInterval,
+      requiresManualApproval: defaultGroup!.requiresManualApproval,
+      filters: defaultGroup!.filters,
+      reviewerHandles: defaultGroup!.reviewerHandles,
+    });
+
+    expect(getDefaultReviewerGroup()).toMatchObject({ enabled: false, name: "All reviewers" });
+  });
+
+  it("adopts an existing All reviewers group on upgrade without duplicating it", async () => {
+    const Database = require("better-sqlite3") as typeof import("better-sqlite3");
+    const oldDb = new Database(path.join(dataDir, "app.db"));
+    oldDb.exec(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        handle TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      );
+
+      CREATE TABLE reviewer_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        auto_threshold REAL NOT NULL DEFAULT 4,
+        sync_interval TEXT NOT NULL DEFAULT '1d',
+        requires_manual_approval INTEGER NOT NULL DEFAULT 0,
+        filters_json TEXT NOT NULL DEFAULT '{"year":{"mode":"any"},"genres":{"include":[],"exclude":[]}}',
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      );
+
+      CREATE TABLE reviewer_group_members (
+        group_id INTEGER NOT NULL REFERENCES reviewer_groups(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        PRIMARY KEY (group_id, user_id)
+      );
+
+      CREATE TABLE app_state (
+        id INTEGER PRIMARY KEY,
+        admin_password_hash TEXT NOT NULL DEFAULT '',
+        setup_completed_at TEXT,
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      );
+
+      INSERT INTO app_state (id) VALUES (1);
+      INSERT INTO users (handle) VALUES ('bob');
+      INSERT INTO reviewer_groups (id, name, auto_threshold, sync_interval)
+        VALUES (7, 'All reviewers', 4.5, 'manual');
+    `);
+    oldDb.close();
+
+    const { getDefaultReviewerGroupId } = await import("@/app/lib/repos/appState");
+    const { getDefaultReviewerGroup, listReviewerGroups } = await import(
+      "@/app/lib/repos/reviewerGroups"
+    );
+
+    expect(getDefaultReviewerGroupId()).toBe(7);
+    expect(listReviewerGroups()).toHaveLength(1);
+    expect(getDefaultReviewerGroup()).toMatchObject({
+      id: 7,
+      name: "All reviewers",
+      ratingThreshold: 4.5,
+      syncInterval: "manual",
+      reviewerHandles: ["bob"],
+    });
+  });
+
   it("allows deleting any group", async () => {
     const { getOrCreateUser } = await import("@/app/lib/repos/users");
     const { deleteReviewerGroup, getReviewerGroup, upsertReviewerGroup } = await import(

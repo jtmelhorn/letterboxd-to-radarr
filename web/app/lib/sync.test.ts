@@ -277,6 +277,82 @@ describeWithSqlite("sync filtering", () => {
     expect(lookupCalls).toBe(0);
   });
 
+  it("uses the setup threshold on the default group for all-scope syncs", async () => {
+    const addedTitles: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const request = input instanceof Request ? input : null;
+        const url = request?.url ?? String(input);
+        const method = init?.method ?? request?.method ?? "GET";
+
+        if (url === "https://letterboxd.com/alice/rss/") {
+          return new Response(rss, {
+            status: 200,
+            headers: { "Content-Type": "application/rss+xml" },
+          });
+        }
+
+        if (url.startsWith("http://radarr.local/api/v3/movie/lookup")) {
+          const term = new URL(url).searchParams.get("term") ?? "";
+          const tmdbId = term.startsWith("tmdb:") ? term.slice("tmdb:".length) : "100";
+          const movie = lookupMovies.get(tmdbId);
+          return Response.json(movie ? [movie] : []);
+        }
+
+        if (url === "http://radarr.local/api/v3/movie" && method === "POST") {
+          const payload = JSON.parse(String(init?.body ?? "{}")) as {
+            title?: string;
+            year?: number;
+            tmdbId?: number;
+          };
+          if (payload.title) addedTitles.push(payload.title);
+          return Response.json(
+            { id: 800 + addedTitles.length, title: payload.title, year: payload.year, tmdbId: payload.tmdbId },
+            { status: 201 },
+          );
+        }
+
+        return Response.json({ message: `Unexpected request: ${method} ${url}` }, { status: 500 });
+      }),
+    );
+
+    const { buildSessionToken, SESSION_COOKIE } = await import("@/app/lib/auth");
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { getDefaultReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+    const { saveSettings } = await import("@/app/lib/repos/settings");
+    const { POST } = await import("@/app/api/setup/complete/route");
+    const { runSyncScope } = await import("@/app/lib/sync");
+
+    getOrCreateUser("alice");
+    saveSettings({
+      radarrUrl: "http://radarr.local",
+      radarrApiKey: "secret",
+      qualityProfileId: 1,
+      rootFolderPath: "/movies",
+      autoThreshold: 5,
+    });
+
+    const setupResponse = await POST(
+      new Request("http://localhost/api/setup/complete", {
+        method: "POST",
+        headers: {
+          cookie: `${SESSION_COOKIE}=${encodeURIComponent(buildSessionToken())}`,
+        },
+      }),
+    );
+    const summary = await runSyncScope({ type: "all" }, { auto: true });
+
+    expect(setupResponse.status).toBe(200);
+    expect(getDefaultReviewerGroup()).toMatchObject({
+      name: "All reviewers",
+      ratingThreshold: 5,
+      reviewerHandles: ["alice"],
+    });
+    expect(summary.added).toBe(3);
+    expect(addedTitles.sort()).toEqual(["Action Future", "Action Past", "Future Doc"]);
+  });
+
   it("runs freshly pulled reviews through sync groups from the reviews refresh endpoint", async () => {
     let addCalls = 0;
     const addedTitles: string[] = [];

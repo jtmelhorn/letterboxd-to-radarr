@@ -2,8 +2,11 @@ import { asc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/app/lib/db";
 import { reviewerGroupMembers, reviewerGroups, users } from "@/app/lib/db/schema";
+import { getDefaultReviewerGroupId } from "@/app/lib/repos/appState";
 import { parseSyncFiltersJson, stringifySyncFilters } from "@/app/lib/syncFilters";
 import type { ReviewerGroupDto, SyncInterval } from "@/app/types/movie";
+
+export const DEFAULT_REVIEWER_GROUP_NAME = "All reviewers";
 
 function normalizeGroupName(name: string): string {
   return name.trim().replace(/\s+/g, " ");
@@ -62,6 +65,22 @@ export function getReviewerGroup(groupId: number): ReviewerGroupDto | null {
   return group ? toReviewerGroupDto(group) : null;
 }
 
+export function getDefaultReviewerGroup(): ReviewerGroupDto | null {
+  const groupId = getDefaultReviewerGroupId();
+  return typeof groupId === "number" ? getReviewerGroup(groupId) : null;
+}
+
+export function addUserToDefaultReviewerGroup(userId: number): void {
+  const groupId = getDefaultReviewerGroupId();
+  if (typeof groupId !== "number") return;
+
+  getDb()
+    .insert(reviewerGroupMembers)
+    .values({ groupId, userId })
+    .onConflictDoNothing()
+    .run();
+}
+
 function reviewerIdsFromHandles(handles: string[]): number[] {
   const normalized = [...new Set(handles.map((h) => h.trim().toLowerCase()).filter(Boolean))];
   if (normalized.length === 0) return [];
@@ -73,6 +92,14 @@ function reviewerIdsFromHandles(handles: string[]): number[] {
     .where(inArray(users.handle, normalized))
     .all();
   return rows.map((row) => row.id);
+}
+
+function allReviewerIds(): number[] {
+  return getDb()
+    .select({ id: users.id })
+    .from(users)
+    .all()
+    .map((row) => row.id);
 }
 
 export function upsertReviewerGroup(input: {
@@ -110,7 +137,8 @@ export function upsertReviewerGroup(input: {
   const requiresManualApproval = input.requiresManualApproval ?? false;
   const filtersJson =
     input.filters === undefined && existingGroup ? existingGroup.filtersJson : stringifySyncFilters(input.filters);
-  const memberIds = reviewerIdsFromHandles(input.reviewerHandles);
+  const isDefaultGroupUpdate = typeof input.id === "number" && input.id === getDefaultReviewerGroupId();
+  const memberIds = isDefaultGroupUpdate ? allReviewerIds() : reviewerIdsFromHandles(input.reviewerHandles);
 
   const group = db.transaction((tx) => {
     const saved =
@@ -154,7 +182,35 @@ export function upsertReviewerGroup(input: {
   return toReviewerGroupDto(group);
 }
 
+export function applyDefaultReviewerGroupThreshold(threshold: number): ReviewerGroupDto {
+  if (!isValidAutoThreshold(threshold)) {
+    throw new Error("Auto-sync threshold must be disabled or between 1.0 and 5.0.");
+  }
+
+  const groupId = getDefaultReviewerGroupId();
+  if (typeof groupId !== "number") {
+    throw new Error("Default reviewer group is not configured.");
+  }
+
+  const db = getDb();
+  const now = new Date().toISOString();
+  const saved = db
+    .update(reviewerGroups)
+    .set({ autoThreshold: normalizeThreshold(threshold), updatedAt: now })
+    .where(eq(reviewerGroups.id, groupId))
+    .returning()
+    .get();
+  if (!saved) {
+    throw new Error("Default reviewer group was not found.");
+  }
+  return toReviewerGroupDto(saved);
+}
+
 export function deleteReviewerGroup(groupId: number): boolean {
+  if (groupId === getDefaultReviewerGroupId()) {
+    throw new Error(`The default ${DEFAULT_REVIEWER_GROUP_NAME} group cannot be deleted. Disable it instead.`);
+  }
+
   const db = getDb();
   const result = db.delete(reviewerGroups).where(eq(reviewerGroups.id, groupId)).run();
   return (result.changes ?? 0) > 0;

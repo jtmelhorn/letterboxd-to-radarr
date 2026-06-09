@@ -187,6 +187,7 @@ export const appState = sqliteTable("app_state", {
   id: integer("id").primaryKey(),
   adminPasswordHash: text("admin_password_hash").notNull().default(""),
   setupCompletedAt: text("setup_completed_at"),
+  defaultGroupId: integer("default_group_id").references(() => reviewerGroups.id, { onDelete: "set null" }),
   updatedAt: text("updated_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),

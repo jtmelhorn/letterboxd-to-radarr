@@ -8,6 +8,7 @@ const APP_STATE_ID = 1;
 export interface AppStateSnapshot {
   adminPasswordHash: string;
   setupCompletedAt: string | null;
+  defaultGroupId: number | null;
 }
 
 export function getAppState(): AppStateSnapshot {
@@ -16,7 +17,12 @@ export function getAppState(): AppStateSnapshot {
   return {
     adminPasswordHash: row?.adminPasswordHash ?? "",
     setupCompletedAt: row?.setupCompletedAt ?? null,
+    defaultGroupId: row?.defaultGroupId ?? null,
   };
+}
+
+export function getDefaultReviewerGroupId(): number | null {
+  return getAppState().defaultGroupId;
 }
 
 export function hasStoredAdminPassword(): boolean {

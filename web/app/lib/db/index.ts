@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS app_state (
   id INTEGER PRIMARY KEY,
   admin_password_hash TEXT NOT NULL DEFAULT '',
   setup_completed_at TEXT,
+  default_group_id INTEGER REFERENCES reviewer_groups(id) ON DELETE SET NULL,
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
@@ -151,6 +152,9 @@ CREATE TABLE IF NOT EXISTS movie_blocklist (
 
 `;
 
+const DEFAULT_REVIEWER_GROUP_NAME = "All reviewers";
+const DEFAULT_FILTERS_JSON = '{"year":{"mode":"any"},"genres":{"include":[],"exclude":[]}}';
+
 function ensureColumn(sqlite: Database.Database, table: string, column: string, ddl: string): boolean {
   const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   if (!columns.some((row) => row.name === column)) {
@@ -158,6 +162,54 @@ function ensureColumn(sqlite: Database.Database, table: string, column: string, 
     return true;
   }
   return false;
+}
+
+function backfillDefaultGroupMembership(sqlite: Database.Database, groupId: number): void {
+  sqlite
+    .prepare(
+      `INSERT OR IGNORE INTO reviewer_group_members (group_id, user_id)
+       SELECT ?, id FROM users`,
+    )
+    .run(groupId);
+}
+
+function ensureDefaultReviewerGroup(sqlite: Database.Database): void {
+  const tracked = sqlite
+    .prepare(
+      `SELECT app_state.default_group_id AS defaultGroupId, reviewer_groups.id AS groupId
+       FROM app_state
+       LEFT JOIN reviewer_groups ON reviewer_groups.id = app_state.default_group_id
+       WHERE app_state.id = 1`,
+    )
+    .get() as { defaultGroupId: number | null; groupId: number | null } | undefined;
+
+  if (tracked?.defaultGroupId && tracked.groupId) {
+    backfillDefaultGroupMembership(sqlite, tracked.defaultGroupId);
+    return;
+  }
+
+  const existing = sqlite
+    .prepare("SELECT id FROM reviewer_groups WHERE name = ?")
+    .get(DEFAULT_REVIEWER_GROUP_NAME) as { id: number } | undefined;
+
+  const groupId =
+    existing?.id ??
+    (sqlite
+      .prepare(
+        `INSERT INTO reviewer_groups (name, filters_json)
+         VALUES (?, ?)
+         RETURNING id`,
+      )
+      .get(DEFAULT_REVIEWER_GROUP_NAME, DEFAULT_FILTERS_JSON) as { id: number }).id;
+
+  sqlite
+    .prepare(
+      `UPDATE app_state
+       SET default_group_id = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+       WHERE id = 1`,
+    )
+    .run(groupId);
+  backfillDefaultGroupMembership(sqlite, groupId);
 }
 
 function init(): { sqlite: Database.Database; db: DrizzleDb } {
@@ -202,6 +254,12 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
   ensureColumn(sqlite, "reviews", "tmdb_tv_id", "tmdb_tv_id INTEGER");
   ensureColumn(sqlite, "sync_results", "radarr_movie_id", "radarr_movie_id INTEGER");
   ensureColumn(sqlite, "movie_metadata", "year", "year INTEGER");
+  ensureColumn(
+    sqlite,
+    "app_state",
+    "default_group_id",
+    "default_group_id INTEGER REFERENCES reviewer_groups(id) ON DELETE SET NULL",
+  );
   ensureColumn(sqlite, "movie_blocklist", "imdb_id", "imdb_id TEXT");
   ensureColumn(sqlite, "movie_blocklist", "radarr_movie_id", "radarr_movie_id INTEGER");
   const addedBlocklistNormalizedTitle = ensureColumn(
@@ -239,6 +297,7 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
     .run();
 
   migrateLegacyJson(sqlite);
+  ensureDefaultReviewerGroup(sqlite);
 
   const db = drizzle(sqlite, { schema });
   return { sqlite, db };

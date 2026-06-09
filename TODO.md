@@ -113,7 +113,9 @@ No data files in git, CI runs typecheck + tests on PRs, compose file is valid an
 
 ---
 
-### [ ] P0-3: Create, protect, and wire the default "All reviewers" group
+### [x] P0-3: Create, protect, and wire the default "All reviewers" group
+
+> **Completed:** 2026-06-09 — dev / no PR — No spec deviation; local SQLite-backed Vitest suites were skipped by the existing harness.
 
 **Problem:**
 No code creates a default reviewer group. The setup wizard's "Initial All reviewers group" section (`ControlPanelForm.tsx`, setup mode) writes only the deprecated `radarr_targets.auto_threshold`, which group sync never reads. `deleteReviewerGroup` (`web/app/lib/repos/reviewerGroups.ts`) has no guard for group id 1. No auto-membership exists. `README.md` and `AGENTS.md` describe all of this as existing behavior.

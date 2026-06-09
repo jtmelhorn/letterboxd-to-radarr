@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 
 import { getDb } from "@/app/lib/db";
 import { users } from "@/app/lib/db/schema";
+import { addUserToDefaultReviewerGroup } from "@/app/lib/repos/reviewerGroups";
 
 export function normalizeHandle(handle: string): string {
   return handle.trim().toLowerCase();
@@ -20,6 +21,7 @@ export function getOrCreateUser(handle: string): { id: number; handle: string } 
   }
 
   const inserted = db.insert(users).values({ handle: normalized }).returning().get();
+  addUserToDefaultReviewerGroup(inserted.id);
   return { id: inserted.id, handle: inserted.handle };
 }
 
