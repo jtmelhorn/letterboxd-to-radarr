@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
+import { useClickAway } from "@/app/hooks/useClickAway";
 import {
   MAX_SYNC_YEAR,
   MIN_SYNC_YEAR,
@@ -153,6 +154,8 @@ function MultiGenreDropdown({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+  useClickAway(rootRef, () => setIsOpen(false), isOpen);
   const availableOptions = useMemo(() => {
     const labels = new Map<string, string>();
     for (const option of [...options, ...values]) {
@@ -179,7 +182,7 @@ function MultiGenreDropdown({
       : `${values.length} selected`;
 
   return (
-    <div className="relative space-y-2">
+    <div ref={rootRef} className="relative space-y-2">
       <div className="space-y-1">
         <span className={labelCls}>{label}</span>
         <button

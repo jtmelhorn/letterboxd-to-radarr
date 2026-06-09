@@ -5,6 +5,8 @@ import type { FormEvent, ReactNode } from "react";
 
 import { canCompleteSetup, ControlPanelForm } from "@/app/components/ControlPanelForm";
 import { SyncConfigurationPanel } from "@/app/components/SyncConfigurationPanel";
+import { useClickAway } from "@/app/hooks/useClickAway";
+import { useFocusTrap } from "@/app/hooks/useFocusTrap";
 import { evaluateSyncFilters, normalizeGenreKey, normalizeGenreLabel } from "@/app/lib/syncFilters";
 import type {
   AggregatedMovieDto,
@@ -795,6 +797,28 @@ export default function Home() {
   const [activitySeenAt, setActivitySeenAt] = useState(() => Date.now());
   const [isActivityOpen, setIsActivityOpen] = useState(false);
   const [isClearActivityConfirmOpen, setIsClearActivityConfirmOpen] = useState(false);
+  const [isRatingTooltipOpen, setIsRatingTooltipOpen] = useState(false);
+
+  const movieModalRef = useRef<HTMLDivElement>(null);
+  const activityPanelRef = useRef<HTMLElement>(null);
+  const syncedPanelRef = useRef<HTMLElement>(null);
+  const settingsModalRef = useRef<HTMLDivElement>(null);
+  const removeDialogRef = useRef<HTMLDivElement>(null);
+  const clearActivityDialogRef = useRef<HTMLDivElement>(null);
+  const genreDropdownRef = useRef<HTMLDivElement>(null);
+  const ratingTooltipRef = useRef<HTMLSpanElement>(null);
+
+  // Nested overlays (remove/clear dialogs above a modal) stay correct because
+  // each trap listens on its own container — only the topmost layer sees Tab.
+  useFocusTrap(movieModalRef, Boolean(activeMovieKey));
+  useFocusTrap(activityPanelRef, isActivityOpen);
+  useFocusTrap(syncedPanelRef, isSyncedOpen);
+  useFocusTrap(settingsModalRef, isSettingsOpen);
+  useFocusTrap(removeDialogRef, removingMovie != null);
+  useFocusTrap(clearActivityDialogRef, isClearActivityConfirmOpen);
+
+  useClickAway(genreDropdownRef, () => setIsGenreFilterOpen(false), isGenreFilterOpen);
+  useClickAway(ratingTooltipRef, () => setIsRatingTooltipOpen(false), isRatingTooltipOpen);
 
   const isDesktop = useMediaQuery("(min-width: 640px)");
 
@@ -2210,15 +2234,28 @@ export default function Home() {
                     </span>
                   ) : (
                     <>
-                      <span className="group relative flex h-10 flex-[0_0_auto] items-center gap-1.5">
+                      <span
+                        ref={ratingTooltipRef}
+                        className="group relative flex h-10 flex-[0_0_auto] items-center gap-1.5"
+                      >
                         <label className="text-xs font-bold uppercase tracking-wider text-cornsilk/55">
                           Min. rating ≥
                         </label>
-                        <span className="text-cornsilk/45 transition-colors hover:text-cornsilk/80" tabIndex={0}>
+                        <button
+                          aria-describedby="min-rating-tooltip"
+                          aria-expanded={isRatingTooltipOpen}
+                          aria-label="About the rating filter"
+                          className="text-cornsilk/45 transition-colors hover:text-cornsilk/80 focus:text-cornsilk/80"
+                          onClick={() => setIsRatingTooltipOpen((open) => !open)}
+                          type="button"
+                        >
                           <InfoIcon className="h-3.5 w-3.5" />
-                        </span>
+                        </button>
                         <span
-                          className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-60 rounded-lg border border-cornsilk/10 bg-ink px-3 py-2 text-[11px] font-medium leading-relaxed text-cornsilk/80 opacity-0 shadow-xl transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
+                          className={`pointer-events-none absolute left-0 top-full z-20 mt-2 w-60 rounded-lg border border-cornsilk/10 bg-ink px-3 py-2 text-[11px] font-medium leading-relaxed text-cornsilk/80 shadow-xl transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 ${
+                            isRatingTooltipOpen ? "opacity-100" : "opacity-0"
+                          }`}
+                          id="min-rating-tooltip"
                           role="tooltip"
                         >
                           Filter which movies appear in the grid. Auto-sync to Radarr uses thresholds in Sync groups.
@@ -2250,7 +2287,7 @@ export default function Home() {
                         ))}
                       </div>
 
-                      <div className="relative max-w-full flex-[0_1_10rem]">
+                      <div ref={genreDropdownRef} className="relative max-w-full flex-[0_1_10rem]">
                         <button
                           className="flex h-10 w-full min-w-32 items-center justify-between gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-white/20 hover:text-cornsilk"
                           onClick={() => setIsGenreFilterOpen((open) => !open)}
@@ -2632,6 +2669,7 @@ export default function Home() {
           }}
         >
           <div
+            ref={movieModalRef}
             aria-labelledby="movie-detail-title"
             aria-modal="true"
             className="glass-modal animate-fade-in flex max-h-[90vh] min-h-0 w-full flex-col overflow-hidden rounded-t-3xl border border-cornsilk/10 shadow-2xl transition-all sm:max-w-4xl sm:rounded-[var(--radius-card)]"
@@ -2851,6 +2889,7 @@ export default function Home() {
           }}
         >
           <aside
+            ref={activityPanelRef}
             aria-labelledby="activity-title"
             aria-modal="true"
             className="glass-modal animate-fade-in flex h-full w-full max-w-md flex-col border-l border-cornsilk/10 shadow-2xl"
@@ -3018,6 +3057,7 @@ export default function Home() {
           }}
         >
           <aside
+            ref={syncedPanelRef}
             aria-labelledby="synced-title"
             aria-modal="true"
             className="glass-modal animate-fade-in flex h-full w-full max-w-md flex-col border-l border-cornsilk/10 shadow-2xl"
@@ -3144,7 +3184,12 @@ export default function Home() {
       {/* ── Clear activity confirmation dialog ────────────────────────────── */}
       {isClearActivityConfirmOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="glass-modal w-full max-w-sm rounded-[var(--radius-card)] border border-cornsilk/10 p-5 shadow-2xl">
+          <div
+            ref={clearActivityDialogRef}
+            aria-modal="true"
+            className="glass-modal w-full max-w-sm rounded-[var(--radius-card)] border border-cornsilk/10 p-5 shadow-2xl"
+            role="dialog"
+          >
             <h3 className="text-base font-extrabold text-cornsilk">Clear activity?</h3>
             <p className="mt-2 text-sm text-cornsilk/70">
               This clears the visible sync history. Movies already sent to Radarr will not be re-added.
@@ -3173,7 +3218,12 @@ export default function Home() {
       {/* ── Remove confirmation dialog ─────────────────────────────────────── */}
       {removingMovie && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="glass-modal w-full max-w-sm rounded-[var(--radius-card)] border border-cornsilk/10 p-5 shadow-2xl">
+          <div
+            ref={removeDialogRef}
+            aria-modal="true"
+            className="glass-modal w-full max-w-sm rounded-[var(--radius-card)] border border-cornsilk/10 p-5 shadow-2xl"
+            role="dialog"
+          >
             <h3 className="text-base font-extrabold text-cornsilk">Remove from Radarr?</h3>
             <p className="mt-2 text-sm text-cornsilk/70">
               This will remove <strong className="text-cornsilk">{removingMovie.title}</strong>
@@ -3247,6 +3297,7 @@ export default function Home() {
           }}
         >
           <div
+            ref={settingsModalRef}
             aria-labelledby="settings-title"
             aria-modal="true"
             className="glass-modal flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-3xl border border-cornsilk/10 shadow-2xl sm:max-w-4xl sm:rounded-[var(--radius-card)]"

@@ -919,7 +919,9 @@ Clear labels, full threshold range incl. "Disabled", and a visible dirty indicat
 
 ---
 
-### [ ] P2-4: Modal/dropdown interaction and focus management
+### [x] P2-4: Modal/dropdown interaction and focus management
+
+> **Completed:** 2026-06-09 — dev / no PR — Tooltip made a click-toggleable popover (as suggested, coordinating with P2-6) while keeping hover reveal; clear-activity confirm dialog also got the focus trap alongside the five overlays named in the spec; manual keyboard pass not performed (no confirmed local run workflow).
 
 **Problem:**
 - All four overlays (movie detail, activity, synced, settings) set `aria-modal` but never trap focus or move it on open; background stays tabbable; focus is not returned to the trigger on close.
