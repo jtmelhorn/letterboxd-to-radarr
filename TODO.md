@@ -877,7 +877,9 @@ Each search input's placeholder describes what it actually matches.
 
 ---
 
-### [ ] P2-3: Form/control improvements in sync configuration
+### [x] P2-3: Form/control improvements in sync configuration
+
+> **Completed:** 2026-06-09 — dev / no PR — Dirty indicator rendered as an "Unsaved changes" label plus a dot on the Save button (aria-hidden so accessible names stay stable); no other spec deviation.
 
 **Problem:**
 - The "Hide in Radarr" checkbox label is ambiguous.

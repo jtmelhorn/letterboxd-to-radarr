@@ -105,6 +105,10 @@ function TrashIcon({ className }: { className?: string }) {
   );
 }
 
+function ratingOptionLabel(rating: number): string {
+  return rating === -1 ? "Disabled (no auto-sync)" : `Avg >= ${rating.toFixed(1)} stars`;
+}
+
 function draftFromGroup(group: ReviewerGroupDto): GroupDraft {
   return {
     name: group.name,
@@ -397,7 +401,7 @@ export function SyncConfigurationPanel({
               >
                 {ratingOptions.map((rating) => (
                   <option key={rating} value={rating}>
-                    Avg &gt;= {rating.toFixed(1)} stars
+                    {ratingOptionLabel(rating)}
                   </option>
                 ))}
               </select>
@@ -423,6 +427,7 @@ export function SyncConfigurationPanel({
 
           {reviewerGroups.map((group) => {
             const draft = groupDrafts[group.id] ?? draftFromGroup(group);
+            const isDirty = JSON.stringify(draft) !== JSON.stringify(draftFromGroup(group));
 
             return (
               <article
@@ -484,7 +489,7 @@ export function SyncConfigurationPanel({
                       >
                         {ratingOptions.map((rating) => (
                           <option key={rating} value={rating}>
-                            Avg &gt;= {rating.toFixed(1)} stars
+                            {ratingOptionLabel(rating)}
                           </option>
                         ))}
                       </select>
@@ -593,9 +598,15 @@ export function SyncConfigurationPanel({
                         <span className="text-xs font-semibold text-cornsilk/45">Drag reviewers here</span>
                       )}
                     </div>
+                    <p className="mt-2 text-[11px] leading-relaxed text-cornsilk/50">
+                      Membership changes save immediately.
+                    </p>
                   </div>
 
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                    {isDirty && savingGroupId !== group.id && (
+                      <span className="text-[11px] font-bold text-gold/80 sm:mr-1">Unsaved changes</span>
+                    )}
                     <button
                       className={`${ghostBtnCls} h-9 px-3 text-xs`}
                       type="button"
@@ -608,11 +619,12 @@ export function SyncConfigurationPanel({
                     </button>
                     <button
                       className={`${primaryBtnCls} h-9 px-3 text-xs`}
-                      disabled={savingGroupId === group.id}
+                      disabled={savingGroupId === group.id || !isDirty}
                       type="button"
                       onClick={() => void saveGroupDraft(group)}
                     >
                       {savingGroupId === group.id ? "Saving..." : "Save group"}
+                      {isDirty && savingGroupId !== group.id && <span aria-hidden="true"> •</span>}
                     </button>
                   </div>
                 </div>

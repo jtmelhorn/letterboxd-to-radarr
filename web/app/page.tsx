@@ -57,7 +57,8 @@ const STORAGE_KEY = "letterboxdarr-local-config";
 const LEGACY_STORAGE_KEY = "letterboxd-to-radarr-local-config";
 const UNKNOWN_GENRE = "Unknown genre";
 const ratingOptions = Array.from({ length: 9 }, (_, i) => 1 + i * 0.5);
-const groupRatingOptions = [3, 3.5, 4, 4.5, 5];
+// -1 is the backend's "automation disabled" threshold (isValidAutoThreshold).
+const groupRatingOptions = [-1, ...ratingOptions];
 const commonExcludedGenreOptions = ["Documentary", "Short", "Reality", "TV Movie"];
 const syncIntervalOptions: Array<{ value: SyncInterval; label: string }> = [
   { value: "manual", label: "Manual only" },
@@ -2322,7 +2323,7 @@ export default function Home() {
                       onChange={(e) => setHideAdded(e.target.checked)}
                       type="checkbox"
                     />
-                    <span className="text-xs font-bold text-cornsilk/70 whitespace-nowrap">Hide in Radarr</span>
+                    <span className="text-xs font-bold text-cornsilk/70 whitespace-nowrap">Hide movies already in Radarr</span>
                   </label>
                 </div>
 

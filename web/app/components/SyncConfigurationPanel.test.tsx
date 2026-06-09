@@ -212,6 +212,57 @@ describe("SyncConfigurationPanel", () => {
     expect(within(legacy as HTMLElement).getByLabelText("Release year filter")).toHaveValue("any");
   });
 
+  it("disables Save when clean and indicates unsaved changes until reset", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    const favorites = screen.getByLabelText("Favorites group name").closest("article");
+    const scope = within(favorites as HTMLElement);
+
+    const save = scope.getByRole("button", { name: "Save group" });
+    expect(save).toBeDisabled();
+    expect(scope.queryByText("Unsaved changes")).not.toBeInTheDocument();
+
+    await user.type(scope.getByLabelText("Favorites group name"), " updated");
+    expect(save).toBeEnabled();
+    expect(scope.getByText("Unsaved changes")).toBeInTheDocument();
+
+    await user.click(scope.getByRole("button", { name: "Reset" }));
+    expect(save).toBeDisabled();
+    expect(scope.queryByText("Unsaved changes")).not.toBeInTheDocument();
+  });
+
+  it("offers a Disabled (no auto-sync) threshold option mapping to -1", async () => {
+    const user = userEvent.setup();
+    const props = renderPanel({ ratingOptions: [-1, 1, 2.5, 3, 4, 5] });
+    const favorites = screen.getByLabelText("Favorites group name").closest("article");
+    const scope = within(favorites as HTMLElement);
+
+    const thresholdSelect = scope.getByDisplayValue("Avg >= 4.0 stars");
+    await user.selectOptions(thresholdSelect, "-1");
+    expect(scope.getByDisplayValue("Disabled (no auto-sync)")).toBeInTheDocument();
+
+    await user.click(scope.getByRole("button", { name: "Save group" }));
+    expect(props.onSaveGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 2, name: "Favorites" }),
+      expect.objectContaining({ ratingThreshold: -1 }),
+    );
+  });
+
+  it("renders thresholds below 3.0 from existing groups", () => {
+    renderPanel({
+      ratingOptions: [-1, 1, 1.5, 2, 2.5, 3, 4, 5],
+      reviewerGroups: [group({ id: 2, name: "Favorites", ratingThreshold: 1.5 })],
+    });
+
+    const favorites = screen.getByLabelText("Favorites group name").closest("article");
+    expect(within(favorites as HTMLElement).getByDisplayValue("Avg >= 1.5 stars")).toBeInTheDocument();
+  });
+
+  it("explains that membership changes save immediately", () => {
+    renderPanel();
+    expect(screen.getByText("Membership changes save immediately.")).toBeInTheDocument();
+  });
+
   it("shows group defaults as any year, four stars, and no genre filters", () => {
     renderPanel();
 
