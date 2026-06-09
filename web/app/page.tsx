@@ -1531,6 +1531,31 @@ export default function Home() {
     }
   }
 
+  async function rejectAndBlocklistPendingApproval(approval: PendingApprovalDto) {
+    setSettingsError(null);
+    try {
+      const rejectRes = await fetch(`/api/pending-approvals/${approval.id}/reject`, { method: "POST" });
+      const rejectBody = (await rejectRes.json().catch(() => null)) as { message?: string } | null;
+      if (!rejectRes.ok) throw new Error(apiMessage(rejectBody, "Unable to reject pending movie."));
+
+      const blockRes = await fetch("/api/blocklist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: approval.title,
+          year: approval.year,
+          filmId: approval.filmId,
+        }),
+      });
+      const blockBody = (await blockRes.json().catch(() => null)) as { message?: string } | null;
+      if (!blockRes.ok) throw new Error(apiMessage(blockBody, "Unable to blocklist movie."));
+
+      await Promise.all([loadPendingApprovals(), loadBlocklist(), loadActivity(), loadSyncedMovies(), loadReviews(false)]);
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : "Unable to reject and blocklist pending movie.");
+    }
+  }
+
   async function completeSetup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSavingSettings(true);
@@ -3242,6 +3267,13 @@ export default function Home() {
                             type="button"
                           >
                             Reject
+                          </button>
+                          <button
+                            className="h-9 rounded-[var(--radius-control)] border border-rose-500/25 bg-rose-500/10 px-3 text-xs font-bold text-rose-200 transition hover:border-rose-400/50 hover:bg-rose-500/20 hover:text-white"
+                            onClick={() => void rejectAndBlocklistPendingApproval(approval)}
+                            type="button"
+                          >
+                            Reject + blocklist
                           </button>
                         </div>
                       </div>

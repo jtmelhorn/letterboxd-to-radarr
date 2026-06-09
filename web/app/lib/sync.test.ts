@@ -194,6 +194,69 @@ describeWithSqlite("sync filtering", () => {
     expect(addCalls).toBe(1);
   });
 
+  it("does not recreate a rejected pending approval on the next sync", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const request = input instanceof Request ? input : null;
+        const url = request?.url ?? String(input);
+        const method = init?.method ?? request?.method ?? "GET";
+
+        if (url === "https://letterboxd.com/alice/rss/") {
+          return new Response(rss, {
+            status: 200,
+            headers: { "Content-Type": "application/rss+xml" },
+          });
+        }
+
+        if (url.startsWith("http://radarr.local/api/v3/movie/lookup")) {
+          const term = new URL(url).searchParams.get("term") ?? "";
+          const tmdbId = term.startsWith("tmdb:") ? term.slice("tmdb:".length) : "100";
+          const movie = lookupMovies.get(tmdbId);
+          return Response.json(movie ? [movie] : []);
+        }
+
+        return Response.json({ message: `Unexpected request: ${method} ${url}` }, { status: 500 });
+      }),
+    );
+
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { listPendingApprovals, resolvePendingApproval } = await import("@/app/lib/repos/pendingApprovals");
+    const { upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+    const { saveSettings } = await import("@/app/lib/repos/settings");
+    const { runSyncScope } = await import("@/app/lib/sync");
+
+    getOrCreateUser("alice");
+    saveSettings({
+      radarrUrl: "http://radarr.local",
+      radarrApiKey: "secret",
+      qualityProfileId: 1,
+      rootFolderPath: "/movies",
+    });
+    const group = upsertReviewerGroup({
+      name: "Manual 2026 action",
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: true,
+      filters: {
+        year: { mode: "exact", exactYear: 2026 },
+        genres: { include: [], exclude: ["Documentary"] },
+      },
+      reviewerHandles: ["alice"],
+    });
+
+    const first = await runSyncScope({ type: "group", groupId: group.id }, { auto: true });
+    const pending = listPendingApprovals()[0];
+    expect(first.pending).toBe(1);
+    expect(pending).toMatchObject({ filmId: "film:action-future", status: "pending" });
+
+    resolvePendingApproval(pending!.id, "rejected", "Rejected before Radarr sync.");
+    const second = await runSyncScope({ type: "group", groupId: group.id }, { auto: true });
+
+    expect(second.pending).toBe(0);
+    expect(listPendingApprovals()).toHaveLength(0);
+  });
+
   it("does not fetch or sync a disabled group", async () => {
     const fetchSpy = vi.fn(async () => Response.json({ message: "Unexpected request" }, { status: 500 }));
     vi.stubGlobal("fetch", fetchSpy);

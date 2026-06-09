@@ -14,6 +14,10 @@ export interface CreatePendingApprovalInput {
   message?: string;
 }
 
+function roundedRating(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
 function toDto(row: {
   id: number;
   groupId: number;
@@ -117,6 +121,28 @@ export function createPendingApproval(input: CreatePendingApprovalInput): Pendin
 
   if (existing) return null;
 
+  const rejected = db
+    .select({
+      id: pendingApprovals.id,
+      averageRating: pendingApprovals.averageRating,
+    })
+    .from(pendingApprovals)
+    .where(
+      and(
+        eq(pendingApprovals.groupId, input.groupId),
+        eq(pendingApprovals.filmId, input.filmId),
+        eq(pendingApprovals.status, "rejected"),
+      ),
+    )
+    .orderBy(desc(pendingApprovals.updatedAt))
+    .get();
+
+  // Re-open a rejected approval only when the group average improves enough to
+  // change the displayed one-decimal rating; otherwise rejection stays sticky.
+  if (rejected && roundedRating(input.averageRating) <= roundedRating(rejected.averageRating)) {
+    return null;
+  }
+
   const now = new Date().toISOString();
   const inserted = db
     .insert(pendingApprovals)
@@ -152,4 +178,10 @@ export function resolvePendingApproval(
     .get();
 
   return updated ? getPendingApproval(updated.id) : null;
+}
+
+export function resetPendingApproval(id: number): boolean {
+  const db = getDb();
+  const result = db.delete(pendingApprovals).where(eq(pendingApprovals.id, id)).run();
+  return (result.changes ?? 0) > 0;
 }

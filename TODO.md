@@ -219,7 +219,9 @@ One authoritative, film-keyed answer to "what is this film's sync state", used b
 
 ---
 
-### [ ] P0-5: Make "Reject" on pending approvals permanent
+### [x] P0-5: Make "Reject" on pending approvals permanent
+
+> **Completed:** 2026-06-09 — dev / no PR — No spec deviation; local SQLite-backed Vitest suites were skipped by the existing harness.
 
 **Problem:**
 `createPendingApproval` (`web/app/lib/repos/pendingApprovals.ts`) dedupes only against rows with `status = 'pending'`. After a reject (`/api/pending-approvals/[id]/reject` sets `status = 'rejected'`), the very next sync of that group re-creates a fresh pending approval for the same film. Reject silently means "ask me again on every sync interval".
