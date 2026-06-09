@@ -139,6 +139,7 @@ export const syncResults = sqliteTable(
     reviewId: integer("review_id")
       .notNull()
       .references(() => reviews.id, { onDelete: "cascade" }),
+    filmId: text("film_id"),
     status: text("status").notNull(),
     radarrTmdbId: integer("radarr_tmdb_id"),
     radarrMovieId: integer("radarr_movie_id"),
@@ -149,7 +150,10 @@ export const syncResults = sqliteTable(
       .notNull()
       .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
   },
-  (table) => [index("sync_results_review_idx").on(table.reviewId)],
+  (table) => [
+    index("sync_results_review_idx").on(table.reviewId),
+    index("sync_results_film_created_idx").on(table.filmId, table.createdAt),
+  ],
 );
 
 export const pendingApprovals = sqliteTable(

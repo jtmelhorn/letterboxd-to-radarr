@@ -538,8 +538,9 @@ describeWithSqlite("sync filtering", () => {
     const { listBlocklistedMovies } = await import("@/app/lib/repos/movieBlocklist");
     const { POST } = await import("@/app/api/movies/[id]/remove/route");
 
-    const user = getOrCreateUser("alice");
-    upsertReviews(user.id, [
+    const alice = getOrCreateUser("alice");
+    const bob = getOrCreateUser("bob");
+    upsertReviews(alice.id, [
       {
         title: "Delete Me",
         year: 2026,
@@ -548,7 +549,17 @@ describeWithSqlite("sync filtering", () => {
         tmdbMovieId: 700,
       },
     ]);
+    upsertReviews(bob.id, [
+      {
+        title: "Delete Me",
+        year: 2026,
+        rating: 4.5,
+        letterboxdUrl: "https://letterboxd.com/bob/film/delete-me/",
+        tmdbMovieId: 700,
+      },
+    ]);
     const movie = getAggregatedMovies()[0];
+    expect(movie.reviews).toHaveLength(2);
     recordSyncResult({
       reviewId: movie.reviews[0]!.id,
       status: "added",

@@ -1,11 +1,11 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/app/lib/db";
-import { reviews, syncResults, users } from "@/app/lib/db/schema";
+import { reviews, users } from "@/app/lib/db/schema";
 import { canonicalFilmGuid } from "@/app/lib/filmIdentity";
 import { metadataForFilmIds } from "@/app/lib/repos/movieMetadata";
 import { getReviewerGroup } from "@/app/lib/repos/reviewerGroups";
-import { isSyncMovieStatus } from "@/app/lib/repos/syncResults";
+import { latestFilmStatuses } from "@/app/lib/repos/syncResults";
 import { findUser, listUsers } from "@/app/lib/repos/users";
 import type {
   AggregatedMovieDto,
@@ -39,19 +39,6 @@ function reviewTime(reviewedAt: string | null | undefined): number {
   return Number.isNaN(time) ? 0 : time;
 }
 
-function normalizeStatus(status: string): SyncStatus {
-  return isSyncMovieStatus(status) ? status : null;
-}
-
-function statusRank(status: SyncStatus): number {
-  if (status === "failed_remove") return 4;
-  if (status === "added") return 3;
-  if (status === "exists") return 2;
-  if (status === "blocklisted" || status === "removed") return 1;
-  if (status === "error" || status === "skipped") return 1;
-  return 0;
-}
-
 function resolveReviewerIds(scope: ReviewerScope): number[] {
   if (scope.type === "reviewer" && scope.reviewer) {
     const reviewer = findUser(scope.reviewer);
@@ -67,26 +54,6 @@ function resolveReviewerIds(scope: ReviewerScope): number[] {
   }
 
   return listUsers().map((reviewer) => reviewer.id);
-}
-
-function syncStatusByReview(reviewIds: number[]): Map<number, SyncStatus> {
-  const map = new Map<number, SyncStatus>();
-  if (reviewIds.length === 0) return map;
-
-  const db = getDb();
-  const rows = db
-    .select()
-    .from(syncResults)
-    .where(inArray(syncResults.reviewId, reviewIds))
-    .orderBy(desc(syncResults.createdAt))
-    .all();
-
-  for (const row of rows) {
-    if (map.has(row.reviewId)) continue;
-    const normalized = normalizeStatus(row.status);
-    map.set(row.reviewId, normalized);
-  }
-  return map;
 }
 
 function rowsForScope(scope: ReviewerScope): ReviewWithHandle[] {
@@ -122,13 +89,14 @@ export function getAggregatedMovies(
   options: { onlySynced?: boolean } = {},
 ): AggregatedMovieDto[] {
   const rows = rowsForScope(scope);
-  const statusMap = syncStatusByReview(rows.map((row) => row.id));
-  const metadataMap = metadataForFilmIds(rows.map((row) => canonicalFilmGuid(row)));
+  const filmIds = rows.map((row) => canonicalFilmGuid(row));
+  const statusMap = latestFilmStatuses(filmIds);
+  const metadataMap = metadataForFilmIds(filmIds);
   const grouped = new Map<string, AggregatedMovieDto>();
 
   for (const row of rows) {
     const filmId = canonicalFilmGuid(row);
-    const status = statusMap.get(row.id) ?? null;
+    const status = statusMap.get(filmId) ?? null;
     const metadata = metadataMap.get(filmId);
     const year = row.year ?? metadata?.year ?? null;
     const posterUrl = row.posterUrl ?? metadata?.posterUrl ?? undefined;
@@ -189,8 +157,7 @@ export function getAggregatedMovies(
     existing.reviewerCount = existing.reviewerHandles.length;
     existing.averageRating =
       existing.reviews.reduce((sum, item) => sum + item.rating, 0) / existing.reviews.length;
-    existing.status =
-      statusRank(status) > statusRank(existing.status) ? status : existing.status;
+    existing.status = status;
     if (!existing.posterUrl && posterUrl) existing.posterUrl = posterUrl;
     if (!existing.backdropUrl && backdropUrl) existing.backdropUrl = backdropUrl;
     if (!existing.letterboxdUrl && row.letterboxdUrl) existing.letterboxdUrl = row.letterboxdUrl;

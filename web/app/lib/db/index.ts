@@ -6,6 +6,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 
 import { getDataDir } from "@/app/lib/config";
 import { migrateLegacyJson } from "@/app/lib/db/migrateLegacy";
+import { canonicalFilmGuid } from "@/app/lib/filmIdentity";
 import * as schema from "@/app/lib/db/schema";
 
 type DrizzleDb = ReturnType<typeof drizzle<typeof schema>>;
@@ -99,6 +100,7 @@ CREATE INDEX IF NOT EXISTS movie_metadata_status_idx ON movie_metadata(metadata_
 CREATE TABLE IF NOT EXISTS sync_results (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   review_id INTEGER NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+  film_id TEXT,
   status TEXT NOT NULL,
   radarr_tmdb_id INTEGER,
   radarr_movie_id INTEGER,
@@ -109,6 +111,7 @@ CREATE TABLE IF NOT EXISTS sync_results (
 );
 
 CREATE INDEX IF NOT EXISTS sync_results_review_idx ON sync_results(review_id);
+CREATE INDEX IF NOT EXISTS sync_results_film_created_idx ON sync_results(film_id, created_at);
 
 CREATE TABLE IF NOT EXISTS pending_approvals (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -212,6 +215,36 @@ function ensureDefaultReviewerGroup(sqlite: Database.Database): void {
   backfillDefaultGroupMembership(sqlite, groupId);
 }
 
+function backfillSyncResultFilmIds(sqlite: Database.Database): void {
+  const rows = sqlite
+    .prepare(
+      `SELECT sync_results.id AS syncResultId,
+              reviews.guid AS guid,
+              reviews.title AS title,
+              reviews.year AS year,
+              reviews.letterboxd_url AS letterboxdUrl
+       FROM sync_results
+       INNER JOIN reviews ON reviews.id = sync_results.review_id
+       WHERE sync_results.film_id IS NULL OR sync_results.film_id = ''`,
+    )
+    .all() as Array<{
+    syncResultId: number;
+    guid: string | null;
+    title: string;
+    year: number | null;
+    letterboxdUrl: string | null;
+  }>;
+  if (rows.length === 0) return;
+
+  const update = sqlite.prepare("UPDATE sync_results SET film_id = ? WHERE id = ?");
+  const tx = sqlite.transaction(() => {
+    for (const row of rows) {
+      update.run(canonicalFilmGuid(row), row.syncResultId);
+    }
+  });
+  tx();
+}
+
 function init(): { sqlite: Database.Database; db: DrizzleDb } {
   const dataDir = getDataDir();
   mkdirSync(dataDir, { recursive: true });
@@ -253,6 +286,7 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
   ensureColumn(sqlite, "reviews", "tmdb_movie_id", "tmdb_movie_id INTEGER");
   ensureColumn(sqlite, "reviews", "tmdb_tv_id", "tmdb_tv_id INTEGER");
   ensureColumn(sqlite, "sync_results", "radarr_movie_id", "radarr_movie_id INTEGER");
+  ensureColumn(sqlite, "sync_results", "film_id", "film_id TEXT");
   ensureColumn(sqlite, "movie_metadata", "year", "year INTEGER");
   ensureColumn(
     sqlite,
@@ -284,6 +318,9 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
     .prepare("CREATE INDEX IF NOT EXISTS movie_blocklist_title_year_idx ON movie_blocklist(normalized_title, year)")
     .run();
   sqlite.prepare("CREATE INDEX IF NOT EXISTS movie_blocklist_film_idx ON movie_blocklist(film_id)").run();
+  sqlite
+    .prepare("CREATE INDEX IF NOT EXISTS sync_results_film_created_idx ON sync_results(film_id, created_at)")
+    .run();
 
   // Ensure the singleton settings row exists.
   sqlite
@@ -298,6 +335,7 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
 
   migrateLegacyJson(sqlite);
   ensureDefaultReviewerGroup(sqlite);
+  backfillSyncResultFilmIds(sqlite);
 
   const db = drizzle(sqlite, { schema });
   return { sqlite, db };

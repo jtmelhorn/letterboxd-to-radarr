@@ -164,7 +164,9 @@ A default "All reviewers" group exists on every install, covers all reviewers au
 
 ---
 
-### [ ] P0-4: Film-level sync-state ledger (fixes stale "synced" status after removal)
+### [x] P0-4: Film-level sync-state ledger (fixes stale "synced" status after removal)
+
+> **Completed:** 2026-06-09 — dev / no PR — No spec deviation; local SQLite-backed Vitest suites were skipped by the existing harness.
 
 **Problem:**
 Sync state is stored per *review* in `sync_results`. Removal endpoints (`web/app/api/movies/[id]/remove/route.ts`, `web/app/api/radarr/route.ts` DELETE) record `removed`/`blocklisted` against **one** reviewId. `getAggregatedMovies` (`web/app/lib/repos/aggregatedReviews.ts`) computes a film's status as the max `statusRank` across all its reviews, where `added` (rank 3) beats `blocklisted`/`removed` (rank 1). So a multi-reviewer film removed from Radarr still shows as "synced" forever, stays in the Synced panel, and keeps the green poster ring. Related debt: `getLatestSyncResultForFilmId` (`syncResults.ts`) and `getReviewByFilmId` (`reviews.ts`) load entire tables and scan in JS because `sync_results` has no film identity; and two different status pipelines exist (`reviews.ts:latestStatusByReview` "success sticky" vs `aggregatedReviews.ts:syncStatusByReview` + `statusRank` max-rank) implementing different semantics for the same concept.

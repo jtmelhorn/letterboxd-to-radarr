@@ -7,6 +7,7 @@ import type { SyncMovieStatus, SyncResultItem } from "@/app/types/movie";
 
 export interface RecordSyncInput {
   reviewId: number;
+  filmId?: string;
   status: SyncMovieStatus;
   radarrTmdbId?: number | null;
   radarrMovieId?: number | null;
@@ -16,9 +17,25 @@ export interface RecordSyncInput {
 
 export function recordSyncResult(input: RecordSyncInput): void {
   const db = getDb();
+  const review = db
+    .select({
+      guid: reviews.guid,
+      title: reviews.title,
+      year: reviews.year,
+      letterboxdUrl: reviews.letterboxdUrl,
+    })
+    .from(reviews)
+    .where(eq(reviews.id, input.reviewId))
+    .get();
+  if (!review) {
+    throw new Error("Cannot record sync result for an unknown review.");
+  }
+  const filmId = input.filmId ?? canonicalFilmGuid(review);
+
   db.insert(syncResults)
     .values({
       reviewId: input.reviewId,
+      filmId,
       status: input.status,
       radarrTmdbId: input.radarrTmdbId ?? null,
       radarrMovieId: input.radarrMovieId ?? null,
@@ -36,6 +53,7 @@ export function getRecentSyncResults(userId?: number, limit = 100): SyncResultIt
       id: syncResults.id,
       reviewId: syncResults.reviewId,
       status: syncResults.status,
+      filmId: syncResults.filmId,
       radarrMovieId: syncResults.radarrMovieId,
       message: syncResults.message,
       auto: syncResults.auto,
@@ -57,7 +75,7 @@ export function getRecentSyncResults(userId?: number, limit = 100): SyncResultIt
   return rows.map((row) => ({
     id: row.id,
     reviewId: row.reviewId,
-    filmId: canonicalFilmGuid(row),
+    filmId: row.filmId ?? canonicalFilmGuid(row),
     title: row.title,
     year: row.year,
     status: row.status,
@@ -77,9 +95,58 @@ export interface LatestSyncResultForFilm {
   createdAt: string;
 }
 
+function isTerminalRemovalStatus(status: SyncMovieStatus): boolean {
+  return status === "removed" || status === "blocklisted" || status === "failed_remove";
+}
+
+function isSuccessStatus(status: SyncMovieStatus): boolean {
+  return status === "added" || status === "exists";
+}
+
+export function latestFilmStatuses(filmIds: string[]): Map<string, SyncMovieStatus> {
+  const uniqueFilmIds = [...new Set(filmIds.filter(Boolean))];
+  const resolved = new Map<string, SyncMovieStatus>();
+  if (uniqueFilmIds.length === 0) return resolved;
+
+  const rows = getDb()
+    .select({
+      id: syncResults.id,
+      filmId: syncResults.filmId,
+      status: syncResults.status,
+      createdAt: syncResults.createdAt,
+    })
+    .from(syncResults)
+    .where(inArray(syncResults.filmId, uniqueFilmIds))
+    .orderBy(desc(syncResults.createdAt), desc(syncResults.id))
+    .all();
+
+  const fallbacks = new Map<string, SyncMovieStatus>();
+  for (const row of rows) {
+    if (!row.filmId || resolved.has(row.filmId)) continue;
+    if (!isSyncMovieStatus(row.status)) continue;
+
+    if (isTerminalRemovalStatus(row.status) || isSuccessStatus(row.status)) {
+      resolved.set(row.filmId, row.status);
+      continue;
+    }
+
+    if (!fallbacks.has(row.filmId)) {
+      fallbacks.set(row.filmId, row.status);
+    }
+  }
+
+  for (const [filmId, status] of fallbacks) {
+    if (!resolved.has(filmId)) {
+      resolved.set(filmId, status);
+    }
+  }
+
+  return resolved;
+}
+
 export function getLatestSyncResultForFilmId(filmId: string): LatestSyncResultForFilm | null {
   const db = getDb();
-  const rows = db
+  const row = db
     .select({
       reviewId: syncResults.reviewId,
       status: syncResults.status,
@@ -87,17 +154,13 @@ export function getLatestSyncResultForFilmId(filmId: string): LatestSyncResultFo
       radarrMovieId: syncResults.radarrMovieId,
       message: syncResults.message,
       createdAt: syncResults.createdAt,
-      title: reviews.title,
-      year: reviews.year,
-      letterboxdUrl: reviews.letterboxdUrl,
-      guid: reviews.guid,
     })
     .from(syncResults)
-    .innerJoin(reviews, eq(syncResults.reviewId, reviews.id))
-    .orderBy(desc(syncResults.createdAt))
-    .all();
+    .where(eq(syncResults.filmId, filmId))
+    .orderBy(desc(syncResults.createdAt), desc(syncResults.id))
+    .limit(1)
+    .get();
 
-  const row = rows.find((item) => canonicalFilmGuid(item) === filmId);
   if (!row || !isSyncMovieStatus(row.status)) return null;
   return {
     reviewId: row.reviewId,
@@ -107,6 +170,27 @@ export function getLatestSyncResultForFilmId(filmId: string): LatestSyncResultFo
     message: row.message,
     createdAt: row.createdAt,
   };
+}
+
+export function getLatestRadarrMovieIdForFilmId(filmId: string): number | null {
+  const db = getDb();
+  const rows = db
+    .select({
+      status: syncResults.status,
+      radarrMovieId: syncResults.radarrMovieId,
+    })
+    .from(syncResults)
+    .where(eq(syncResults.filmId, filmId))
+    .orderBy(desc(syncResults.createdAt), desc(syncResults.id))
+    .all();
+
+  const row = rows.find(
+    (item) =>
+      isSyncMovieStatus(item.status) &&
+      typeof item.radarrMovieId === "number" &&
+      item.radarrMovieId > 0,
+  );
+  return row?.radarrMovieId ?? null;
 }
 
 export function isSyncMovieStatus(status: string): status is SyncMovieStatus {

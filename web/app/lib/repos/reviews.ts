@@ -1,10 +1,11 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { getDb } from "@/app/lib/db";
 import { reviews, syncResults } from "@/app/lib/db/schema";
 import type { ReviewRow } from "@/app/lib/db/schema";
 import { canonicalFilmGuid } from "@/app/lib/filmIdentity";
 import { metadataForFilmIds } from "@/app/lib/repos/movieMetadata";
+import { latestFilmStatuses } from "@/app/lib/repos/syncResults";
 import type { MovieReview, ReviewDto } from "@/app/types/movie";
 
 export function reviewGuid(movie: MovieReview): string {
@@ -93,10 +94,14 @@ function mergeExistingDuplicates(_userId: number, rows: ReviewRow[]): void {
       if (keeper.guid !== canonical) {
         tx.update(reviews).set({ guid: canonical }).where(eq(reviews.id, keeper.id)).run();
       }
+      tx.update(syncResults)
+        .set({ filmId: canonical })
+        .where(eq(syncResults.reviewId, keeper.id))
+        .run();
 
       for (const dupe of sorted.slice(1)) {
         tx.update(syncResults)
-          .set({ reviewId: keeper.id })
+          .set({ reviewId: keeper.id, filmId: canonical })
           .where(eq(syncResults.reviewId, dupe.id))
           .run();
         tx.delete(reviews).where(eq(reviews.id, dupe.id)).run();
@@ -187,47 +192,22 @@ export function getReviewById(reviewId: number): ReviewRow | null {
 
 export function getReviewByFilmId(filmId: string): ReviewRow | null {
   const db = getDb();
+  const canonicalRow = db.select().from(reviews).where(eq(reviews.guid, filmId)).get();
+  if (canonicalRow) return canonicalRow;
+
   const rows = db.select().from(reviews).all();
   return rows.find((row) => canonicalFilmGuid(row) === filmId) ?? null;
 }
 
-/** Map the latest successful/failed status per review (added/exists win over error). */
-function latestStatusByReview(reviewIds: number[]): Map<number, ReviewDto["status"]> {
-  const map = new Map<number, ReviewDto["status"]>();
-  if (reviewIds.length === 0) return map;
-
-  const db = getDb();
-  const rows = db
-    .select()
-    .from(syncResults)
-    .where(inArray(syncResults.reviewId, reviewIds))
-    .orderBy(desc(syncResults.createdAt))
-    .all();
-
-  for (const row of rows) {
-    const current = map.get(row.reviewId);
-    const normalized: ReviewDto["status"] =
-      row.status === "added" || row.status === "exists"
-        ? row.status
-        : row.status === "error"
-          ? "error"
-          : null;
-    // Success states are sticky and should not be overwritten by later errors.
-    if (current === "added" || current === "exists") continue;
-    if (normalized) {
-      map.set(row.reviewId, normalized);
-    }
-  }
-  return map;
-}
-
 export function getReviewDtos(userId: number): ReviewDto[] {
   const rows = getReviewRows(userId);
-  const statusMap = latestStatusByReview(rows.map((r) => r.id));
-  const metadataMap = metadataForFilmIds(rows.map((row) => canonicalFilmGuid(row)));
+  const filmIds = rows.map((row) => canonicalFilmGuid(row));
+  const statusMap = latestFilmStatuses(filmIds);
+  const metadataMap = metadataForFilmIds(filmIds);
 
   return rows.map((row) => {
-    const metadata = metadataMap.get(canonicalFilmGuid(row));
+    const filmId = canonicalFilmGuid(row);
+    const metadata = metadataMap.get(filmId);
     return {
       id: row.id,
       title: row.title,
@@ -247,18 +227,17 @@ export function getReviewDtos(userId: number): ReviewDto[] {
       metadataLookupStatus: metadata?.metadataLookupStatus ?? "pending",
       metadataLastFetchedAt: metadata?.metadataLastFetchedAt ?? null,
       guid: row.guid,
-      status: statusMap.get(row.id) ?? null,
+      status: statusMap.get(filmId) ?? null,
     };
   });
 }
 
 /** True when this review already has a successful add/exists result. */
 export function hasSuccessfulSync(reviewId: number): boolean {
-  const db = getDb();
-  const rows = db
-    .select()
-    .from(syncResults)
-    .where(eq(syncResults.reviewId, reviewId))
-    .all();
-  return rows.some((r) => r.status === "added" || r.status === "exists");
+  const review = getReviewById(reviewId);
+  if (!review) return false;
+
+  const filmId = canonicalFilmGuid(review);
+  const status = latestFilmStatuses([filmId]).get(filmId);
+  return status === "added" || status === "exists";
 }
