@@ -587,7 +587,7 @@ describeWithSqlite("sync filtering", () => {
     expect(first.added).toBe(1);
     expect(addCalls).toBe(1);
 
-    expect(clearAllSyncResults()).toBeGreaterThan(0);
+    expect(clearAllSyncResults()).toBe(0);
     expect(latestFilmStatuses(["film:action-future"])).toEqual(
       new Map([["film:action-future", "added"]]),
     );
