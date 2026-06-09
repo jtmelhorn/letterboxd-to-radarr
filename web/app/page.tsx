@@ -34,6 +34,7 @@ type ActivityStatus = "added" | "exists" | "error" | "skipped" | "removed" | "bl
 interface ActivityEntry {
   id: string;
   reviewId: number | null;
+  filmId: string | null;
   title: string;
   year: number | null;
   status: ActivityStatus;
@@ -219,6 +220,7 @@ function syncResultToActivity(item: SyncResultItem): ActivityEntry {
   return {
     id: String(item.id),
     reviewId: item.reviewId,
+    filmId: item.filmId ?? null,
     title: item.title,
     year: item.year,
     status,
@@ -788,6 +790,7 @@ export default function Home() {
 
   const [autoSyncSummary, setAutoSyncSummary] = useState<AutoSyncSummary | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
+  const [activityRetryNotices, setActivityRetryNotices] = useState<Record<string, string>>({});
   const [activitySeenAt, setActivitySeenAt] = useState(() => Date.now());
   const [isActivityOpen, setIsActivityOpen] = useState(false);
   const [isClearActivityConfirmOpen, setIsClearActivityConfirmOpen] = useState(false);
@@ -1669,6 +1672,7 @@ export default function Home() {
     const entry: ActivityEntry = {
       id: `${movieKey(movie)}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       reviewId: movie.reviews[0]?.id ?? null,
+      filmId: movieKey(movie),
       title: movie.title,
       year: movie.year,
       status,
@@ -1680,10 +1684,29 @@ export default function Home() {
     setActivityLog((log) => [entry, ...log].slice(0, 100));
   }
 
-  async function retryFromActivity(reviewId: number | null) {
-    if (reviewId == null) return;
-    const movie = movies.find((m) => m.reviews.some((review) => review.id === reviewId));
-    if (!movie) return;
+  async function retryFromActivity(entry: ActivityEntry) {
+    const movie =
+      (entry.filmId != null
+        ? (movies.find((m) => movieKey(m) === entry.filmId) ??
+          syncedMovies.find((m) => movieKey(m) === entry.filmId))
+        : undefined) ??
+      (entry.reviewId != null
+        ? (movies.find((m) => m.reviews.some((review) => review.id === entry.reviewId)) ??
+          syncedMovies.find((m) => m.reviews.some((review) => review.id === entry.reviewId)))
+        : undefined);
+    if (!movie) {
+      setActivityRetryNotices((current) => ({
+        ...current,
+        [entry.id]: "Movie not in the current scope — switch scope to retry.",
+      }));
+      return;
+    }
+    setActivityRetryNotices((current) => {
+      if (!(entry.id in current)) return current;
+      const next = { ...current };
+      delete next[entry.id];
+      return next;
+    });
     await sendToRadarr(movie);
   }
 
@@ -2959,17 +2982,22 @@ export default function Home() {
                             {entry.outcome === "skipped" ? "Skipped" : entry.auto ? "Auto" : "Manual"}
                           </span>
                           <span className="text-[10px] text-cornsilk/55">{formatRelativeTime(entry.at)}</span>
-                          {entry.outcome === "error" && entry.reviewId != null && (
+                          {entry.outcome === "error" && (entry.filmId != null || entry.reviewId != null) && (
                             <button
                               className="ml-auto rounded-md border border-cornsilk/10 bg-ink/60 px-2 py-0.5 text-[10px] font-bold text-cornsilk/80 transition hover:border-gold/30 hover:text-cornsilk disabled:opacity-50"
-                              disabled={sendStates[String(entry.reviewId)] === "loading"}
-                              onClick={() => void retryFromActivity(entry.reviewId)}
+                              disabled={entry.filmId != null && sendStates[entry.filmId] === "loading"}
+                              onClick={() => void retryFromActivity(entry)}
                               type="button"
                             >
-                              {sendStates[String(entry.reviewId)] === "loading" ? "Sending…" : "Retry"}
+                              {entry.filmId != null && sendStates[entry.filmId] === "loading"
+                                ? "Sending…"
+                                : "Retry"}
                             </button>
                           )}
                         </div>
+                        {activityRetryNotices[entry.id] && (
+                          <p className="mt-1 text-[10px] text-azure/80">{activityRetryNotices[entry.id]}</p>
+                        )}
                       </div>
                     </li>
                   ))}

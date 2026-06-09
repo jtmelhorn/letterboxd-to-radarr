@@ -810,7 +810,9 @@ When no confident match exists, return `not_found` with an "ambiguous match" mes
 
 ## P2 - UI polish, responsive behavior, and quality-of-life improvements
 
-### [ ] P2-1: Fix activity retry button state (wrong key space)
+### [x] P2-1: Fix activity retry button state (wrong key space)
+
+> **Completed:** 2026-06-09 — dev / no PR — Implemented in `page.tsx` since P1-8 decomposition has not landed; the planned ActivityPanel component test was skipped for the same reason (no extracted component to test).
 
 **Problem:**
 In the activity panel (`web/app/page.tsx`), the retry button's busy check reads `sendStates[String(entry.reviewId)]`, but `sendStates` is keyed by film id (`movieKey(movie)` → `movie.id`, e.g. `"film:slug"`), never by review id. The disabled/"Sending…" state can never trigger. Also `retryFromActivity` searches only `movies` (current scope) and fails silently when the entry's film isn't in the loaded scope.
