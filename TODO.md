@@ -65,7 +65,9 @@ A green test suite where the test explicitly asserts which films are added and w
 
 ---
 
-### [ ] P0-2: Repo hygiene and CI guardrails
+### [x] P0-2: Repo hygiene and CI guardrails
+
+> **Completed:** 2026-06-09 — dev / no PR — No spec deviation; CI red-check behavior requires a GitHub PR run to observe.
 
 **Problem:**
 - `web/.smoke-data2/app.db`, `app.db-shm`, `app.db-wal` are committed SQLite databases (git-tracked). `web/.gitignore` covers `.smoke-data` but not `.smoke-data2`.
