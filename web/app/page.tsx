@@ -650,11 +650,16 @@ function StatCard({
         <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-black/25 text-gold">
           {icon}
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-xs font-bold uppercase tracking-wide text-cornsilk/70">{label}</p>
           <div className="mt-1 truncate text-lg font-black leading-tight text-cornsilk">{value}</div>
           <p className="mt-1 text-xs text-cornsilk/62">{detail}</p>
         </div>
+        {onClick && (
+          <span aria-hidden="true" className="self-center text-lg text-cornsilk/45 transition group-hover/stat:text-gold">
+            ›
+          </span>
+        )}
       </div>
     </>
   );
@@ -662,7 +667,7 @@ function StatCard({
   if (onClick) {
     return (
       <button
-        className="glass-card rounded-[var(--radius-card)] p-3 text-left transition hover:border-gold/25 hover:bg-white/[0.055] sm:p-4"
+        className="glass-card group/stat rounded-[var(--radius-card)] p-3 text-left transition hover:border-gold/25 hover:bg-white/[0.055] hover:ring-1 hover:ring-gold/20 sm:p-4"
         onClick={onClick}
         type="button"
       >
@@ -770,6 +775,8 @@ export default function Home() {
   const [blocklistedMovies, setBlocklistedMovies] = useState<BlocklistedMovieDto[]>([]);
   const [reviewers, setReviewers] = useState<ReviewerDto[]>([]);
   const [reviewerGroups, setReviewerGroups] = useState<ReviewerGroupDto[]>([]);
+  const [hasLoadedGroups, setHasLoadedGroups] = useState(false);
+  const [allSyncedCount, setAllSyncedCount] = useState<number | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApprovalDto[]>([]);
   const [scopeSelection, setScopeSelection] = useState<ScopeSelection>("all");
   const [isFetching, setIsFetching] = useState(false);
@@ -828,6 +835,7 @@ export default function Home() {
     [activityLog, activitySeenAt],
   );
   const pendingApprovalCount = pendingApprovals.filter((approval) => approval.status === "pending").length;
+  const erroredApprovalCount = pendingApprovals.filter((approval) => approval.status === "error").length;
   const hasManualApprovalGroups = reviewerGroups.some((group) => group.requiresManualApproval);
   const enabledSyncGroupCount = reviewerGroups.filter(
     (group) => group.enabled && group.reviewerHandles.length > 0,
@@ -951,6 +959,7 @@ export default function Home() {
       if (!res.ok) return;
       const body = (await res.json()) as { groups?: ReviewerGroupDto[] };
       setReviewerGroups(body.groups ?? []);
+      setHasLoadedGroups(true);
     } catch {
       // non-fatal
     }
@@ -958,7 +967,8 @@ export default function Home() {
 
   const loadPendingApprovals = useCallback(async () => {
     try {
-      const res = await fetch("/api/pending-approvals", { cache: "no-store" });
+      // includeResolved so errored approvals stay visible; counts filter on status.
+      const res = await fetch("/api/pending-approvals?includeResolved=1", { cache: "no-store" });
       if (!res.ok) return;
       const body = (await res.json()) as { pendingApprovals?: PendingApprovalDto[] };
       setPendingApprovals(body.pendingApprovals ?? []);
@@ -1046,11 +1056,22 @@ export default function Home() {
       const res = await fetch(`/api/radarr/synced?${scopeQuery()}`, { cache: "no-store" });
       if (!res.ok) return;
       const body = (await res.json()) as { movies?: AggregatedMovieDto[] };
-      setSyncedMovies(body.movies ?? []);
+      const scoped = body.movies ?? [];
+      setSyncedMovies(scoped);
+      if (currentScope.type === "all") {
+        setAllSyncedCount(scoped.length);
+      } else {
+        // The scoped panel's empty state points users at the unscoped list.
+        const allRes = await fetch("/api/radarr/synced", { cache: "no-store" });
+        if (allRes.ok) {
+          const allBody = (await allRes.json()) as { movies?: AggregatedMovieDto[] };
+          setAllSyncedCount((allBody.movies ?? []).length);
+        }
+      }
     } catch {
       // non-fatal
     }
-  }, [scopeQuery]);
+  }, [currentScope.type, scopeQuery]);
 
   const removeSyncedMovie = useCallback(async () => {
     if (!removingMovie) return;
@@ -1261,9 +1282,15 @@ export default function Home() {
     [activityLog, activitySearch],
   );
 
+  // Pending rows are actionable; error rows are surfaced read-only so failed
+  // approvals are not invisible. Approved/rejected rows stay hidden here.
+  const visiblePendingApprovals = useMemo(
+    () => pendingApprovals.filter((approval) => approval.status === "pending" || approval.status === "error"),
+    [pendingApprovals],
+  );
   const filteredPendingApprovals = useMemo(
-    () => pendingApprovals.filter((approval) => pendingApprovalMatchesSearch(approval, pendingSearch)),
-    [pendingApprovals, pendingSearch],
+    () => visiblePendingApprovals.filter((approval) => pendingApprovalMatchesSearch(approval, pendingSearch)),
+    [visiblePendingApprovals, pendingSearch],
   );
 
   const filteredBlocklistedMovies = useMemo(
@@ -2144,6 +2171,24 @@ export default function Home() {
                 </AlertBanner>
               )}
 
+              {hasLoadedGroups && enabledSyncGroupCount === 0 && (
+                <AlertBanner
+                  action={
+                    <button
+                      className="rounded-[var(--radius-control)] border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-bold text-cornsilk/80 transition hover:bg-white/[0.08] hover:text-cornsilk"
+                      onClick={() => setIsSettingsOpen(true)}
+                      type="button"
+                    >
+                      Open sync settings
+                    </button>
+                  }
+                  title="No enabled sync groups"
+                  tone="info"
+                >
+                  Movies will not be added to Radarr automatically until a sync group is enabled.
+                </AlertBanner>
+              )}
+
               <div className="grid shrink-0 grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
                 <StatCard
                   detail={`${stats.total} total films found`}
@@ -2163,6 +2208,7 @@ export default function Home() {
                   detail="Configured in Sync groups"
                   icon={<ServerIcon className="h-5 w-5" />}
                   label="Sync groups"
+                  onClick={() => setIsSettingsOpen(true)}
                   value={
                     enabledSyncGroupCount === 0 ? (
                       <span className="text-cornsilk/65">None enabled</span>
@@ -2182,7 +2228,7 @@ export default function Home() {
                   value={`${stats.synced} synced`}
                 />
                 <StatCard
-                  detail={`${stats.filtered} shown ${
+                  detail={`Avg of ${stats.filtered} shown ${
                     activeReviewerGroup
                       ? "(group filters)"
                       : minimumRating > 0
@@ -3131,10 +3177,22 @@ export default function Home() {
                   <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-ink text-cornsilk/55">
                     <CheckIcon className="h-6 w-6" />
                   </div>
-                  <h3 className="text-base font-extrabold text-cornsilk">No synced movies yet</h3>
-                  <p className="mt-1 max-w-xs text-xs text-cornsilk/70">
-                    Movies successfully added to Radarr will appear here.
-                  </p>
+                  {currentScope.type !== "all" && (allSyncedCount ?? 0) > 0 ? (
+                    <>
+                      <h3 className="text-base font-extrabold text-cornsilk">No synced movies in this scope</h3>
+                      <p className="mt-1 max-w-xs text-xs text-cornsilk/70">
+                        Switch the scope to “All enabled groups” to see {allSyncedCount} synced{" "}
+                        {allSyncedCount === 1 ? "movie" : "movies"}.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <h3 className="text-base font-extrabold text-cornsilk">No synced movies yet</h3>
+                      <p className="mt-1 max-w-xs text-xs text-cornsilk/70">
+                        Movies successfully added to Radarr will appear here.
+                      </p>
+                    </>
+                  )}
                 </div>
               ) : filteredSyncedMovies.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center px-6 text-center">
@@ -3346,7 +3404,7 @@ export default function Home() {
                 onSaveGroup={saveReviewerGroup}
               />
 
-              {(hasManualApprovalGroups || pendingApprovalCount > 0) && (
+              {(hasManualApprovalGroups || pendingApprovalCount > 0 || erroredApprovalCount > 0) && (
                 <section className="rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
                   <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div className="space-y-1">
@@ -3384,38 +3442,47 @@ export default function Home() {
                           <p className="mt-1 text-xs text-cornsilk/60">
                             {approval.groupName} · Avg {approval.averageRating.toFixed(1)} stars
                           </p>
+                          {approval.status === "error" && approval.message && (
+                            <p className="mt-1 text-xs text-rose-300/90">{approval.message}</p>
+                          )}
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            className={`${primaryBtnCls} h-9 px-3 text-xs`}
-                            onClick={() => void resolvePendingApproval(approval.id, "approve")}
-                            type="button"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            className="h-9 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/70 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300"
-                            onClick={() => void resolvePendingApproval(approval.id, "reject")}
-                            type="button"
-                          >
-                            Reject
-                          </button>
-                          <button
-                            className="h-9 rounded-[var(--radius-control)] border border-rose-500/25 bg-rose-500/10 px-3 text-xs font-bold text-rose-200 transition hover:border-rose-400/50 hover:bg-rose-500/20 hover:text-white"
-                            onClick={() => void rejectAndBlocklistPendingApproval(approval)}
-                            type="button"
-                          >
-                            Reject + blocklist
-                          </button>
-                        </div>
+                        {approval.status === "error" ? (
+                          <span className="w-fit rounded-full border border-rose-500/25 bg-rose-500/10 px-2.5 py-1 text-xs font-bold text-rose-200">
+                            Error
+                          </span>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              className={`${primaryBtnCls} h-9 px-3 text-xs`}
+                              onClick={() => void resolvePendingApproval(approval.id, "approve")}
+                              type="button"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              className="h-9 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/70 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300"
+                              onClick={() => void resolvePendingApproval(approval.id, "reject")}
+                              type="button"
+                            >
+                              Reject
+                            </button>
+                            <button
+                              className="h-9 rounded-[var(--radius-control)] border border-rose-500/25 bg-rose-500/10 px-3 text-xs font-bold text-rose-200 transition hover:border-rose-400/50 hover:bg-rose-500/20 hover:text-white"
+                              onClick={() => void rejectAndBlocklistPendingApproval(approval)}
+                              type="button"
+                            >
+                              Reject + blocklist
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ))}
-                    {pendingApprovals.length === 0 && (
+                    {visiblePendingApprovals.length === 0 && (
                       <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/70">
                         No movies are waiting for approval.
                       </p>
                     )}
-                    {pendingApprovals.length > 0 && filteredPendingApprovals.length === 0 && (
+                    {visiblePendingApprovals.length > 0 && filteredPendingApprovals.length === 0 && (
                       <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/70">
                         No pending approvals match your search.
                       </p>

@@ -1042,7 +1042,9 @@ Comfortable phone layout: natural page scroll on small screens, compact filters,
 
 ---
 
-### [ ] P2-7: Empty/guidance states and stat-card affordances
+### [x] P2-7: Empty/guidance states and stat-card affordances
+
+> **Completed:** 2026-06-09 — dev / no PR — Errored approvals are shown read-only (no retry buttons) because the approve route 404s on non-pending rows; unscoped synced count is fetched alongside scoped loads rather than passed through existing data.
 
 **Problem:**
 - With zero enabled groups (P0-3 reduces but doesn't eliminate this — groups can be disabled), the dashboard shows movies normally while auto-sync is silently dead; the only signal is a stat card.
