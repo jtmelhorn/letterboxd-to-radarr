@@ -111,7 +111,6 @@ CREATE TABLE IF NOT EXISTS sync_results (
 );
 
 CREATE INDEX IF NOT EXISTS sync_results_review_idx ON sync_results(review_id);
-CREATE INDEX IF NOT EXISTS sync_results_film_created_idx ON sync_results(film_id, created_at);
 
 CREATE TABLE IF NOT EXISTS pending_approvals (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
