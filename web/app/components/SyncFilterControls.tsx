@@ -37,8 +37,8 @@ const inputCls =
   "h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25";
 
 const selectCls = `${inputCls} appearance-none`;
-const labelCls = "text-[10px] font-bold uppercase tracking-wider text-cornsilk/55";
-const helperCls = "text-[11px] leading-relaxed text-cornsilk/50";
+const labelCls = "text-[11px] font-bold uppercase tracking-wider text-cornsilk/70";
+const helperCls = "text-[11px] leading-relaxed text-cornsilk/70";
 const currentYear = String(new Date().getFullYear());
 
 const yearModeOptions: Array<{ value: SyncYearFilterMode; label: string }> = [
@@ -226,7 +226,7 @@ function MultiGenreDropdown({
               );
             })}
             {filteredOptions.length === 0 && (
-              <p className="px-2 py-3 text-xs font-semibold text-cornsilk/45">No matching genres.</p>
+              <p className="px-2 py-3 text-xs font-semibold text-cornsilk/70">No matching genres.</p>
             )}
           </div>
           <button
@@ -256,7 +256,7 @@ function MultiGenreDropdown({
             </button>
           </span>
         ))}
-        {values.length === 0 && <span className="text-[11px] font-semibold text-cornsilk/45">None selected</span>}
+        {values.length === 0 && <span className="text-[11px] font-semibold text-cornsilk/70">None selected</span>}
       </div>
     </div>
   );

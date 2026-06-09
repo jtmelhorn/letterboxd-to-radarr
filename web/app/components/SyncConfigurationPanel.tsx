@@ -66,8 +66,8 @@ const ghostBtnCls =
   "rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 font-bold text-cornsilk/70 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-cornsilk disabled:cursor-not-allowed disabled:opacity-45";
 const dangerBtnCls =
   "rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 font-bold text-cornsilk/65 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-45";
-const labelCls = "text-[10px] font-bold uppercase tracking-wider text-cornsilk/55";
-const helperCls = "text-xs leading-relaxed text-cornsilk/65";
+const labelCls = "text-[11px] font-bold uppercase tracking-wider text-cornsilk/70";
+const helperCls = "text-xs leading-relaxed text-cornsilk/70";
 
 function XIcon({ className }: { className?: string }) {
   return (
@@ -146,7 +146,7 @@ function ReviewerChip({
       {onRemove && (
         <button
           aria-label={`Remove @${handle}`}
-          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md text-cornsilk/45 transition hover:bg-rose-500/15 hover:text-rose-300"
+          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md text-cornsilk/70 transition hover:bg-rose-500/15 hover:text-rose-300"
           type="button"
           onClick={onRemove}
         >
@@ -319,12 +319,12 @@ export function SyncConfigurationPanel({
               <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <p className={labelCls}>Reviewer pool</p>
-                <p className="mt-1 text-[11px] leading-relaxed text-cornsilk/50">
+                <p className="mt-1 text-[11px] leading-relaxed text-cornsilk/70">
                   Reviewers here can be added to custom groups.
                 </p>
               </div>
               {pendingApprovalCount > 0 && (
-                <span className="rounded-full border border-gold/20 bg-gold/10 px-2 py-0.5 text-[10px] font-bold text-gold">
+                <span className="rounded-full border border-gold/20 bg-gold/10 px-2 py-0.5 text-[11px] font-bold text-gold">
                   {pendingApprovalCount} pending
                 </span>
               )}
@@ -379,7 +379,7 @@ export function SyncConfigurationPanel({
                   />
                 ))}
                 {reviewers.length === 0 && (
-                  <span className="text-xs text-cornsilk/55">No reviewers added yet.</span>
+                  <span className="text-xs text-cornsilk/70">No reviewers added yet.</span>
                 )}
               </div>
             </div>
@@ -420,7 +420,7 @@ export function SyncConfigurationPanel({
         <div className="space-y-3">
           <div>
             <p className={labelCls}>Sync groups</p>
-            <p className="mt-1 text-[11px] leading-relaxed text-cornsilk/50">
+            <p className="mt-1 text-[11px] leading-relaxed text-cornsilk/70">
               Enabled groups control sync timing, threshold, approvals, and movie filters. Custom groups are optional.
             </p>
           </div>
@@ -595,10 +595,10 @@ export function SyncConfigurationPanel({
                         />
                       ))}
                       {group.reviewerHandles.length === 0 && (
-                        <span className="text-xs font-semibold text-cornsilk/45">Drag reviewers here</span>
+                        <span className="text-xs font-semibold text-cornsilk/70">Drag reviewers here</span>
                       )}
                     </div>
-                    <p className="mt-2 text-[11px] leading-relaxed text-cornsilk/50">
+                    <p className="mt-2 text-[11px] leading-relaxed text-cornsilk/70">
                       Membership changes save immediately.
                     </p>
                   </div>

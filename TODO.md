@@ -961,7 +961,9 @@ Standard focus-trapped dialogs, click-away dropdowns, accessible tooltip.
 
 ---
 
-### [ ] P2-5: Accessibility pass (contrast, labels, semantics)
+### [x] P2-5: Accessibility pass (contrast, labels, semantics)
+
+> **Completed:** 2026-06-09 — dev / no PR — Functional text swept to /70+ opacity and ≥11px (decorative icons/chevrons left alone); gold/chartreuse accents kept at larger sizes rather than recolored; manual contrast-checker and screen-reader spot checks not performed (no confirmed local run workflow).
 
 **Problem:**
 - Helper/label text at `text-cornsilk/55` and sizes like `text-[10px]`/`text-[9px]` will fail WCAG AA contrast/size in stat labels, section labels, and badges.

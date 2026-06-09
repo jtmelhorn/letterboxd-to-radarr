@@ -651,7 +651,7 @@ function StatCard({
           {icon}
         </div>
         <div className="min-w-0">
-          <p className="text-xs font-bold uppercase tracking-wide text-cornsilk/55">{label}</p>
+          <p className="text-xs font-bold uppercase tracking-wide text-cornsilk/70">{label}</p>
           <div className="mt-1 truncate text-lg font-black leading-tight text-cornsilk">{value}</div>
           <p className="mt-1 text-xs text-cornsilk/62">{detail}</p>
         </div>
@@ -694,7 +694,7 @@ function ModalHeader({
   return (
     <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-white/10 px-6 pb-4 pt-5">
       <div>
-        <p className="mb-0.5 text-[10px] font-bold uppercase tracking-widest text-cornsilk/55">{eyebrow}</p>
+        <p className="mb-0.5 text-[11px] font-bold uppercase tracking-widest text-cornsilk/70">{eyebrow}</p>
         <h2 className="text-xl font-black tracking-tight text-cornsilk" id={titleId}>{title}</h2>
       </div>
       <button
@@ -1835,7 +1835,7 @@ export default function Home() {
       ? { dotClass: "bg-pine", textClass: "text-chartreuse", label: "Connected" }
       : connectionTestResult
         ? { dotClass: "bg-rose-500", textClass: "text-rose-400", label: "Failed" }
-        : { dotClass: "bg-pine/50", textClass: "text-cornsilk/55", label: "Not tested" };
+        : { dotClass: "bg-pine/50", textClass: "text-cornsilk/70", label: "Not tested" };
 
   const setupReady = canCompleteSetup(settings, settingsDraft, config.username || reviewers[0]?.handle || "");
 
@@ -2055,7 +2055,7 @@ export default function Home() {
             >
               <ClockIcon className="h-5 w-5" />
               {activityUnreadCount > 0 && (
-                <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gold px-1 text-[9px] font-bold text-ink shadow">
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gold px-1 text-[11px] font-bold text-ink shadow">
                   {activityUnreadCount > 99 ? "99+" : activityUnreadCount}
                 </span>
               )}
@@ -2091,7 +2091,7 @@ export default function Home() {
                 />
               )}
               {isRadarrSetup && pendingApprovalCount > 0 && (
-                <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gold px-1 text-[9px] font-bold text-ink shadow">
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gold px-1 text-[11px] font-bold text-ink shadow">
                   {pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}
                 </span>
               )}
@@ -2238,14 +2238,14 @@ export default function Home() {
                         ref={ratingTooltipRef}
                         className="group relative flex h-10 flex-[0_0_auto] items-center gap-1.5"
                       >
-                        <label className="text-xs font-bold uppercase tracking-wider text-cornsilk/55">
+                        <label className="text-xs font-bold uppercase tracking-wider text-cornsilk/70">
                           Min. rating ≥
                         </label>
                         <button
                           aria-describedby="min-rating-tooltip"
                           aria-expanded={isRatingTooltipOpen}
                           aria-label="About the rating filter"
-                          className="text-cornsilk/45 transition-colors hover:text-cornsilk/80 focus:text-cornsilk/80"
+                          className="text-cornsilk/70 transition-colors hover:text-cornsilk focus:text-cornsilk"
                           onClick={() => setIsRatingTooltipOpen((open) => !open)}
                           type="button"
                         >
@@ -2311,17 +2311,16 @@ export default function Home() {
                               )}
                             </div>
                             <div className="max-h-64 overflow-y-auto py-1">
-                              <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]">
-                                <input
-                                  checked={selectedGenres.length === 0}
-                                  className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                                  onChange={() => setSelectedGenres([])}
-                                  type="checkbox"
-                                />
-                                All genres
-                              </label>
+                              <button
+                                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06] disabled:cursor-default disabled:opacity-50"
+                                disabled={selectedGenres.length === 0}
+                                onClick={() => setSelectedGenres([])}
+                                type="button"
+                              >
+                                {selectedGenres.length === 0 ? "All genres shown" : "Clear selection"}
+                              </button>
                               {genreOptions.length === 0 ? (
-                                <p className="px-2 py-3 text-xs leading-relaxed text-cornsilk/55">
+                                <p className="px-2 py-3 text-xs leading-relaxed text-cornsilk/70">
                                   Cached genres will appear after metadata refresh.
                                 </p>
                               ) : (
@@ -2409,7 +2408,9 @@ export default function Home() {
                         className={`poster-card group w-full min-h-0 aspect-[2/3] overflow-hidden rounded-2xl bg-ink/60 text-left ${posterRingClass(sendState)}`}
                       >
                         <button
-                          aria-label={`${movie.title} (${movie.year ?? "unknown"}) — ${movie.averageRating.toFixed(1)} average stars`}
+                          aria-label={`${movie.title} (${movie.year ?? "unknown"}) — ${movie.averageRating.toFixed(1)} average stars${
+                            sendState === "added" ? " — already in Radarr" : ""
+                          }`}
                           className="absolute inset-0 h-full w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-pine/80"
                           onClick={() => setActiveMovieKey(key)}
                           type="button"
@@ -2425,7 +2426,7 @@ export default function Home() {
                           ) : (
                             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-pine to-ink p-4">
                               <FilmIcon className="h-9 w-9 text-granite/70" />
-                              <span className="line-clamp-3 text-center text-[10px] font-bold leading-tight text-cornsilk/55">
+                              <span className="line-clamp-3 text-center text-[11px] font-bold leading-tight text-cornsilk/75">
                                 {movie.title}
                               </span>
                             </div>
@@ -2435,20 +2436,20 @@ export default function Home() {
 
                           <div className="absolute inset-x-2 top-2 flex justify-start pointer-events-none">
                             <div className="rounded-lg bg-black/60 px-2 py-0.5 backdrop-blur-md border border-cornsilk/5">
-                              <span className="text-[10px] font-bold text-gold flex items-center gap-0.5">
+                              <span className="text-[11px] font-bold text-gold flex items-center gap-0.5">
                                 ★ {movie.averageRating.toFixed(1)}
                               </span>
                             </div>
                           </div>
 
                           <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-3">
-                            <span className="rounded-full bg-black/0 px-3 py-1 text-center text-[10px] font-extrabold uppercase tracking-wide text-transparent transition duration-200 group-hover:bg-black/45 group-hover:text-gold group-focus-within:bg-black/45 group-focus-within:text-gold">
+                            <span className="rounded-full bg-black/0 px-3 py-1 text-center text-[11px] font-extrabold uppercase tracking-wide text-transparent transition duration-200 group-hover:bg-black/45 group-hover:text-gold group-focus-within:bg-black/45 group-focus-within:text-gold">
                               Click for review
                             </span>
                           </div>
 
                           <div className="absolute inset-x-0 bottom-0 p-3.5 pointer-events-none">
-                            <p className="mb-0.5 text-[10px] font-bold text-cornsilk/60">{movie.year ?? "—"}</p>
+                            <p className="mb-0.5 text-[11px] font-bold text-cornsilk/70">{movie.year ?? "—"}</p>
                             <h3 className="line-clamp-2 text-xs font-extrabold leading-snug text-cornsilk group-hover:text-gold transition-colors">
                               {movie.title}
                             </h3>
@@ -2541,7 +2542,7 @@ export default function Home() {
                         <div className="flex items-center gap-2">
                           <h4 className="text-sm font-bold text-cornsilk">Configure Radarr Server</h4>
                           {!isRadarrSetup && (
-                            <span className="rounded bg-gold/10 px-1.5 py-0.5 text-[10px] font-bold text-gold border border-gold/10">
+                            <span className="rounded bg-gold/10 px-1.5 py-0.5 text-[11px] font-bold text-gold border border-gold/10">
                               Setup Needed
                             </span>
                           )}
@@ -2730,7 +2731,7 @@ export default function Home() {
                 <section className="min-w-0 flex-1 overflow-hidden rounded-2xl border border-cornsilk/10 bg-ink/20">
                   <div className="flex items-start justify-between gap-4 border-b border-cornsilk/5 px-4 py-4 sm:px-5">
                     <div className="min-w-0">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-cornsilk/70">
                         Reviewer notes
                       </p>
                     </div>
@@ -2739,7 +2740,7 @@ export default function Home() {
                       <span className="flex items-center gap-1 text-xl font-black text-gold">
                         ★ {activeMovie.averageRating.toFixed(1)}
                       </span>
-                      <span className="text-[10px] font-medium text-cornsilk/55">
+                      <span className="text-[11px] font-medium text-cornsilk/70">
                         {activeMovie.reviewerCount} reviewer{activeMovie.reviewerCount === 1 ? "" : "s"}
                       </span>
                     </div>
@@ -2749,7 +2750,7 @@ export default function Home() {
                     <div className="rounded-xl border border-cornsilk/10 bg-black/15 p-3">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
-                          <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-cornsilk/55">
+                          <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-cornsilk/70">
                             Genres
                           </p>
                           <div className="flex flex-wrap gap-2">
@@ -2801,7 +2802,7 @@ export default function Home() {
                             &quot;{review.reviewText}&quot;
                           </p>
                         ) : (
-                          <p className="text-xs italic text-cornsilk/55">No written review for this film.</p>
+                          <p className="text-xs italic text-cornsilk/70">No written review for this film.</p>
                         )}
                       </div>
                     ))}
@@ -2897,7 +2898,7 @@ export default function Home() {
           >
             <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-white/10 px-6 pb-4 pt-5">
               <div>
-                <p className="mb-0.5 text-[10px] font-bold uppercase tracking-widest text-cornsilk/55">
+                <p className="mb-0.5 text-[11px] font-bold uppercase tracking-widest text-cornsilk/70">
                   Recent syncs
                 </p>
                 <h2 className="text-xl font-black tracking-tight text-cornsilk" id="activity-title">
@@ -2951,7 +2952,7 @@ export default function Home() {
                     <ClockIcon className="h-6 w-6" />
                   </div>
                   <h3 className="text-base font-extrabold text-cornsilk">No sync activity yet</h3>
-                  <p className="mt-1 max-w-xs text-xs text-cornsilk/55">
+                  <p className="mt-1 max-w-xs text-xs text-cornsilk/70">
                     Sync results appear here. The badge only highlights new failures that need attention.
                   </p>
                 </div>
@@ -2961,7 +2962,7 @@ export default function Home() {
                     <ClockIcon className="h-6 w-6" />
                   </div>
                   <h3 className="text-base font-extrabold text-cornsilk">No activity matches</h3>
-                  <p className="mt-1 max-w-xs text-xs text-cornsilk/55">
+                  <p className="mt-1 max-w-xs text-xs text-cornsilk/70">
                     Try a different movie, year, status, or message.
                   </p>
                 </div>
@@ -2994,7 +2995,7 @@ export default function Home() {
                           <h4 className="truncate text-sm font-bold text-cornsilk">
                             {entry.title}
                             {entry.year != null && (
-                              <span className="ml-1 font-medium text-cornsilk/55">{entry.year}</span>
+                              <span className="ml-1 font-medium text-cornsilk/70">{entry.year}</span>
                             )}
                           </h4>
                         </div>
@@ -3011,20 +3012,20 @@ export default function Home() {
                         </p>
                         <div className="mt-1.5 flex items-center gap-2">
                           <span
-                            className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                            className={`rounded px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${
                               entry.outcome === "skipped"
                                 ? "bg-azure/10 text-azure border border-azure/20"
                                 : entry.auto
-                                ? "bg-granite/20 text-cornsilk/70 border border-granite/30"
-                                : "bg-cornsilk/5 text-cornsilk/60 border border-cornsilk/5"
+                                ? "bg-granite/20 text-cornsilk/75 border border-granite/30"
+                                : "bg-cornsilk/5 text-cornsilk/70 border border-cornsilk/5"
                             }`}
                           >
                             {entry.outcome === "skipped" ? "Skipped" : entry.auto ? "Auto" : "Manual"}
                           </span>
-                          <span className="text-[10px] text-cornsilk/55">{formatRelativeTime(entry.at)}</span>
+                          <span className="text-[11px] text-cornsilk/70">{formatRelativeTime(entry.at)}</span>
                           {entry.outcome === "error" && (entry.filmId != null || entry.reviewId != null) && (
                             <button
-                              className="ml-auto rounded-md border border-cornsilk/10 bg-ink/60 px-2 py-0.5 text-[10px] font-bold text-cornsilk/80 transition hover:border-gold/30 hover:text-cornsilk disabled:opacity-50"
+                              className="ml-auto rounded-md border border-cornsilk/10 bg-ink/60 px-2 py-0.5 text-[11px] font-bold text-cornsilk/80 transition hover:border-gold/30 hover:text-cornsilk disabled:opacity-50"
                               disabled={entry.filmId != null && sendStates[entry.filmId] === "loading"}
                               onClick={() => void retryFromActivity(entry)}
                               type="button"
@@ -3036,7 +3037,7 @@ export default function Home() {
                           )}
                         </div>
                         {activityRetryNotices[entry.id] && (
-                          <p className="mt-1 text-[10px] text-azure/80">{activityRetryNotices[entry.id]}</p>
+                          <p className="mt-1 text-[11px] text-azure/80">{activityRetryNotices[entry.id]}</p>
                         )}
                       </div>
                     </li>
@@ -3065,7 +3066,7 @@ export default function Home() {
           >
             <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-white/10 px-6 pb-4 pt-5">
               <div>
-                <p className="mb-0.5 text-[10px] font-bold uppercase tracking-widest text-cornsilk/55">
+                <p className="mb-0.5 text-[11px] font-bold uppercase tracking-widest text-cornsilk/70">
                   Radarr library
                 </p>
                 <h2 className="text-xl font-black tracking-tight text-cornsilk" id="synced-title">
@@ -3112,7 +3113,7 @@ export default function Home() {
                     <CheckIcon className="h-6 w-6" />
                   </div>
                   <h3 className="text-base font-extrabold text-cornsilk">No synced movies yet</h3>
-                  <p className="mt-1 max-w-xs text-xs text-cornsilk/55">
+                  <p className="mt-1 max-w-xs text-xs text-cornsilk/70">
                     Movies successfully added to Radarr will appear here.
                   </p>
                 </div>
@@ -3122,7 +3123,7 @@ export default function Home() {
                     <FilmIcon className="h-6 w-6" />
                   </div>
                   <h3 className="text-base font-extrabold text-cornsilk">No synced movies match</h3>
-                  <p className="mt-1 max-w-xs text-xs text-cornsilk/55">
+                  <p className="mt-1 max-w-xs text-xs text-cornsilk/70">
                     Try a different title, year, reviewer, or genre.
                   </p>
                 </div>
@@ -3152,7 +3153,7 @@ export default function Home() {
                           <h4 className="truncate text-sm font-bold text-cornsilk">
                             {movie.title}
                             {movie.year != null && (
-                              <span className="ml-1 font-medium text-cornsilk/55">{movie.year}</span>
+                              <span className="ml-1 font-medium text-cornsilk/70">{movie.year}</span>
                             )}
                           </h4>
                           <p className="mt-0.5 text-xs text-cornsilk/60">
@@ -3162,7 +3163,7 @@ export default function Home() {
                         </div>
                         <button
                           aria-label={`Remove ${movie.title} from Radarr`}
-                          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-cornsilk/10 bg-black/30 text-cornsilk/45 opacity-0 transition hover:border-rose-500/40 hover:bg-rose-500/15 hover:text-rose-300 group-hover:opacity-100 focus:opacity-100"
+                          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-cornsilk/10 bg-black/30 text-cornsilk/70 opacity-0 transition hover:border-rose-500/40 hover:bg-rose-500/15 hover:text-rose-300 group-hover:opacity-100 focus:opacity-100"
                           onClick={(e) => {
                             e.stopPropagation();
                             setRemovingMovie(movie);
@@ -3227,7 +3228,7 @@ export default function Home() {
             <h3 className="text-base font-extrabold text-cornsilk">Remove from Radarr?</h3>
             <p className="mt-2 text-sm text-cornsilk/70">
               This will remove <strong className="text-cornsilk">{removingMovie.title}</strong>
-              {removingMovie.year != null && <span className="text-cornsilk/50"> ({removingMovie.year})</span>} from your
+              {removingMovie.year != null && <span className="text-cornsilk/70"> ({removingMovie.year})</span>} from your
               Radarr library.
             </p>
 
@@ -3241,7 +3242,7 @@ export default function Home() {
                 />
                 <div>
                   <span className="text-sm font-bold text-cornsilk/80">Also delete files from disk</span>
-                  <p className="mt-0.5 text-xs text-cornsilk/55">
+                  <p className="mt-0.5 text-xs text-cornsilk/70">
                     Deletes the movie folder and files through Radarr.
                   </p>
                 </div>
@@ -3255,7 +3256,7 @@ export default function Home() {
                 />
                 <div>
                   <span className="text-sm font-bold text-cornsilk/80">Block this movie from future auto-sync</span>
-                  <p className="mt-0.5 text-xs text-cornsilk/55">
+                  <p className="mt-0.5 text-xs text-cornsilk/70">
                     Prevents this app from adding the movie again during future syncs.
                   </p>
                 </div>
@@ -3358,7 +3359,7 @@ export default function Home() {
                           <p className="truncate text-sm font-extrabold text-cornsilk">
                             {approval.title}
                             {approval.year != null && (
-                              <span className="ml-1 font-medium text-cornsilk/55">{approval.year}</span>
+                              <span className="ml-1 font-medium text-cornsilk/70">{approval.year}</span>
                             )}
                           </p>
                           <p className="mt-1 text-xs text-cornsilk/60">
@@ -3391,12 +3392,12 @@ export default function Home() {
                       </div>
                     ))}
                     {pendingApprovals.length === 0 && (
-                      <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/55">
+                      <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/70">
                         No movies are waiting for approval.
                       </p>
                     )}
                     {pendingApprovals.length > 0 && filteredPendingApprovals.length === 0 && (
-                      <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/55">
+                      <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/70">
                         No pending approvals match your search.
                       </p>
                     )}
@@ -3435,7 +3436,7 @@ export default function Home() {
                         <p className="truncate text-sm font-extrabold text-cornsilk">
                           {movie.title}
                           {movie.year != null && (
-                            <span className="ml-1 font-medium text-cornsilk/55">{movie.year}</span>
+                            <span className="ml-1 font-medium text-cornsilk/70">{movie.year}</span>
                           )}
                         </p>
                         <p className="mt-1 text-xs text-cornsilk/60">
@@ -3453,12 +3454,12 @@ export default function Home() {
                     </div>
                   ))}
                   {blocklistedMovies.length === 0 && (
-                    <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/55">
+                    <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/70">
                       No movies are blocklisted.
                     </p>
                   )}
                   {blocklistedMovies.length > 0 && filteredBlocklistedMovies.length === 0 && (
-                    <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/55">
+                    <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/70">
                       No blocklisted movies match your search.
                     </p>
                   )}
