@@ -1085,7 +1085,9 @@ The dashboard tells users when automation is off and stats are navigable and hon
 
 ---
 
-### [ ] P2-8: Setup wizard — allow completing setup without a reachable Radarr
+### [x] P2-8: Setup wizard — allow completing setup without a reachable Radarr
+
+> **Completed:** 2026-06-09 — dev / no PR — Half-filled Radarr config at skip time is discarded (not persisted) and the server rejects half-filled stored config; manual first-run walkthrough not performed (no confirmed local run workflow); SQLite-backed setup tests run in CI only.
 
 **Problem:**
 `canCompleteSetup` (`web/app/components/ControlPanelForm.tsx`) requires a selected quality profile and root folder, which are only loadable after a successful Radarr connection test. If Radarr is down/unreachable during first-run, the user is hard-blocked from finishing setup and exploring the app.

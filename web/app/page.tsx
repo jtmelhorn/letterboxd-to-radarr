@@ -1648,6 +1648,40 @@ export default function Home() {
     }
   }
 
+  // Completes setup with only the reviewer saved; any half-filled Radarr
+  // fields in the form are intentionally discarded, not persisted.
+  async function skipRadarrSetup() {
+    setIsSavingSettings(true);
+    setSettingsMessage(null);
+    setSettingsError(null);
+    try {
+      const reviewerHandle = config.username.trim() || settings.reviewer.trim();
+      if (!reviewerHandle) {
+        throw new Error("Add a Letterboxd username first.");
+      }
+      const reviewerRes = await fetch("/api/reviewers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: reviewerHandle }),
+      });
+      const reviewerBody = (await reviewerRes.json().catch(() => null)) as { message?: string } | null;
+      if (!reviewerRes.ok) throw new Error(apiMessage(reviewerBody, "Unable to save reviewer."));
+
+      const res = await fetch("/api/setup/complete", { method: "POST" });
+      const body = (await res.json().catch(() => null)) as { message?: string; success?: boolean } | null;
+      if (!res.ok || !body?.success) {
+        throw new Error(apiMessage(body, "Unable to complete setup."));
+      }
+      setHasAutoFetched(false);
+      setBootPhase("ready");
+      await loadSettings();
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : "Unable to complete setup.");
+    } finally {
+      setIsSavingSettings(false);
+    }
+  }
+
   async function testConnection() {
     setIsTestingConnection(true);
     setConnectionTestResult(null);
@@ -2037,6 +2071,7 @@ export default function Home() {
               onAutoTestConnection={maybeAutoTestConnection}
               onDraftChange={(updater) => setSettingsDraft(updater)}
               onLetterboxdUsernameChange={(value) => updateConfig("username", value)}
+              onSkipRadarr={() => void skipRadarrSetup()}
               onSubmit={completeSetup}
               onTestConnection={testConnection}
               radarrOptions={radarrOptions}

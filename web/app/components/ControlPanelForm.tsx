@@ -37,6 +37,7 @@ interface ControlPanelFormProps {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onTestConnection: () => void;
   onAutoTestConnection?: () => void;
+  onSkipRadarr?: () => void;
   submitLabel: string;
   canSubmit?: boolean;
 }
@@ -166,6 +167,7 @@ export function ControlPanelForm({
   onSubmit,
   onTestConnection,
   onAutoTestConnection,
+  onSkipRadarr,
   submitLabel,
   canSubmit = true,
 }: ControlPanelFormProps) {
@@ -409,6 +411,19 @@ export function ControlPanelForm({
       )}
 
       <div className="flex flex-col-reverse gap-3 pt-1 sm:flex-row sm:items-center sm:justify-end">
+        {isSetup && onSkipRadarr && !canSubmit && Boolean(letterboxdUsername?.trim()) && (
+          <div className="flex flex-col gap-1 sm:mr-auto">
+            <button
+              className="inline-flex h-11 items-center justify-center rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-5 text-sm font-bold text-cornsilk/75 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-cornsilk disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSaving}
+              type="button"
+              onClick={onSkipRadarr}
+            >
+              Skip Radarr for now
+            </button>
+            <p className={helperCls}>Saves only the reviewer. Connect Radarr later from Settings.</p>
+          </div>
+        )}
         <button
           className="inline-flex h-11 items-center justify-center rounded-[var(--radius-control)] bg-pine px-6 text-sm font-extrabold text-ink transition hover:bg-pine/90 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-pine/35 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={isSaving || !canSubmit}
