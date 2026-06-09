@@ -308,7 +308,9 @@ Clearing the activity display never changes which movies get re-added and never 
 
 ---
 
-### [ ] P0-7: Split "refresh reviews" (GET) from "run sync" (POST)
+### [x] P0-7: Split "refresh reviews" (GET) from "run sync" (POST)
+
+> **Completed:** 2026-06-09 — dev / no PR — No spec deviation; local SQLite-backed Vitest suites were skipped by the existing harness.
 
 **Problem:**
 `GET /api/reviews?refresh=1` calls `syncRefreshedScope(scope, { auto: true }, fetched)` (`web/app/api/reviews/route.ts`), which adds movies to Radarr. The dashboard calls `loadReviews(true)` on first ready render and after every scope-dropdown change (`page.tsx` auto-fetch effect + `setHasAutoFetched(false)` in the scope `onChange`). So merely opening the app or flipping the scope can trigger Radarr adds. `README.md` explicitly documents this endpoint as having "no Radarr add side effects".

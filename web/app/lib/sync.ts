@@ -158,40 +158,6 @@ function syncRunsForScope(scope: ReviewerScope): GroupSyncRun[] {
     .filter((run) => run.handles.length > 0);
 }
 
-function cachedSyncRunsForRefreshedScope(scope: ReviewerScope): GroupSyncRun[] {
-  if (scope.type === "group" && typeof scope.groupId === "number") {
-    const group = getReviewerGroup(scope.groupId);
-    if (!group?.enabled) return [];
-    return handlesForGroup(group).length > 0
-      ? [{ group, handles: [], aggregationScope: { type: "group", groupId: group.id } }]
-      : [];
-  }
-
-  if (scope.type === "reviewer" && scope.reviewer) {
-    const handle = scope.reviewer.trim().toLowerCase();
-    if (!handle) return [];
-    return listReviewerGroups()
-      .filter((group) => group.enabled && groupCoversReviewer(group, handle) && handlesForGroup(group).length > 0)
-      .map(
-        (group): GroupSyncRun => ({
-          group,
-          handles: [],
-          aggregationScope: { type: "group", groupId: group.id },
-        }),
-      );
-  }
-
-  return listReviewerGroups()
-    .filter((group) => group.enabled && handlesForGroup(group).length > 0)
-    .map(
-      (group): GroupSyncRun => ({
-        group,
-        handles: [],
-        aggregationScope: { type: "group", groupId: group.id },
-      }),
-    );
-}
-
 function combineSummaries(summaries: SyncRunSummary[], threshold: number): SyncRunSummary {
   return {
     fetched: summaries.reduce((sum, item) => sum + item.fetched, 0),
@@ -418,28 +384,6 @@ export async function refreshScopeReviews(scope: ReviewerScope): Promise<number>
     listUsers().map((reviewer) => reviewer.handle),
     { fetchMetadata: scopeNeedsGenreMetadata(scope) },
   );
-}
-
-export async function syncRefreshedScope(
-  scope: ReviewerScope,
-  options: SyncOptions,
-  fetched: number,
-): Promise<SyncRunSummary> {
-  const runs = cachedSyncRunsForRefreshedScope(scope);
-  const threshold = typeof options.threshold === "number" ? options.threshold : fallbackThresholdForScope(scope);
-  if (runs.length === 0) {
-    return emptySummary(threshold);
-  }
-
-  if (runs.length > 1) {
-    const summaries: SyncRunSummary[] = [];
-    for (const [index, run] of runs.entries()) {
-      summaries.push(await syncCachedGroup(run, options, index === 0 ? fetched : 0));
-    }
-    return combineSummaries(summaries, threshold);
-  }
-
-  return syncCachedGroup(runs[0], options, fetched);
 }
 
 function scopeNeedsGenreMetadata(scope: ReviewerScope): boolean {

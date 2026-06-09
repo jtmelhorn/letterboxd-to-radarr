@@ -2147,8 +2147,8 @@ export default function Home() {
                 />
               </div>
 
-              <div className="flex shrink-0 flex-col gap-3 rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] px-3 py-3 sm:px-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex shrink-0 items-center gap-2 text-sm text-cornsilk/60">
+              <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] px-3 py-3 sm:px-4">
+                <div className="flex min-w-[min(100%,14rem)] flex-[1_1_220px] flex-wrap items-center gap-x-2 gap-y-1 text-sm text-cornsilk/60">
                   <span>Displaying</span>
                   <strong className="text-cornsilk font-extrabold">{stats.filtered}</strong>
                   <span>of</span>
@@ -2156,159 +2156,158 @@ export default function Home() {
                   <span>cached movies.</span>
                 </div>
 
-                <div className="flex w-full flex-col gap-3 lg:w-auto lg:flex-row lg:items-center">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div className="relative">
-                      <select
-                        aria-label="Reviewer scope"
-                        className="h-9 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 pr-8 text-xs font-bold text-cornsilk focus:outline-none focus:ring-2 focus:ring-gold/30"
-                        value={scopeSelection}
-                        onChange={(event) => {
-                          setScopeSelection(event.target.value as ScopeSelection);
-                          setHasAutoFetched(false);
-                        }}
-                      >
-                        <option value="all">All enabled groups</option>
-                        {reviewers.map((reviewer) => (
-                          <option key={reviewer.handle} value={`reviewer:${reviewer.handle}`}>
-                            @{reviewer.handle}
-                          </option>
-                        ))}
-                        {reviewerGroups.map((group) => (
-                          <option key={group.id} value={`group:${group.id}`}>
-                            Group: {group.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    {currentScope.type === "group" ? (
-                      <span className="rounded-full border border-pine/20 bg-pine/10 px-2.5 py-1 text-[10px] font-bold text-chartreuse">
-                        Using group filters
-                      </span>
-                    ) : (
-                      <>
-                        <span className="group relative flex items-center gap-1.5">
-                          <label className="text-xs font-bold uppercase tracking-wider text-cornsilk/55">
-                            Min. rating ≥
-                          </label>
-                          <span className="text-cornsilk/45 transition-colors hover:text-cornsilk/80" tabIndex={0}>
-                            <InfoIcon className="h-3.5 w-3.5" />
-                          </span>
-                          <span
-                            className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-60 rounded-lg border border-cornsilk/10 bg-ink px-3 py-2 text-[11px] font-medium leading-relaxed text-cornsilk/80 opacity-0 shadow-xl transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
-                            role="tooltip"
-                          >
-                            Filter which movies appear in the grid. Auto-sync to Radarr uses thresholds in Sync
-                            groups.
-                          </span>
-                        </span>
-                        <div className="flex h-9 rounded-[var(--radius-control)] border border-white/10 bg-black/20 p-0.5">
-                          <button
-                            className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
-                              minimumRating === 0 ? "bg-pine text-ink shadow" : "text-cornsilk/65 hover:text-cornsilk"
-                            }`}
-                            onClick={() => setMinimumRating(0)}
-                            type="button"
-                          >
-                            All
-                          </button>
-                          {[3.0, 3.5, 4.0, 4.5, 5.0].map((val) => (
-                            <button
-                              key={val}
-                              className={`h-full px-3 text-xs font-bold rounded-md transition-all ${
-                                minimumRating === val
-                                  ? "bg-pine text-ink shadow"
-                                  : "text-cornsilk/65 hover:text-cornsilk"
-                              }`}
-                              onClick={() => setMinimumRating(val)}
-                              type="button"
-                            >
-                              {val.toFixed(1)}★
-                            </button>
-                          ))}
-                        </div>
-
-                        <div className="relative">
-                          <button
-                            className="flex h-9 min-w-32 items-center justify-between gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-white/20 hover:text-cornsilk"
-                            onClick={() => setIsGenreFilterOpen((open) => !open)}
-                            type="button"
-                          >
-                            <span className="truncate">{genreFilterLabel}</span>
-                            <span className="text-cornsilk/45">▼</span>
-                          </button>
-                          {isGenreFilterOpen && (
-                            <div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border border-cornsilk/10 bg-ink p-2 shadow-2xl">
-                              <div className="flex items-center justify-between gap-2 border-b border-cornsilk/10 px-2 pb-2">
-                                <span className="text-xs font-extrabold text-cornsilk">Genres</span>
-                                {selectedGenres.length > 0 && (
-                                  <button
-                                    className="text-xs font-bold text-pine transition hover:text-chartreuse"
-                                    onClick={() => setSelectedGenres([])}
-                                    type="button"
-                                  >
-                                    Clear
-                                  </button>
-                                )}
-                              </div>
-                              <div className="max-h-64 overflow-y-auto py-1">
-                                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]">
-                                  <input
-                                    checked={selectedGenres.length === 0}
-                                    className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                                    onChange={() => setSelectedGenres([])}
-                                    type="checkbox"
-                                  />
-                                  All genres
-                                </label>
-                                {genreOptions.length === 0 ? (
-                                  <p className="px-2 py-3 text-xs leading-relaxed text-cornsilk/55">
-                                    Cached genres will appear after metadata refresh.
-                                  </p>
-                                ) : (
-                                  genreOptions.map((genre) => (
-                                    <label
-                                      key={genre}
-                                      className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]"
-                                    >
-                                      <input
-                                        checked={selectedGenres.includes(genre)}
-                                        className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                                        onChange={(e) =>
-                                          setSelectedGenres((current) =>
-                                            e.target.checked
-                                              ? [...new Set([...current, genre])]
-                                              : current.filter((item) => item !== genre),
-                                          )
-                                        }
-                                        type="checkbox"
-                                      />
-                                      <span className="truncate">{genre}</span>
-                                    </label>
-                                  ))
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </>
-                    )}
-
-                    <label className="flex h-9 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3">
-                      <input
-                        checked={hideAdded}
-                        className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                        onChange={(e) => setHideAdded(e.target.checked)}
-                        type="checkbox"
-                      />
-                      <span className="text-xs font-bold text-cornsilk/70 whitespace-nowrap">Hide in Radarr</span>
-                    </label>
+                <div className="flex min-w-0 flex-[0_1_auto] flex-wrap items-center gap-2 sm:gap-3">
+                  <div className="relative max-w-full flex-[0_1_14rem]">
+                    <select
+                      aria-label="Reviewer scope"
+                      className="h-10 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 pr-8 text-xs font-bold text-cornsilk focus:outline-none focus:ring-2 focus:ring-gold/30"
+                      value={scopeSelection}
+                      onChange={(event) => {
+                        setScopeSelection(event.target.value as ScopeSelection);
+                        setHasAutoFetched(false);
+                      }}
+                    >
+                      <option value="all">All enabled groups</option>
+                      {reviewers.map((reviewer) => (
+                        <option key={reviewer.handle} value={`reviewer:${reviewer.handle}`}>
+                          @{reviewer.handle}
+                        </option>
+                      ))}
+                      {reviewerGroups.map((group) => (
+                        <option key={group.id} value={`group:${group.id}`}>
+                          Group: {group.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
+                  {currentScope.type === "group" ? (
+                    <span className="flex h-10 flex-[0_0_auto] items-center rounded-[var(--radius-control)] border border-pine/20 bg-pine/10 px-3 text-xs font-bold text-chartreuse">
+                      Using group filters
+                    </span>
+                  ) : (
+                    <>
+                      <span className="group relative flex h-10 flex-[0_0_auto] items-center gap-1.5">
+                        <label className="text-xs font-bold uppercase tracking-wider text-cornsilk/55">
+                          Min. rating ≥
+                        </label>
+                        <span className="text-cornsilk/45 transition-colors hover:text-cornsilk/80" tabIndex={0}>
+                          <InfoIcon className="h-3.5 w-3.5" />
+                        </span>
+                        <span
+                          className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-60 rounded-lg border border-cornsilk/10 bg-ink px-3 py-2 text-[11px] font-medium leading-relaxed text-cornsilk/80 opacity-0 shadow-xl transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
+                          role="tooltip"
+                        >
+                          Filter which movies appear in the grid. Auto-sync to Radarr uses thresholds in Sync groups.
+                        </span>
+                      </span>
+                      <div className="flex min-h-10 flex-[0_1_auto] flex-wrap rounded-[var(--radius-control)] border border-white/10 bg-black/20 p-0.5">
+                        <button
+                          className={`h-9 rounded-md px-2.5 text-xs font-bold transition-all sm:px-3 ${
+                            minimumRating === 0 ? "bg-pine text-ink shadow" : "text-cornsilk/65 hover:text-cornsilk"
+                          }`}
+                          onClick={() => setMinimumRating(0)}
+                          type="button"
+                        >
+                          All
+                        </button>
+                        {[3.0, 3.5, 4.0, 4.5, 5.0].map((val) => (
+                          <button
+                            key={val}
+                            className={`h-9 rounded-md px-2.5 text-xs font-bold transition-all sm:px-3 ${
+                              minimumRating === val
+                                ? "bg-pine text-ink shadow"
+                                : "text-cornsilk/65 hover:text-cornsilk"
+                            }`}
+                            onClick={() => setMinimumRating(val)}
+                            type="button"
+                          >
+                            {val.toFixed(1)}★
+                          </button>
+                        ))}
+                      </div>
 
+                      <div className="relative max-w-full flex-[0_1_10rem]">
+                        <button
+                          className="flex h-10 w-full min-w-32 items-center justify-between gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-white/20 hover:text-cornsilk"
+                          onClick={() => setIsGenreFilterOpen((open) => !open)}
+                          type="button"
+                        >
+                          <span className="truncate">{genreFilterLabel}</span>
+                          <span className="text-cornsilk/45">▼</span>
+                        </button>
+                        {isGenreFilterOpen && (
+                          <div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border border-cornsilk/10 bg-ink p-2 shadow-2xl">
+                            <div className="flex items-center justify-between gap-2 border-b border-cornsilk/10 px-2 pb-2">
+                              <span className="text-xs font-extrabold text-cornsilk">Genres</span>
+                              {selectedGenres.length > 0 && (
+                                <button
+                                  className="text-xs font-bold text-pine transition hover:text-chartreuse"
+                                  onClick={() => setSelectedGenres([])}
+                                  type="button"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                            </div>
+                            <div className="max-h-64 overflow-y-auto py-1">
+                              <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]">
+                                <input
+                                  checked={selectedGenres.length === 0}
+                                  className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                                  onChange={() => setSelectedGenres([])}
+                                  type="checkbox"
+                                />
+                                All genres
+                              </label>
+                              {genreOptions.length === 0 ? (
+                                <p className="px-2 py-3 text-xs leading-relaxed text-cornsilk/55">
+                                  Cached genres will appear after metadata refresh.
+                                </p>
+                              ) : (
+                                genreOptions.map((genre) => (
+                                  <label
+                                    key={genre}
+                                    className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]"
+                                  >
+                                    <input
+                                      checked={selectedGenres.includes(genre)}
+                                      className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                                      onChange={(e) =>
+                                        setSelectedGenres((current) =>
+                                          e.target.checked
+                                            ? [...new Set([...current, genre])]
+                                            : current.filter((item) => item !== genre),
+                                        )
+                                      }
+                                      type="checkbox"
+                                    />
+                                    <span className="truncate">{genre}</span>
+                                  </label>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  <label className="flex h-10 flex-[0_0_auto] cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3">
+                    <input
+                      checked={hideAdded}
+                      className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                      onChange={(e) => setHideAdded(e.target.checked)}
+                      type="checkbox"
+                    />
+                    <span className="text-xs font-bold text-cornsilk/70 whitespace-nowrap">Hide in Radarr</span>
+                  </label>
+                </div>
+
+                <div className="min-w-[min(100%,260px)] flex-[1_1_280px] lg:ml-auto lg:max-w-sm xl:max-w-md">
                   <input
                     aria-label="Search movies"
-                    className="h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25 lg:w-64 xl:w-80"
-                    placeholder="Search movies, year, reviewer, or genre…"
+                    className="h-10 w-full min-w-0 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
+                    placeholder="Search movies, year, reviewer, or group"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />

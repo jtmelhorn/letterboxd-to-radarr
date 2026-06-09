@@ -71,6 +71,11 @@ export interface AddMovieResult {
   movie?: { title: string; year: number; tmdbId: number; radarrMovieId?: number | null };
 }
 
+export interface ExistingRadarrMovieLookupInput {
+  tmdbId?: number | null;
+  imdbId?: string | null;
+}
+
 export class RadarrError extends Error {
   httpStatus: number;
   constructor(message: string, httpStatus: number) {
@@ -314,6 +319,22 @@ async function findExistingRadarrMovie(
     return movies.find((movie) => movie.imdbId === input.imdbId && typeof movie.id === "number") ?? null;
   }
   return null;
+}
+
+export async function resolveExistingRadarrMovieId(
+  target: ResolvedRadarrTarget,
+  input: ExistingRadarrMovieLookupInput,
+): Promise<number | null> {
+  const baseUrl = normalizeRadarrUrl(target.baseUrl);
+  if (!baseUrl || !target.apiKey) return null;
+
+  const existing = await findExistingRadarrMovie(baseUrl, target.apiKey, {
+    tmdbId: input.tmdbId ?? null,
+    imdbId: input.imdbId ?? null,
+  });
+  return typeof existing?.id === "number" && Number.isInteger(existing.id) && existing.id > 0
+    ? existing.id
+    : null;
 }
 
 /**

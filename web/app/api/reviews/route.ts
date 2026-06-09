@@ -5,7 +5,7 @@ import { isValidHandle } from "@/app/lib/letterboxd";
 import { getAggregatedMovies } from "@/app/lib/repos/aggregatedReviews";
 import { getOrCreateUser } from "@/app/lib/repos/users";
 import { reviewerScopeFromSearchParams } from "@/app/lib/reviewerScope";
-import { refreshScopeReviews, syncRefreshedScope } from "@/app/lib/sync";
+import { refreshScopeReviews } from "@/app/lib/sync";
 
 export const runtime = "nodejs";
 
@@ -29,8 +29,7 @@ export async function GET(request: Request) {
 
   if (refresh) {
     try {
-      const fetched = await refreshScopeReviews(scope);
-      await syncRefreshedScope(scope, { auto: true }, fetched);
+      await refreshScopeReviews(scope);
     } catch (error) {
       console.error("Failed to refresh Letterboxd reviews", error);
       const cached = getAggregatedMovies(scope);

@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 
 import { isRequestAuthorized } from "@/app/lib/auth";
-import { addMovie, deleteMovieByRadarrId } from "@/app/lib/radarr";
+import { addMovie, deleteMovieByRadarrId, resolveExistingRadarrMovieId } from "@/app/lib/radarr";
 import { addToBlocklist } from "@/app/lib/repos/movieBlocklist";
 import { getReviewById } from "@/app/lib/repos/reviews";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
-import { getLatestSyncResultForFilmId, recordSyncResult } from "@/app/lib/repos/syncResults";
+import {
+  getLatestRadarrMovieIdForFilmId,
+  getLatestSyncResultForFilmId,
+  recordSyncResult,
+} from "@/app/lib/repos/syncResults";
 import { canonicalFilmGuid } from "@/app/lib/filmIdentity";
 import type { RadarrAddRequest, RadarrAddResponse } from "@/app/types/movie";
 
@@ -121,12 +125,17 @@ export async function DELETE(request: Request) {
   const blockFutureSync = body.blockFutureSync ?? true;
   const filmId = canonicalFilmGuid(review);
   const latestSync = getLatestSyncResultForFilmId(filmId);
-  const radarrMovieId = latestSync?.radarrMovieId ?? null;
+  const radarrMovieId =
+    latestSync?.radarrMovieId ??
+    getLatestRadarrMovieIdForFilmId(filmId) ??
+    (await resolveExistingRadarrMovieId(target, {
+      tmdbId: review.tmdbMovieId ?? latestSync?.radarrTmdbId ?? null,
+    }));
   if (!radarrMovieId) {
     return NextResponse.json(
       {
         message:
-          "Cannot safely remove this movie because this app does not have the exact Radarr movie ID. Re-sync the movie first, then try again.",
+          "Cannot safely remove this movie because this app could not find an exact matching Radarr movie ID.",
       },
       { status: 409 },
     );

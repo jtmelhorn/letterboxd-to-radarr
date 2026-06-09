@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 
 import { isRequestAuthorized } from "@/app/lib/auth";
-import { deleteMovieByRadarrId } from "@/app/lib/radarr";
+import { deleteMovieByRadarrId, resolveExistingRadarrMovieId } from "@/app/lib/radarr";
 import { addToBlocklist } from "@/app/lib/repos/movieBlocklist";
 import { getAggregatedMovies } from "@/app/lib/repos/aggregatedReviews";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
-import { getLatestSyncResultForFilmId, recordSyncResult } from "@/app/lib/repos/syncResults";
+import {
+  getLatestRadarrMovieIdForFilmId,
+  getLatestSyncResultForFilmId,
+  recordSyncResult,
+} from "@/app/lib/repos/syncResults";
 
 export const runtime = "nodejs";
 
@@ -35,18 +39,8 @@ export async function POST(request: Request, context: RouteContext) {
   const latestSync = getLatestSyncResultForFilmId(filmId);
   const representativeReview = movie.reviews[0];
   const reviewId = latestSync?.reviewId ?? representativeReview?.id ?? null;
-  const radarrMovieId = latestSync?.radarrMovieId ?? null;
   if (!reviewId) {
     return NextResponse.json({ message: "Unable to resolve a stored review for this movie." }, { status: 400 });
-  }
-  if (!radarrMovieId) {
-    return NextResponse.json(
-      {
-        message:
-          "Cannot safely remove this movie because this app does not have the exact Radarr movie ID. Re-sync the movie first, then try again.",
-      },
-      { status: 409 },
-    );
   }
 
   const target = getRadarrTarget();
@@ -54,6 +48,23 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json(
       { message: "Configure the Radarr Base URL and API key in Settings first." },
       { status: 400 },
+    );
+  }
+
+  const radarrMovieId =
+    latestSync?.radarrMovieId ??
+    getLatestRadarrMovieIdForFilmId(filmId) ??
+    (await resolveExistingRadarrMovieId(target, {
+      tmdbId: movie.tmdbMovieId ?? latestSync?.radarrTmdbId ?? null,
+      imdbId: movie.imdbId ?? null,
+    }));
+  if (!radarrMovieId) {
+    return NextResponse.json(
+      {
+        message:
+          "Cannot safely remove this movie because this app could not find an exact matching Radarr movie ID.",
+      },
+      { status: 409 },
     );
   }
 

@@ -416,7 +416,7 @@ describeWithSqlite("sync filtering", () => {
     expect(addedTitles.sort()).toEqual(["Action Future", "Action Past", "Future Doc"]);
   });
 
-  it("runs freshly pulled reviews through sync groups from the reviews refresh endpoint", async () => {
+  it("refreshes reviews without Radarr add side effects and keeps POST sync as the add path", async () => {
     let addCalls = 0;
     const addedTitles: string[] = [];
     vi.stubGlobal(
@@ -464,6 +464,7 @@ describeWithSqlite("sync filtering", () => {
     const { saveSettings } = await import("@/app/lib/repos/settings");
     const { getRecentSyncResults } = await import("@/app/lib/repos/syncResults");
     const { GET } = await import("@/app/api/reviews/route");
+    const { POST: syncPost } = await import("@/app/api/sync/route");
 
     getOrCreateUser("alice");
     saveSettings({
@@ -472,7 +473,7 @@ describeWithSqlite("sync filtering", () => {
       qualityProfileId: 1,
       rootFolderPath: "/movies",
     });
-    upsertReviewerGroup({
+    const group = upsertReviewerGroup({
       name: "Action fans",
       ratingThreshold: 4,
       syncInterval: "1d",
@@ -496,10 +497,30 @@ describeWithSqlite("sync filtering", () => {
     };
 
     expect(response.status).toBe(200);
+    expect(addCalls).toBe(0);
+    expect(addedTitles).toEqual([]);
+    expect(body.reviews?.find((movie) => movie.title === "Action Future")?.status).not.toBe("added");
+    expect(body.reviews?.find((movie) => movie.title === "Future Doc")?.status).not.toBe("added");
+    expect(getRecentSyncResults(undefined, 10).filter((result) => result.status === "added")).toHaveLength(
+      0,
+    );
+
+    const syncResponse = await syncPost(
+      new Request("http://localhost/api/sync", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          cookie: `${SESSION_COOKIE}=${encodeURIComponent(buildSessionToken())}`,
+        },
+        body: JSON.stringify({ scope: "group", groupId: group.id }),
+      }),
+    );
+    const syncBody = (await syncResponse.json()) as { added?: number };
+
+    expect(syncResponse.status).toBe(200);
+    expect(syncBody.added).toBe(1);
     expect(addCalls).toBe(1);
     expect(addedTitles).toEqual(["Action Future"]);
-    expect(body.reviews?.find((movie) => movie.title === "Action Future")?.status).toBe("added");
-    expect(body.reviews?.find((movie) => movie.title === "Future Doc")?.status).not.toBe("added");
     expect(getRecentSyncResults(undefined, 10).filter((result) => result.status === "added")).toHaveLength(
       1,
     );
@@ -725,6 +746,81 @@ describeWithSqlite("sync filtering", () => {
     expect(deleteUrl).toBe("http://radarr.local/api/v3/movie/777");
     expect(getAggregatedMovies(undefined, { onlySynced: true })).toHaveLength(0);
     expect(listBlocklistedMovies()).toHaveLength(0);
+  });
+
+  it("recovers the exact Radarr id by TMDB lookup before removing when sync history is missing it", async () => {
+    let lookupUrl = "";
+    let deleteUrl = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const request = input instanceof Request ? input : null;
+        const url = request?.url ?? String(input);
+        const method = init?.method ?? request?.method ?? "GET";
+        if (method === "GET" && url === "http://radarr.local/api/v3/movie?tmdbId=703") {
+          lookupUrl = url;
+          return Response.json([{ id: 780, title: "Lookup Delete", year: 2026, tmdbId: 703 }]);
+        }
+        if (method === "DELETE" && url.startsWith("http://radarr.local/api/v3/movie/780")) {
+          deleteUrl = url;
+          return new Response(null, { status: 200 });
+        }
+        return Response.json({ message: `Unexpected request: ${method} ${url}` }, { status: 500 });
+      }),
+    );
+
+    const { buildSessionToken, SESSION_COOKIE } = await import("@/app/lib/auth");
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviews } = await import("@/app/lib/repos/reviews");
+    const { saveSettings } = await import("@/app/lib/repos/settings");
+    const { getRecentSyncResults, recordSyncResult } = await import("@/app/lib/repos/syncResults");
+    const { getAggregatedMovies } = await import("@/app/lib/repos/aggregatedReviews");
+    const { POST } = await import("@/app/api/movies/[id]/remove/route");
+
+    const user = getOrCreateUser("alice");
+    upsertReviews(user.id, [
+      {
+        title: "Lookup Delete",
+        year: 2026,
+        rating: 5,
+        letterboxdUrl: "https://letterboxd.com/alice/film/lookup-delete/",
+        tmdbMovieId: 703,
+      },
+    ]);
+    const movie = getAggregatedMovies()[0];
+    recordSyncResult({
+      reviewId: movie.reviews[0]!.id,
+      status: "exists",
+      radarrTmdbId: 703,
+      radarrMovieId: null,
+      message: "Already exists in Radarr.",
+      auto: false,
+    });
+    saveSettings({
+      radarrUrl: "http://radarr.local",
+      radarrApiKey: "secret",
+      qualityProfileId: 1,
+      rootFolderPath: "/movies",
+    });
+
+    const response = await POST(
+      new Request(`http://localhost/api/movies/${encodeURIComponent(movie.id)}/remove`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          cookie: `${SESSION_COOKIE}=${encodeURIComponent(buildSessionToken())}`,
+        },
+        body: JSON.stringify({ deleteFiles: false, blockFutureSync: false }),
+      }),
+      { params: Promise.resolve({ id: encodeURIComponent(movie.id) }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(lookupUrl).toBe("http://radarr.local/api/v3/movie?tmdbId=703");
+    expect(deleteUrl).toBe("http://radarr.local/api/v3/movie/780");
+    expect(getRecentSyncResults(undefined, 1)).toEqual([
+      expect.objectContaining({ status: "removed", radarrMovieId: 780 }),
+    ]);
   });
 
   it("passes explicit deleteFiles and blocklists after removal", async () => {
