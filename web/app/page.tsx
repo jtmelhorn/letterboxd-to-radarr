@@ -790,6 +790,7 @@ export default function Home() {
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
   const [activitySeenAt, setActivitySeenAt] = useState(() => Date.now());
   const [isActivityOpen, setIsActivityOpen] = useState(false);
+  const [isClearActivityConfirmOpen, setIsClearActivityConfirmOpen] = useState(false);
 
   const isDesktop = useMediaQuery("(min-width: 640px)");
 
@@ -962,7 +963,10 @@ export default function Home() {
   const clearActivity = useCallback(async () => {
     try {
       const res = await fetch(`/api/sync?${scopeQuery()}`, { method: "DELETE" });
-      if (res.ok) setActivityLog([]);
+      if (res.ok) {
+        setActivityLog([]);
+        setIsClearActivityConfirmOpen(false);
+      }
     } catch {
       // non-fatal
     }
@@ -2843,7 +2847,7 @@ export default function Home() {
                   <button
                     aria-label="Clear activity"
                     className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-control)] border border-cornsilk/10 bg-white/[0.035] text-cornsilk/60 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300"
-                    onClick={() => void clearActivity()}
+                    onClick={() => setIsClearActivityConfirmOpen(true)}
                     type="button"
                   >
                     <TrashIcon className="h-4 w-4" />
@@ -3106,6 +3110,35 @@ export default function Home() {
               )}
             </div>
           </aside>
+        </div>
+      )}
+
+      {/* ── Clear activity confirmation dialog ────────────────────────────── */}
+      {isClearActivityConfirmOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="glass-modal w-full max-w-sm rounded-[var(--radius-card)] border border-cornsilk/10 p-5 shadow-2xl">
+            <h3 className="text-base font-extrabold text-cornsilk">Clear activity?</h3>
+            <p className="mt-2 text-sm text-cornsilk/70">
+              This clears the visible sync history. Movies already sent to Radarr will not be re-added.
+            </p>
+
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                className="h-9 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-4 text-xs font-bold text-cornsilk/70 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-cornsilk"
+                onClick={() => setIsClearActivityConfirmOpen(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="h-9 rounded-[var(--radius-control)] bg-rose-500 px-4 text-xs font-bold text-white transition hover:bg-rose-600"
+                onClick={() => void clearActivity()}
+                type="button"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

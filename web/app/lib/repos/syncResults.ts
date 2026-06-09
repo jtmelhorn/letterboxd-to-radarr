@@ -1,4 +1,4 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "@/app/lib/db";
 import { reviews, syncResults } from "@/app/lib/db/schema";
@@ -205,26 +205,64 @@ export function isSyncMovieStatus(status: string): status is SyncMovieStatus {
   );
 }
 
+function reviewIdsSql(reviewIds: number[]) {
+  return sql.join(reviewIds.map((id) => sql`${id}`), sql`, `);
+}
+
+function stateRowKeepSubquery(reviewIds?: number[]) {
+  const scopedReviews =
+    reviewIds && reviewIds.length > 0
+      ? sql`AND review_id IN (${reviewIdsSql(reviewIds)})`
+      : sql``;
+
+  return sql`
+    SELECT id FROM (
+      SELECT
+        id,
+        ROW_NUMBER() OVER (
+          PARTITION BY film_id
+          ORDER BY
+            CASE
+              WHEN status IN ('added', 'exists', 'removed', 'blocklisted', 'failed_remove') THEN 0
+              ELSE 1
+            END,
+            created_at DESC,
+            id DESC
+        ) AS state_rank
+      FROM sync_results
+      WHERE film_id IS NOT NULL
+      ${scopedReviews}
+    )
+    WHERE state_rank = 1
+  `;
+}
+
 export function clearSyncResultsForUser(userId: number): number {
   const db = getDb();
   const reviewRows = db.select({ id: reviews.id }).from(reviews).where(eq(reviews.userId, userId)).all();
   if (reviewRows.length === 0) return 0;
+  const reviewIds = reviewRows.map((row) => row.id);
+  const reviewScope = reviewIdsSql(reviewIds);
 
-  const result = db
-    .delete(syncResults)
-    .where(
-      inArray(
-        syncResults.reviewId,
-        reviewRows.map((row) => row.id),
-      ),
-    )
-    .run();
-
-  return result.changes ?? 0;
+  return db.transaction((tx) => {
+    const result = tx
+      .delete(syncResults)
+      .where(sql`
+        ${syncResults.reviewId} IN (${reviewScope})
+        AND ${syncResults.id} NOT IN (${stateRowKeepSubquery(reviewIds)})
+      `)
+      .run();
+    return result.changes ?? 0;
+  });
 }
 
 export function clearAllSyncResults(): number {
   const db = getDb();
-  const result = db.delete(syncResults).run();
-  return result.changes ?? 0;
+  return db.transaction((tx) => {
+    const result = tx
+      .delete(syncResults)
+      .where(sql`${syncResults.id} NOT IN (${stateRowKeepSubquery()})`)
+      .run();
+    return result.changes ?? 0;
+  });
 }

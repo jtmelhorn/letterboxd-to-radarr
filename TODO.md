@@ -264,7 +264,9 @@ Rejected films stay rejected for that group until the user explicitly resets the
 
 ---
 
-### [ ] P0-6: Stop "Clear activity" from destroying sync state
+### [x] P0-6: Stop "Clear activity" from destroying sync state
+
+> **Completed:** 2026-06-09 — dev / no PR — Preserved the latest durable state row per film instead of the raw latest row so P0-4 success-over-transient-error semantics and Radarr ids survive clears; local SQLite-backed Vitest suites were skipped by the existing harness.
 
 **Problem:**
 The activity panel's trash button calls `DELETE /api/sync`, which runs `clearAllSyncResults()` / `clearSyncResultsForUser()` (`web/app/lib/repos/syncResults.ts`). But `sync_results` is also (a) the idempotency ledger — candidate selection in `sync.ts` skips films whose status is `added`/`exists`/`failed_remove` — and (b) the only place `radarrMovieId` is stored, which removal requires (`getLatestSyncResultForFilmId`). Clearing the "log" makes every previously-added movie a re-add candidate on the next sync and breaks "Remove from Radarr" ("Cannot safely remove… Re-sync the movie first").

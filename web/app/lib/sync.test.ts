@@ -505,6 +505,77 @@ describeWithSqlite("sync filtering", () => {
     );
   });
 
+  it("does not re-add movies after activity is cleared", async () => {
+    let addCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const request = input instanceof Request ? input : null;
+        const url = request?.url ?? String(input);
+        const method = init?.method ?? request?.method ?? "GET";
+
+        if (url === "https://letterboxd.com/alice/rss/") {
+          return new Response(rss, {
+            status: 200,
+            headers: { "Content-Type": "application/rss+xml" },
+          });
+        }
+
+        if (url.startsWith("http://radarr.local/api/v3/movie/lookup")) {
+          const term = new URL(url).searchParams.get("term") ?? "";
+          const tmdbId = term.startsWith("tmdb:") ? term.slice("tmdb:".length) : "100";
+          const movie = lookupMovies.get(tmdbId);
+          return Response.json(movie ? [movie] : []);
+        }
+
+        if (url === "http://radarr.local/api/v3/movie" && method === "POST") {
+          addCalls += 1;
+          return Response.json({ id: 800 + addCalls }, { status: 201 });
+        }
+
+        return Response.json({ message: `Unexpected request: ${method} ${url}` }, { status: 500 });
+      }),
+    );
+
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+    const { saveSettings } = await import("@/app/lib/repos/settings");
+    const { clearAllSyncResults, latestFilmStatuses } = await import("@/app/lib/repos/syncResults");
+    const { runSyncScope } = await import("@/app/lib/sync");
+
+    getOrCreateUser("alice");
+    saveSettings({
+      radarrUrl: "http://radarr.local",
+      radarrApiKey: "secret",
+      qualityProfileId: 1,
+      rootFolderPath: "/movies",
+    });
+    const group = upsertReviewerGroup({
+      name: "Action fans",
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: false,
+      filters: {
+        year: { mode: "exact", exactYear: 2026 },
+        genres: { include: [], exclude: ["Documentary"] },
+      },
+      reviewerHandles: ["alice"],
+    });
+
+    const first = await runSyncScope({ type: "group", groupId: group.id }, { auto: true });
+    expect(first.added).toBe(1);
+    expect(addCalls).toBe(1);
+
+    expect(clearAllSyncResults()).toBeGreaterThan(0);
+    expect(latestFilmStatuses(["film:action-future"])).toEqual(
+      new Map([["film:action-future", "added"]]),
+    );
+
+    const second = await runSyncScope({ type: "group", groupId: group.id }, { auto: true });
+    expect(second.added).toBe(0);
+    expect(addCalls).toBe(1);
+  });
+
   it("adds both 2026 films when a group has no genre exclusions", async () => {
     const addedTitles: string[] = [];
     vi.stubGlobal(

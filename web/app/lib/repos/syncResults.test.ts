@@ -108,4 +108,53 @@ describeWithSqlite("film-level sync result status", () => {
       new Map([["film:shared-film", "added"]]),
     );
   });
+
+  it("preserves durable film state and Radarr ids when activity is cleared", async () => {
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviews, getReviewRows } = await import("@/app/lib/repos/reviews");
+    const {
+      clearAllSyncResults,
+      getLatestRadarrMovieIdForFilmId,
+      getLatestSyncResultForFilmId,
+      getRecentSyncResults,
+      latestFilmStatuses,
+      recordSyncResult,
+    } = await import("@/app/lib/repos/syncResults");
+
+    const user = getOrCreateUser("alice");
+    upsertReviews(user.id, [
+      {
+        title: "Safe Clear",
+        year: 2026,
+        rating: 5,
+        letterboxdUrl: "https://letterboxd.com/alice/film/safe-clear/",
+      },
+    ]);
+    const review = getReviewRows(user.id)[0]!;
+
+    recordSyncResult({
+      reviewId: review.id,
+      status: "added",
+      radarrTmdbId: 1234,
+      radarrMovieId: 9876,
+      message: "Added to Radarr.",
+      auto: true,
+    });
+    recordSyncResult({
+      reviewId: review.id,
+      status: "error",
+      message: "Later transient error.",
+      auto: true,
+    });
+
+    expect(clearAllSyncResults()).toBe(1);
+    expect(latestFilmStatuses(["film:safe-clear"])).toEqual(
+      new Map([["film:safe-clear", "added"]]),
+    );
+    expect(getLatestSyncResultForFilmId("film:safe-clear")?.radarrMovieId).toBe(9876);
+    expect(getLatestRadarrMovieIdForFilmId("film:safe-clear")).toBe(9876);
+    expect(getRecentSyncResults(undefined, 10)).toEqual([
+      expect.objectContaining({ title: "Safe Clear", status: "added", radarrMovieId: 9876 }),
+    ]);
+  });
 });
