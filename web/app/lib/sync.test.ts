@@ -978,7 +978,82 @@ describeWithSqlite("sync filtering", () => {
     expect(isMovieBlocklisted({ tmdbId: 800, title: "Anything", year: 1999 })).toBe(true);
     expect(isMovieBlocklisted({ imdbId: "tt1234567", title: "Anything", year: 1999 })).toBe(true);
     expect(isMovieBlocklisted({ title: "fallback block", year: 2024 })).toBe(true);
-    expect(isMovieBlocklisted({ tmdbId: 801, title: "Fallback Block", year: 2024 })).toBe(false);
+    // A candidate carrying a tmdbId must still match rows stored without one.
+    expect(isMovieBlocklisted({ tmdbId: 801, title: "Fallback Block", year: 2024 })).toBe(true);
+    expect(isMovieBlocklisted({ tmdbId: 801, title: "Unrelated Film", year: 2024 })).toBe(false);
+  });
+
+  it("skips a sync candidate whose blocklist row lacks the candidate's identifiers", async () => {
+    let addCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const request = input instanceof Request ? input : null;
+        const url = request?.url ?? String(input);
+        const method = init?.method ?? request?.method ?? "GET";
+
+        if (url === "https://letterboxd.com/alice/rss/") {
+          return new Response(rss, {
+            status: 200,
+            headers: { "Content-Type": "application/rss+xml" },
+          });
+        }
+        if (url.startsWith("http://radarr.local/api/v3/movie/lookup")) {
+          const term = new URL(url).searchParams.get("term") ?? "";
+          const tmdbId = term.startsWith("tmdb:") ? term.slice("tmdb:".length) : "100";
+          const movie = lookupMovies.get(tmdbId);
+          return Response.json(movie ? [movie] : []);
+        }
+        if (url === "http://radarr.local/api/v3/movie" && method === "POST") {
+          addCalls += 1;
+          return Response.json({ id: addCalls }, { status: 201 });
+        }
+        return Response.json({ message: `Unexpected request: ${method} ${url}` }, { status: 500 });
+      }),
+    );
+
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { getDb } = await import("@/app/lib/db");
+    const { radarrTargets } = await import("@/app/lib/db/schema");
+    const { upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+    const { saveSettings } = await import("@/app/lib/repos/settings");
+    const { addToBlocklist } = await import("@/app/lib/repos/movieBlocklist");
+    const { runSyncScope } = await import("@/app/lib/sync");
+
+    getOrCreateUser("alice");
+    saveSettings({
+      radarrUrl: "http://radarr.local",
+      radarrApiKey: "secret",
+      qualityProfileId: 1,
+      rootFolderPath: "/movies",
+    });
+    getDb().update(radarrTargets).set({ autoFetchMetadata: false }).run();
+    const group = upsertReviewerGroup({
+      name: "All films",
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: false,
+      reviewerHandles: ["alice"],
+    });
+
+    // Blocked without a tmdbId; the RSS candidate carries tmdb:100.
+    addToBlocklist({
+      title: "Action Future",
+      year: 2026,
+      filmId: "film:action-future",
+      source: "manually_blocked",
+    });
+
+    const summary = await runSyncScope({ type: "group", groupId: group.id }, { auto: true });
+
+    expect(summary.skipped).toBe(1);
+    expect(summary.added).toBe(2);
+    expect(addCalls).toBe(2);
+    expect(
+      summary.results.some(
+        (result) => result.title === "Action Future" && result.message.includes("blocklisted"),
+      ),
+    ).toBe(true);
   });
 
   it("refuses to approve a pending movie when it is blocklisted", async () => {

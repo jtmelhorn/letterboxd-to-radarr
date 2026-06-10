@@ -148,7 +148,7 @@ export async function DELETE(request: Request) {
   if (result.status === "deleted" || result.status === "not_found") {
     if (blockFutureSync) {
       addToBlocklist({
-        tmdbId: review.tmdbMovieId,
+        tmdbId: review.tmdbMovieId ?? latestSync?.radarrTmdbId ?? null,
         radarrMovieId,
         title: review.title,
         year: review.year,

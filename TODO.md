@@ -440,7 +440,9 @@ A reconcile action (manual button + optional scheduled tail) that compares recor
 
 ---
 
-### [ ] P1-2: Close the blocklist identifier-matching hole
+### [x] P1-2: Close the blocklist identifier-matching hole
+
+> **Completed:** 2026-06-10 — dev / no PR — Updated one existing sync.test.ts assertion that pinned the old gated behavior (tmdbId-carrying candidate vs title/year-only row is now blocked, per spec); local SQLite-backed Vitest suites were skipped by the existing harness.
 
 **Problem:**
 `isMovieBlocklisted` (`web/app/lib/repos/movieBlocklist.ts`) checks `filmId` and normalized title+year **only when the candidate has no tmdbId and no imdbId** (`if (!input.tmdbId && !imdbId && ...)`). A candidate that *has* a tmdbId is never matched against a blocklist row stored *without* one. The `/api/radarr` DELETE path stores only `review.tmdbMovieId` (often null) and ignores the known `latestSync.radarrTmdbId`, so such rows exist. Result: blocked movies can be silently re-added.

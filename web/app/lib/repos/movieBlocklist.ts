@@ -31,7 +31,11 @@ export function isMovieBlocklisted(input: {
     if (row) return true;
   }
 
-  if (!input.tmdbId && !imdbId && input.filmId) {
+  // Always fall through to the weaker identifiers: a blocklist row may have
+  // been stored with fewer identifiers than the candidate carries (e.g. a row
+  // without a tmdbId must still block a candidate whose refreshed RSS now has
+  // one).
+  if (input.filmId) {
     const row = db
       .select({ id: movieBlocklist.id })
       .from(movieBlocklist)
@@ -40,7 +44,9 @@ export function isMovieBlocklisted(input: {
     if (row) return true;
   }
 
-  if (!input.tmdbId && !imdbId && input.title && typeof input.year === "number") {
+  // Lowest priority on purpose: normalized title+year can collide for
+  // same-year remakes, so explicit identifiers are checked first.
+  if (input.title && typeof input.year === "number") {
     const row = db
       .select({ id: movieBlocklist.id })
       .from(movieBlocklist)
