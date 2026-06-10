@@ -213,7 +213,7 @@ function syncResultToActivity(item: SyncResultItem): ActivityEntry {
         ? "skipped"
         : item.status === "exists"
           ? "exists"
-          : item.status === "removed"
+          : item.status === "removed" || item.status === "missing_in_radarr"
             ? "removed"
             : item.status === "blocklisted"
               ? "blocklisted"
@@ -788,6 +788,10 @@ export default function Home() {
   const [deleteFiles, setDeleteFiles] = useState(false);
   const [blockFutureSync, setBlockFutureSync] = useState(true);
   const [syncedSearch, setSyncedSearch] = useState("");
+  const [isReconciling, setIsReconciling] = useState(false);
+  const [reconcileResult, setReconcileResult] = useState<{ message: string; error: boolean } | null>(
+    null,
+  );
   const [activitySearch, setActivitySearch] = useState("");
   const [pendingSearch, setPendingSearch] = useState("");
   const [blocklistSearch, setBlocklistSearch] = useState("");
@@ -1059,6 +1063,43 @@ export default function Home() {
       // non-fatal
     }
   }, [currentScope.type, scopeQuery]);
+
+  const reconcileSyncedMovies = useCallback(async () => {
+    setIsReconciling(true);
+    setReconcileResult(null);
+    try {
+      const res = await fetch("/api/radarr/reconcile", { method: "POST" });
+      const body = (await res.json().catch(() => null)) as
+        | { checked?: number; missing?: number; message?: string }
+        | null;
+      if (res.status === 401) {
+        setBootPhase("needsLogin");
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(apiMessage(body, "Unable to verify the library against Radarr."));
+      }
+      const checked = body?.checked ?? 0;
+      const missing = body?.missing ?? 0;
+      setReconcileResult({
+        message:
+          missing > 0
+            ? `Verified ${checked} synced ${checked === 1 ? "movie" : "movies"}: ${missing} removed in Radarr.`
+            : `Verified ${checked} synced ${checked === 1 ? "movie" : "movies"}: all present in Radarr.`,
+        error: false,
+      });
+      if (missing > 0) {
+        await Promise.all([loadSyncedMovies(), loadActivity(), loadReviews(false)]);
+      }
+    } catch (err) {
+      setReconcileResult({
+        message: err instanceof Error ? err.message : "Unable to verify the library against Radarr.",
+        error: true,
+      });
+    } finally {
+      setIsReconciling(false);
+    }
+  }, [loadActivity, loadReviews, loadSyncedMovies]);
 
   const removeSyncedMovie = useCallback(async () => {
     if (!removingMovie) return;
@@ -2245,6 +2286,7 @@ export default function Home() {
                   label="Radarr status"
                   onClick={() => {
                     void loadSyncedMovies();
+                    setReconcileResult(null);
                     setIsSyncedOpen(true);
                   }}
                   value={`${stats.synced} synced`}
@@ -3164,6 +3206,14 @@ export default function Home() {
               </div>
               <div className="flex items-center gap-2">
                 <button
+                  className="flex h-9 items-center rounded-[var(--radius-control)] border border-cornsilk/10 bg-white/[0.035] px-3 text-xs font-bold text-cornsilk/70 transition hover:bg-white/[0.08] hover:text-cornsilk disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={isReconciling}
+                  onClick={() => void reconcileSyncedMovies()}
+                  type="button"
+                >
+                  {isReconciling ? "Verifying…" : "Verify against Radarr"}
+                </button>
+                <button
                   aria-label="Refresh synced movies"
                   className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-control)] border border-cornsilk/10 bg-white/[0.035] text-cornsilk/60 transition hover:bg-white/[0.08] hover:text-cornsilk"
                   onClick={() => void loadSyncedMovies()}
@@ -3184,6 +3234,17 @@ export default function Home() {
                 </button>
               </div>
             </div>
+
+            {reconcileResult && (
+              <div className="px-4 pt-3">
+                <AlertBanner
+                  title="Radarr verification"
+                  tone={reconcileResult.error ? "error" : "success"}
+                >
+                  {reconcileResult.message}
+                </AlertBanner>
+              </div>
+            )}
 
             <div className="px-4 pt-3 pb-1">
               <input

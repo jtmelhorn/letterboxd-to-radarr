@@ -7,7 +7,8 @@ export type SyncMovieStatus =
   | "skipped"
   | "removed"
   | "blocklisted"
-  | "failed_remove";
+  | "failed_remove"
+  | "missing_in_radarr";
 
 export interface MovieReview {
   title: string;

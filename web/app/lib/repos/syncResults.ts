@@ -1,4 +1,4 @@
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 
 import { getDb } from "@/app/lib/db";
 import { reviews, syncResults } from "@/app/lib/db/schema";
@@ -96,7 +96,12 @@ export interface LatestSyncResultForFilm {
 }
 
 function isTerminalRemovalStatus(status: SyncMovieStatus): boolean {
-  return status === "removed" || status === "blocklisted" || status === "failed_remove";
+  return (
+    status === "removed" ||
+    status === "blocklisted" ||
+    status === "failed_remove" ||
+    status === "missing_in_radarr"
+  );
 }
 
 function isSuccessStatus(status: SyncMovieStatus): boolean {
@@ -201,8 +206,65 @@ export function isSyncMovieStatus(status: string): status is SyncMovieStatus {
     status === "skipped" ||
     status === "removed" ||
     status === "blocklisted" ||
-    status === "failed_remove"
+    status === "failed_remove" ||
+    status === "missing_in_radarr"
   );
+}
+
+export interface SyncedFilmRecord {
+  filmId: string;
+  reviewId: number;
+  radarrMovieId: number | null;
+  radarrTmdbId: number | null;
+}
+
+/**
+ * Films whose resolved sync state currently counts as synced
+ * (added/exists/failed_remove), with the best-known Radarr identifiers
+ * gathered from their sync history.
+ */
+export function listSyncedFilmRecords(): SyncedFilmRecord[] {
+  const db = getDb();
+  const filmRows = db
+    .selectDistinct({ filmId: syncResults.filmId })
+    .from(syncResults)
+    .where(isNotNull(syncResults.filmId))
+    .all();
+  const filmIds = filmRows
+    .map((row) => row.filmId)
+    .filter((filmId): filmId is string => Boolean(filmId));
+  const statusMap = latestFilmStatuses(filmIds);
+
+  const records: SyncedFilmRecord[] = [];
+  for (const filmId of filmIds) {
+    const status = statusMap.get(filmId);
+    if (status !== "added" && status !== "exists" && status !== "failed_remove") continue;
+
+    const rows = db
+      .select({
+        reviewId: syncResults.reviewId,
+        radarrMovieId: syncResults.radarrMovieId,
+        radarrTmdbId: syncResults.radarrTmdbId,
+      })
+      .from(syncResults)
+      .where(eq(syncResults.filmId, filmId))
+      .orderBy(desc(syncResults.createdAt), desc(syncResults.id))
+      .all();
+    const latest = rows[0];
+    if (!latest) continue;
+
+    records.push({
+      filmId,
+      reviewId: latest.reviewId,
+      radarrMovieId:
+        rows.find((row) => typeof row.radarrMovieId === "number" && row.radarrMovieId > 0)
+          ?.radarrMovieId ?? null,
+      radarrTmdbId:
+        rows.find((row) => typeof row.radarrTmdbId === "number" && row.radarrTmdbId > 0)
+          ?.radarrTmdbId ?? null,
+    });
+  }
+  return records;
 }
 
 function reviewIdsSql(reviewIds: number[]) {
@@ -223,7 +285,7 @@ function stateRowKeepSubquery(reviewIds?: number[]) {
           PARTITION BY film_id
           ORDER BY
             CASE
-              WHEN status IN ('added', 'exists', 'removed', 'blocklisted', 'failed_remove') THEN 0
+              WHEN status IN ('added', 'exists', 'removed', 'blocklisted', 'failed_remove', 'missing_in_radarr') THEN 0
               ELSE 1
             END,
             created_at DESC,

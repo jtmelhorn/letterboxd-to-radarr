@@ -245,6 +245,9 @@ async function syncCachedGroup(
   const candidates = getAggregatedMovies(run.aggregationScope).filter((movie) => {
     if (movie.averageRating < threshold) return false;
     if (options.force) return true;
+    // "removed" and "missing_in_radarr" (recorded by reconciliation) stay
+    // re-addable on purpose; only films we still consider present in Radarr
+    // (or whose removal failed) are skipped. Blocklist is checked separately.
     return movie.status !== "added" && movie.status !== "exists" && movie.status !== "failed_remove";
   });
 

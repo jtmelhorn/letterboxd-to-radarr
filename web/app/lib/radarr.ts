@@ -538,6 +538,54 @@ export async function addMovie(
   };
 }
 
+export interface RadarrLibraryMovie {
+  id: number;
+  tmdbId: number | null;
+  imdbId: string | null;
+}
+
+/**
+ * Fetch Radarr's full movie library in a single bulk call. Radarr returns the
+ * entire library from GET /api/v3/movie; no pagination is needed.
+ */
+export async function listRadarrMovies(target: ResolvedRadarrTarget): Promise<RadarrLibraryMovie[]> {
+  const baseUrl = normalizeRadarrUrl(target.baseUrl);
+  if (!baseUrl) {
+    throw new RadarrError("Radarr Base URL is invalid.", 400);
+  }
+  if (!target.apiKey) {
+    throw new RadarrError("Radarr API key is not configured.", 400);
+  }
+
+  let response: Response;
+  try {
+    response = await radarrFetch(baseUrl, target.apiKey, "/api/v3/movie");
+  } catch (error) {
+    throw new RadarrError(
+      error instanceof Error ? error.message : "Unable to communicate with Radarr.",
+      502,
+    );
+  }
+  if (!response.ok) {
+    throw new RadarrError(
+      errorMessageFromBody(await readBody(response), "Unable to fetch the Radarr movie library."),
+      response.status,
+    );
+  }
+
+  const body = (await response.json().catch(() => null)) as RadarrStoredMovie[] | null;
+  if (!Array.isArray(body)) {
+    throw new RadarrError("Radarr returned an unexpected movie library response.", 502);
+  }
+  return body
+    .filter((movie): movie is RadarrStoredMovie & { id: number } => typeof movie.id === "number")
+    .map((movie) => ({
+      id: movie.id,
+      tmdbId: typeof movie.tmdbId === "number" ? movie.tmdbId : null,
+      imdbId: typeof movie.imdbId === "string" && movie.imdbId ? movie.imdbId : null,
+    }));
+}
+
 export interface DeleteMovieResult {
   status: "deleted" | "not_found" | "error";
   message: string;

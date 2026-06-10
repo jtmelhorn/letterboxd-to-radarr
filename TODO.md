@@ -393,7 +393,9 @@ Group scope filters the grid via the group's rules (as today) without ever mutat
 
 ## P1 - High-impact UX and functionality improvements
 
-### [ ] P1-1: Radarr reconciliation job ("the truth job")
+### [x] P1-1: Radarr reconciliation job ("the truth job")
+
+> **Completed:** 2026-06-10 — dev / no PR — UI button implemented directly in `page.tsx` (P1-8 decomposition has not landed); reconcile is manual-only (no scheduled tail, allowed by the spec); films with no recorded Radarr identifiers are skipped rather than marked missing; local SQLite-backed Vitest suites were skipped by the existing harness.
 
 **Problem:**
 `added`/`exists` statuses are sticky forever (success-sticky logic in `reviews.ts`, rank/latest logic in `aggregatedReviews.ts`). If a user deletes a movie inside Radarr, this app still shows it as synced indefinitely. Nothing ever re-verifies against Radarr's actual library.
