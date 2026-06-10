@@ -335,4 +335,118 @@ describeWithSqlite("reviewer group filters", () => {
       genres: { include: [], exclude: ["Documentary"] },
     });
   });
+
+  it("merges partial updates with the stored row instead of resetting defaults", async () => {
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { getReviewerGroup, upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+
+    getOrCreateUser("alice");
+    getOrCreateUser("bob");
+    const saved = upsertReviewerGroup({
+      name: "Partial updates",
+      ratingThreshold: 4.5,
+      syncInterval: "12h",
+      requiresManualApproval: true,
+      filters: {
+        year: { mode: "exact", exactYear: 2026 },
+        genres: { include: [], exclude: ["Documentary"] },
+      },
+      reviewerHandles: ["alice"],
+    });
+
+    // Membership-only update preserves every other field.
+    upsertReviewerGroup({ id: saved.id, reviewerHandles: ["alice", "bob"] });
+    expect(getReviewerGroup(saved.id)).toMatchObject({
+      name: "Partial updates",
+      ratingThreshold: 4.5,
+      syncInterval: "12h",
+      requiresManualApproval: true,
+      filters: {
+        year: { mode: "exact", exactYear: 2026 },
+        genres: { include: [], exclude: ["Documentary"] },
+      },
+      reviewerHandles: ["alice", "bob"],
+    });
+
+    // Flag-only update preserves membership and the rest.
+    upsertReviewerGroup({ id: saved.id, requiresManualApproval: false });
+    expect(getReviewerGroup(saved.id)).toMatchObject({
+      ratingThreshold: 4.5,
+      syncInterval: "12h",
+      requiresManualApproval: false,
+      reviewerHandles: ["alice", "bob"],
+    });
+
+    // Threshold-only and interval-only updates change exactly one field each.
+    upsertReviewerGroup({ id: saved.id, ratingThreshold: 3.5 });
+    upsertReviewerGroup({ id: saved.id, syncInterval: "1w" });
+    expect(getReviewerGroup(saved.id)).toMatchObject({
+      name: "Partial updates",
+      ratingThreshold: 3.5,
+      syncInterval: "1w",
+      requiresManualApproval: false,
+      reviewerHandles: ["alice", "bob"],
+    });
+  });
+
+  it("rejects unknown reviewer handles by name", async () => {
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+
+    getOrCreateUser("alice");
+    expect(() =>
+      upsertReviewerGroup({
+        name: "Unknown member",
+        reviewerHandles: ["alice", "ghost"],
+      }),
+    ).toThrow("Unknown reviewer handle(s): ghost.");
+  });
+
+  it("accepts legacy autoThreshold bodies and partial PUTs through the route", async () => {
+    process.env.APP_PASSWORD = "test-password";
+    try {
+      const { getOrCreateUser } = await import("@/app/lib/repos/users");
+      const { getReviewerGroup, upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+      const { buildSessionToken, SESSION_COOKIE } = await import("@/app/lib/auth");
+      const { PUT } = await import("@/app/api/reviewer-groups/route");
+
+      getOrCreateUser("alice");
+      const saved = upsertReviewerGroup({
+        name: "Route partial",
+        ratingThreshold: 4.5,
+        syncInterval: "12h",
+        requiresManualApproval: true,
+        reviewerHandles: ["alice"],
+      });
+
+      const cookie = `${SESSION_COOKIE}=${encodeURIComponent(buildSessionToken())}`;
+      const legacyRes = await PUT(
+        new Request("http://localhost/api/reviewer-groups", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", cookie },
+          body: JSON.stringify({ id: saved.id, autoThreshold: 3 }),
+        }),
+      );
+      expect(legacyRes.status).toBe(200);
+      expect(getReviewerGroup(saved.id)).toMatchObject({
+        ratingThreshold: 3,
+        syncInterval: "12h",
+        requiresManualApproval: true,
+        reviewerHandles: ["alice"],
+      });
+
+      const unknownRes = await PUT(
+        new Request("http://localhost/api/reviewer-groups", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", cookie },
+          body: JSON.stringify({ id: saved.id, reviewerHandles: ["ghost"] }),
+        }),
+      );
+      expect(unknownRes.status).toBe(400);
+      const unknownBody = (await unknownRes.json()) as { message: string };
+      expect(unknownBody.message).toContain("ghost");
+    } finally {
+      delete process.env.APP_PASSWORD;
+    }
+  });
 });

@@ -528,7 +528,9 @@ A dedicated approvals slide-over (same pattern as the Activity/Synced panels) wi
 
 ---
 
-### [ ] P1-4: Harden partial reviewer-group updates
+### [x] P1-4: Harden partial reviewer-group updates
+
+> **Completed:** 2026-06-10 — dev / no PR — Also added an early "Reviewer group was not found" error for updates targeting nonexistent ids (previously surfaced as a confusing name-required error); drag-flow error surfacing already worked via the existing settingsError path; local SQLite-backed Vitest suites were skipped by the existing harness.
 
 **Problem:**
 `parseGroupBody` (`web/app/api/reviewer-groups/route.ts`) substitutes defaults for omitted fields (`syncInterval: "1d"`, `requiresManualApproval: false`, threshold `4`, `reviewerHandles: []`), and `upsertReviewerGroup` writes them all. Any partial `PUT` silently resets group config. The drag-and-drop UI only survives because the React layer happens to send full payloads; a two-step drag between groups does two sequential saves and can leave a reviewer in both groups if the second fails. `reviewerIdsFromHandles` silently drops unknown handles.

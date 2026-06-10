@@ -87,10 +87,16 @@ function reviewerIdsFromHandles(handles: string[]): number[] {
 
   const db = getDb();
   const rows = db
-    .select({ id: users.id })
+    .select({ id: users.id, handle: users.handle })
     .from(users)
     .where(inArray(users.handle, normalized))
     .all();
+
+  const found = new Set(rows.map((row) => row.handle.toLowerCase()));
+  const unknown = normalized.filter((handle) => !found.has(handle));
+  if (unknown.length > 0) {
+    throw new Error(`Unknown reviewer handle(s): ${unknown.join(", ")}.`);
+  }
   return rows.map((row) => row.id);
 }
 
@@ -104,41 +110,61 @@ function allReviewerIds(): number[] {
 
 export function upsertReviewerGroup(input: {
   id?: number;
-  name: string;
+  name?: string;
   autoThreshold?: number;
   ratingThreshold?: number;
   enabled?: boolean;
   syncInterval?: SyncInterval;
   requiresManualApproval?: boolean;
   filters?: unknown;
-  reviewerHandles: string[];
+  reviewerHandles?: string[];
 }): ReviewerGroupDto {
-  const name = normalizeGroupName(input.name);
-  if (!name) {
-    throw new Error("Group name is required.");
-  }
-  const rawThreshold = input.ratingThreshold ?? input.autoThreshold ?? 4;
-  if (!isValidAutoThreshold(rawThreshold)) {
-    throw new Error("Auto-sync threshold must be disabled or between 1.0 and 5.0.");
-  }
-
   const db = getDb();
-  const now = new Date().toISOString();
   const existingGroup =
     typeof input.id === "number"
       ? db.select().from(reviewerGroups).where(eq(reviewerGroups.id, input.id)).get()
       : null;
+  if (typeof input.id === "number" && !existingGroup) {
+    throw new Error("Reviewer group was not found.");
+  }
+
+  // Updates merge with the stored row: every omitted field keeps its current
+  // value. Creates fall back to the documented defaults.
+  const name =
+    input.name !== undefined ? normalizeGroupName(input.name) : existingGroup?.name ?? "";
+  if (!name) {
+    throw new Error("Group name is required.");
+  }
+  const rawThreshold =
+    input.ratingThreshold ?? input.autoThreshold ?? existingGroup?.autoThreshold ?? 4;
+  if (!isValidAutoThreshold(rawThreshold)) {
+    throw new Error("Auto-sync threshold must be disabled or between 1.0 and 5.0.");
+  }
+
+  const now = new Date().toISOString();
   const autoThreshold = normalizeThreshold(rawThreshold);
   const enabled = input.enabled ?? existingGroup?.enabled ?? true;
-  const syncInterval = input.syncInterval ?? "1d";
+  const syncInterval =
+    input.syncInterval ??
+    (existingGroup && isValidSyncInterval(existingGroup.syncInterval)
+      ? existingGroup.syncInterval
+      : "1d");
   if (!isValidSyncInterval(syncInterval)) {
     throw new Error("Sync interval is not supported.");
   }
-  const requiresManualApproval = input.requiresManualApproval ?? false;
+  const requiresManualApproval =
+    input.requiresManualApproval ?? existingGroup?.requiresManualApproval ?? false;
   const filtersJson =
     input.filters === undefined && existingGroup ? existingGroup.filtersJson : stringifySyncFilters(input.filters);
   const isDefaultGroupUpdate = typeof input.id === "number" && input.id === getDefaultReviewerGroupId();
-  const memberIds = isDefaultGroupUpdate ? allReviewerIds() : reviewerIdsFromHandles(input.reviewerHandles);
+  // null means "leave membership untouched" (update with handles omitted).
+  const memberIds: number[] | null = isDefaultGroupUpdate
+    ? allReviewerIds()
+    : input.reviewerHandles !== undefined
+      ? reviewerIdsFromHandles(input.reviewerHandles)
+      : existingGroup
+        ? null
+        : [];
 
   const group = db.transaction((tx) => {
     const saved =
@@ -168,12 +194,14 @@ export function upsertReviewerGroup(input: {
       throw new Error("Reviewer group was not found.");
     }
 
-    tx.delete(reviewerGroupMembers).where(eq(reviewerGroupMembers.groupId, saved.id)).run();
-    for (const userId of memberIds) {
-      tx.insert(reviewerGroupMembers)
-        .values({ groupId: saved.id, userId })
-        .onConflictDoNothing()
-        .run();
+    if (memberIds !== null) {
+      tx.delete(reviewerGroupMembers).where(eq(reviewerGroupMembers.groupId, saved.id)).run();
+      for (const userId of memberIds) {
+        tx.insert(reviewerGroupMembers)
+          .values({ groupId: saved.id, userId })
+          .onConflictDoNothing()
+          .run();
+      }
     }
 
     return saved;

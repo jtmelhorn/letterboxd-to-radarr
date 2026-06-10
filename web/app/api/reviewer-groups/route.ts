@@ -24,24 +24,25 @@ interface ReviewerGroupRequestBody {
   reviewerHandles?: unknown;
 }
 
+// Omitted fields stay undefined so updates merge with the stored row instead
+// of silently resetting it to defaults; creates apply defaults in the repo.
 function parseGroupBody(body: ReviewerGroupRequestBody) {
   const id = typeof body.id === "number" ? body.id : undefined;
-  const name = typeof body.name === "string" ? body.name : "";
+  const name = typeof body.name === "string" ? body.name : undefined;
   const enabled = typeof body.enabled === "boolean" ? body.enabled : undefined;
   const ratingThreshold =
     typeof body.ratingThreshold === "number"
       ? body.ratingThreshold
       : typeof body.autoThreshold === "number"
         ? body.autoThreshold
-        : 4;
-  const syncInterval: SyncInterval =
-    typeof body.syncInterval === "string" && isValidSyncInterval(body.syncInterval)
-      ? body.syncInterval
-      : "1d";
-  const requiresManualApproval = body.requiresManualApproval === true;
+        : undefined;
+  const syncInterval =
+    typeof body.syncInterval === "string" ? (body.syncInterval as SyncInterval) : undefined;
+  const requiresManualApproval =
+    typeof body.requiresManualApproval === "boolean" ? body.requiresManualApproval : undefined;
   const reviewerHandles = Array.isArray(body.reviewerHandles)
     ? body.reviewerHandles.filter((h): h is string => typeof h === "string")
-    : [];
+    : undefined;
 
   return {
     id,
