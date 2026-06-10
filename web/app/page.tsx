@@ -899,19 +899,6 @@ export default function Home() {
     [currentScope, reviewerGroups],
   );
 
-  // Mirror display filters from active sync group when scoped to a group
-  useEffect(() => {
-    if (activeReviewerGroup) {
-      setMinimumRating(activeReviewerGroup.ratingThreshold ?? 0);
-      setSelectedGenres(
-        (activeReviewerGroup.filters?.genres?.include ?? []).map(normalizeGenreLabel).filter(Boolean),
-      );
-      return;
-    }
-    setMinimumRating(0);
-    setSelectedGenres([]);
-  }, [activeReviewerGroup]);
-
   const scopeQuery = useCallback(
     (extra = "") => {
       const params = new URLSearchParams();
@@ -2487,6 +2474,8 @@ export default function Home() {
                       ? "All visible movies are already in Radarr, or none meet the current filter. Adjust the filters above."
                       : searchQuery.trim()
                         ? "No movies match your search. Try a different query."
+                        : activeReviewerGroup
+                        ? "No movies match this group's threshold and filters. Adjust them in Sync groups."
                         : selectedGenres.length > 0
                         ? "No movies match the selected genre filter. Clear genres or choose a different selection above."
                         : minimumRating > 0

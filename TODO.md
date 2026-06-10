@@ -354,7 +354,9 @@ Surprise downloads; users cannot preview their feed without triggering automatio
 
 ---
 
-### [ ] P0-8: Stop group scope from overwriting saved display filters
+### [x] P0-8: Stop group scope from overwriting saved display filters
+
+> **Completed:** 2026-06-10 — dev / no PR — Also added a group-scope branch to the empty-state message, which previously displayed the (now unmirrored) user filter values in group scope; manual localStorage verification not possible (no confirmed local run workflow).
 
 **Problem:**
 A `useEffect` in `web/app/page.tsx` (the "Mirror display filters from active sync group" block) overwrites `minimumRating` and `selectedGenres` whenever a group scope is selected, and resets them to `0` / `[]` when leaving group scope. The persistence effect then writes these clobbered values into localStorage (`letterboxdarr-local-config`). One visit to a group scope permanently destroys the user's saved display preferences. The mirroring is also redundant: `filteredMovies` already applies `activeReviewerGroup` threshold+filters directly, and the rating pills / genre control are hidden in group scope anyway.
