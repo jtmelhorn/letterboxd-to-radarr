@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 
+import { ApprovalsPanel } from "@/app/components/ApprovalsPanel";
 import { canCompleteSetup, ControlPanelForm } from "@/app/components/ControlPanelForm";
 import { SyncConfigurationPanel } from "@/app/components/SyncConfigurationPanel";
 import { useClickAway } from "@/app/hooks/useClickAway";
 import { useFocusTrap } from "@/app/hooks/useFocusTrap";
+import { formatRelativeTime } from "@/app/lib/format";
 import { evaluateSyncFilters, normalizeGenreKey, normalizeGenreLabel } from "@/app/lib/syncFilters";
 import type {
   AggregatedMovieDto,
@@ -109,17 +111,6 @@ function apiMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
-function formatRelativeTime(at: number): string {
-  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
-  if (seconds < 60) return "just now";
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  return `${days}d ago`;
-}
-
 function reviewTime(movie: AggregatedMovieDto): number {
   if (!movie.latestReviewedAt) return 0;
   const time = Date.parse(movie.latestReviewedAt);
@@ -163,16 +154,6 @@ function movieMatchesSearch(movie: AggregatedMovieDto, query: string): boolean {
     movie.reviewerHandles.some((handle) => handle.toLowerCase().includes(q)) ||
     movie.genres.some((genre) => genre.toLowerCase().includes(q)) ||
     movie.id.toLowerCase().includes(q)
-  );
-}
-
-function pendingApprovalMatchesSearch(approval: PendingApprovalDto, query: string): boolean {
-  const q = searchText(query);
-  if (!q) return true;
-  return (
-    approval.title.toLowerCase().includes(q) ||
-    (typeof approval.year === "number" && String(approval.year).includes(q)) ||
-    approval.groupName.toLowerCase().includes(q)
   );
 }
 
@@ -437,6 +418,23 @@ function ClockIcon({ className }: { className?: string }) {
     >
       <circle cx="12" cy="12" r="9" />
       <polyline points="12 7 12 12 15.5 14" />
+    </svg>
+  );
+}
+
+function InboxIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.75}
+      viewBox="0 0 24 24"
+    >
+      <path d="M22 12h-6l-2 3h-4l-2-3H2" />
+      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
     </svg>
   );
 }
@@ -782,6 +780,7 @@ export default function Home() {
   const [isFetching, setIsFetching] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSyncedOpen, setIsSyncedOpen] = useState(false);
+  const [isApprovalsOpen, setIsApprovalsOpen] = useState(false);
   const [hasAutoFetched, setHasAutoFetched] = useState(false);
   const [removingMovie, setRemovingMovie] = useState<AggregatedMovieDto | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
@@ -793,7 +792,6 @@ export default function Home() {
     null,
   );
   const [activitySearch, setActivitySearch] = useState("");
-  const [pendingSearch, setPendingSearch] = useState("");
   const [blocklistSearch, setBlocklistSearch] = useState("");
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sendStates, setSendStates] = useState<Record<string, SendState>>({});
@@ -814,6 +812,7 @@ export default function Home() {
   const movieModalRef = useRef<HTMLDivElement>(null);
   const activityPanelRef = useRef<HTMLElement>(null);
   const syncedPanelRef = useRef<HTMLElement>(null);
+  const approvalsPanelRef = useRef<HTMLElement>(null);
   const settingsModalRef = useRef<HTMLDivElement>(null);
   const removeDialogRef = useRef<HTMLDivElement>(null);
   const clearActivityDialogRef = useRef<HTMLDivElement>(null);
@@ -825,6 +824,7 @@ export default function Home() {
   useFocusTrap(movieModalRef, Boolean(activeMovieKey));
   useFocusTrap(activityPanelRef, isActivityOpen);
   useFocusTrap(syncedPanelRef, isSyncedOpen);
+  useFocusTrap(approvalsPanelRef, isApprovalsOpen);
   useFocusTrap(settingsModalRef, isSettingsOpen);
   useFocusTrap(removeDialogRef, removingMovie != null);
   useFocusTrap(clearActivityDialogRef, isClearActivityConfirmOpen);
@@ -1225,11 +1225,15 @@ export default function Home() {
         setIsSyncedOpen(false);
         return;
       }
+      if (isApprovalsOpen) {
+        setIsApprovalsOpen(false);
+        return;
+      }
       if (bootPhase === "ready" && isSettingsOpen) setIsSettingsOpen(false);
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [activeMovieKey, bootPhase, isActivityOpen, isGenreFilterOpen, isSettingsOpen, isSyncedOpen]);
+  }, [activeMovieKey, bootPhase, isActivityOpen, isApprovalsOpen, isGenreFilterOpen, isSettingsOpen, isSyncedOpen]);
 
   useEffect(() => {
     if (!autoSyncSummary) return;
@@ -1308,17 +1312,6 @@ export default function Home() {
   const filteredActivityLog = useMemo(
     () => activityLog.filter((entry) => activityMatchesSearch(entry, activitySearch)),
     [activityLog, activitySearch],
-  );
-
-  // Pending rows are actionable; error rows are surfaced read-only so failed
-  // approvals are not invisible. Approved/rejected rows stay hidden here.
-  const visiblePendingApprovals = useMemo(
-    () => pendingApprovals.filter((approval) => approval.status === "pending" || approval.status === "error"),
-    [pendingApprovals],
-  );
-  const filteredPendingApprovals = useMemo(
-    () => visiblePendingApprovals.filter((approval) => pendingApprovalMatchesSearch(approval, pendingSearch)),
-    [visiblePendingApprovals, pendingSearch],
   );
 
   const filteredBlocklistedMovies = useMemo(
@@ -1607,24 +1600,28 @@ export default function Home() {
     }
   }
 
-  async function resolvePendingApproval(id: number, action: "approve" | "reject") {
-    setSettingsError(null);
+  // Approval-queue actions return an error message (or null) so the panel can
+  // render failures inline on the row instead of routing through settingsError.
+  async function resolvePendingApproval(
+    approval: PendingApprovalDto,
+    action: "approve" | "reject",
+  ): Promise<string | null> {
     try {
-      const res = await fetch(`/api/pending-approvals/${id}/${action}`, { method: "POST" });
+      const res = await fetch(`/api/pending-approvals/${approval.id}/${action}`, { method: "POST" });
       const body = (await res.json().catch(() => null)) as { message?: string } | null;
-      if (!res.ok) throw new Error(apiMessage(body, `Unable to ${action} pending movie.`));
+      if (!res.ok) return apiMessage(body, `Unable to ${action} pending movie.`);
       await Promise.all([loadPendingApprovals(), loadActivity(), loadSyncedMovies(), loadReviews(false)]);
+      return null;
     } catch (err) {
-      setSettingsError(err instanceof Error ? err.message : `Unable to ${action} pending movie.`);
+      return err instanceof Error ? err.message : `Unable to ${action} pending movie.`;
     }
   }
 
-  async function rejectAndBlocklistPendingApproval(approval: PendingApprovalDto) {
-    setSettingsError(null);
+  async function rejectAndBlocklistPendingApproval(approval: PendingApprovalDto): Promise<string | null> {
     try {
       const rejectRes = await fetch(`/api/pending-approvals/${approval.id}/reject`, { method: "POST" });
       const rejectBody = (await rejectRes.json().catch(() => null)) as { message?: string } | null;
-      if (!rejectRes.ok) throw new Error(apiMessage(rejectBody, "Unable to reject pending movie."));
+      if (!rejectRes.ok) return apiMessage(rejectBody, "Unable to reject pending movie.");
 
       const blockRes = await fetch("/api/blocklist", {
         method: "POST",
@@ -1636,11 +1633,24 @@ export default function Home() {
         }),
       });
       const blockBody = (await blockRes.json().catch(() => null)) as { message?: string } | null;
-      if (!blockRes.ok) throw new Error(apiMessage(blockBody, "Unable to blocklist movie."));
+      if (!blockRes.ok) return apiMessage(blockBody, "Unable to blocklist movie.");
 
       await Promise.all([loadPendingApprovals(), loadBlocklist(), loadActivity(), loadSyncedMovies(), loadReviews(false)]);
+      return null;
     } catch (err) {
-      setSettingsError(err instanceof Error ? err.message : "Unable to reject and blocklist pending movie.");
+      return err instanceof Error ? err.message : "Unable to reject and blocklist pending movie.";
+    }
+  }
+
+  async function resetResolvedApproval(approval: PendingApprovalDto): Promise<string | null> {
+    try {
+      const res = await fetch(`/api/pending-approvals/${approval.id}`, { method: "DELETE" });
+      const body = (await res.json().catch(() => null)) as { message?: string } | null;
+      if (!res.ok) return apiMessage(body, "Unable to reset approval.");
+      await loadPendingApprovals();
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : "Unable to reset approval.";
     }
   }
 
@@ -2152,6 +2162,22 @@ export default function Home() {
               )}
             </button>
             <button
+              aria-label="Open approval queue"
+              className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-white/10 bg-white/[0.035] text-cornsilk/70 transition hover:bg-white/[0.075] hover:text-cornsilk"
+              onClick={() => {
+                void loadPendingApprovals();
+                setIsApprovalsOpen(true);
+              }}
+              type="button"
+            >
+              <InboxIcon className="h-5 w-5" />
+              {pendingApprovalCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gold px-1 text-[11px] font-bold text-ink shadow">
+                  {pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}
+                </span>
+              )}
+            </button>
+            <button
               aria-label="Open settings"
               className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-white/10 bg-white/[0.035] text-cornsilk/70 transition hover:bg-white/[0.075] hover:text-cornsilk"
               onClick={() => {
@@ -2180,11 +2206,6 @@ export default function Home() {
                   aria-label="Radarr setup needed"
                   className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 animate-pulse rounded-full bg-gold ring-2 ring-ink"
                 />
-              )}
-              {isRadarrSetup && pendingApprovalCount > 0 && (
-                <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gold px-1 text-[11px] font-bold text-ink shadow">
-                  {pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}
-                </span>
               )}
             </button>
           </div>
@@ -3180,6 +3201,20 @@ export default function Home() {
         </div>
       )}
 
+      {/* ── Approval Queue Slide-over ────────────────────────────────────── */}
+      {isApprovalsOpen && (
+        <ApprovalsPanel
+          approvals={pendingApprovals}
+          panelRef={approvalsPanelRef}
+          onApprove={(approval) => resolvePendingApproval(approval, "approve")}
+          onClose={() => setIsApprovalsOpen(false)}
+          onRefresh={() => void loadPendingApprovals()}
+          onReject={(approval) => resolvePendingApproval(approval, "reject")}
+          onRejectAndBlocklist={rejectAndBlocklistPendingApproval}
+          onReset={resetResolvedApproval}
+        />
+      )}
+
       {/* ── Synced Movies Slide-over ─────────────────────────────────────── */}
       {isSyncedOpen && (
         <div
@@ -3490,89 +3525,27 @@ export default function Home() {
               />
 
               {(hasManualApprovalGroups || pendingApprovalCount > 0 || erroredApprovalCount > 0) && (
-                <section className="rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
-                  <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="space-y-1">
-                      <h3 className="text-base font-extrabold tracking-tight text-cornsilk">
-                        Pending approvals
-                      </h3>
-                      <p className="text-xs leading-relaxed text-cornsilk/65">
-                        Review movies held by groups that require approval before Radarr sync.
-                      </p>
-                    </div>
-                    <span className="w-fit rounded-full border border-gold/20 bg-gold/10 px-2.5 py-1 text-xs font-bold text-gold">
-                      {pendingApprovalCount} pending
-                    </span>
+                <section className="flex flex-col gap-2 rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                  <div className="space-y-1">
+                    <h3 className="text-base font-extrabold tracking-tight text-cornsilk">
+                      Pending approvals ({pendingApprovalCount})
+                    </h3>
+                    <p className="text-xs leading-relaxed text-cornsilk/65">
+                      Approvals now live in their own queue — open it from the inbox icon in the
+                      navigation bar.
+                    </p>
                   </div>
-                  <input
-                    aria-label="Search pending approvals"
-                    className="mb-3 h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
-                    placeholder="Search by title, year, or group…"
-                    value={pendingSearch}
-                    onChange={(e) => setPendingSearch(e.target.value)}
-                  />
-                  <div className="space-y-2">
-                    {filteredPendingApprovals.map((approval) => (
-                      <div
-                        key={approval.id}
-                        className="flex flex-col gap-3 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 p-3 sm:flex-row sm:items-center sm:justify-between"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-extrabold text-cornsilk">
-                            {approval.title}
-                            {approval.year != null && (
-                              <span className="ml-1 font-medium text-cornsilk/70">{approval.year}</span>
-                            )}
-                          </p>
-                          <p className="mt-1 text-xs text-cornsilk/60">
-                            {approval.groupName} · Avg {approval.averageRating.toFixed(1)} stars
-                          </p>
-                          {approval.status === "error" && approval.message && (
-                            <p className="mt-1 text-xs text-rose-300/90">{approval.message}</p>
-                          )}
-                        </div>
-                        {approval.status === "error" ? (
-                          <span className="w-fit rounded-full border border-rose-500/25 bg-rose-500/10 px-2.5 py-1 text-xs font-bold text-rose-200">
-                            Error
-                          </span>
-                        ) : (
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              className={`${primaryBtnCls} h-9 px-3 text-xs`}
-                              onClick={() => void resolvePendingApproval(approval.id, "approve")}
-                              type="button"
-                            >
-                              Approve
-                            </button>
-                            <button
-                              className="h-9 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/70 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300"
-                              onClick={() => void resolvePendingApproval(approval.id, "reject")}
-                              type="button"
-                            >
-                              Reject
-                            </button>
-                            <button
-                              className="h-9 rounded-[var(--radius-control)] border border-rose-500/25 bg-rose-500/10 px-3 text-xs font-bold text-rose-200 transition hover:border-rose-400/50 hover:bg-rose-500/20 hover:text-white"
-                              onClick={() => void rejectAndBlocklistPendingApproval(approval)}
-                              type="button"
-                            >
-                              Reject + blocklist
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {visiblePendingApprovals.length === 0 && (
-                      <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/70">
-                        No movies are waiting for approval.
-                      </p>
-                    )}
-                    {visiblePendingApprovals.length > 0 && filteredPendingApprovals.length === 0 && (
-                      <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/70">
-                        No pending approvals match your search.
-                      </p>
-                    )}
-                  </div>
+                  <button
+                    className="h-9 w-fit rounded-[var(--radius-control)] border border-white/10 bg-white/[0.04] px-3 text-xs font-bold text-cornsilk/80 transition hover:bg-white/[0.08] hover:text-cornsilk"
+                    onClick={() => {
+                      setIsSettingsOpen(false);
+                      void loadPendingApprovals();
+                      setIsApprovalsOpen(true);
+                    }}
+                    type="button"
+                  >
+                    Open queue
+                  </button>
                 </section>
               )}
 

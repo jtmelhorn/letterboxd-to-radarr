@@ -130,4 +130,84 @@ describeWithSqlite("pending approval rejection", () => {
     expect(resetPendingApproval(pending!.id)).toBe(true);
     expect(getPendingApproval(pending!.id)).toBeNull();
   });
+
+  it("GET /api/pending-approvals returns resolved rows only with includeResolved=1", async () => {
+    process.env.APP_PASSWORD = "test-password";
+    try {
+      const { getOrCreateUser } = await import("@/app/lib/repos/users");
+      const { upsertReviews, getReviewRows } = await import("@/app/lib/repos/reviews");
+      const { upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+      const { createPendingApproval, resolvePendingApproval } = await import(
+        "@/app/lib/repos/pendingApprovals"
+      );
+      const { buildSessionToken, SESSION_COOKIE } = await import("@/app/lib/auth");
+      const { GET } = await import("@/app/api/pending-approvals/route");
+
+      const user = getOrCreateUser("alice");
+      upsertReviews(user.id, [
+        {
+          title: "Route Movie",
+          year: 2026,
+          rating: 4.5,
+          letterboxdUrl: "https://letterboxd.com/alice/film/route-movie/",
+        },
+        {
+          title: "Resolved Movie",
+          year: 2026,
+          rating: 4.5,
+          letterboxdUrl: "https://letterboxd.com/alice/film/resolved-movie/",
+        },
+      ]);
+      const rows = getReviewRows(user.id);
+      const group = upsertReviewerGroup({
+        name: "Route group",
+        ratingThreshold: 4,
+        syncInterval: "1d",
+        requiresManualApproval: true,
+        reviewerHandles: ["alice"],
+      });
+      createPendingApproval({
+        groupId: group.id,
+        reviewId: rows[0]!.id,
+        filmId: "film:route-movie",
+        title: "Route Movie",
+        year: 2026,
+        averageRating: 4.5,
+      });
+      const resolved = createPendingApproval({
+        groupId: group.id,
+        reviewId: rows[1]!.id,
+        filmId: "film:resolved-movie",
+        title: "Resolved Movie",
+        year: 2026,
+        averageRating: 4.5,
+      });
+      resolvePendingApproval(resolved!.id, "rejected", "No thanks.");
+
+      const cookie = `${SESSION_COOKIE}=${encodeURIComponent(buildSessionToken())}`;
+      const defaultRes = await GET(
+        new Request("http://localhost/api/pending-approvals", { headers: { cookie } }),
+      );
+      const defaultBody = (await defaultRes.json()) as { pendingApprovals: Array<{ title: string }> };
+      expect(defaultBody.pendingApprovals.map((item) => item.title)).toEqual(["Route Movie"]);
+
+      const resolvedRes = await GET(
+        new Request("http://localhost/api/pending-approvals?includeResolved=1", {
+          headers: { cookie },
+        }),
+      );
+      const resolvedBody = (await resolvedRes.json()) as {
+        pendingApprovals: Array<{ title: string; status: string }>;
+      };
+      expect(resolvedBody.pendingApprovals).toHaveLength(2);
+      expect(resolvedBody.pendingApprovals).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ title: "Route Movie", status: "pending" }),
+          expect.objectContaining({ title: "Resolved Movie", status: "rejected" }),
+        ]),
+      );
+    } finally {
+      delete process.env.APP_PASSWORD;
+    }
+  });
 });

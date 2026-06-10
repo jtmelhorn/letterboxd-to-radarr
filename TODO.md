@@ -481,7 +481,9 @@ A blocklist row blocks the film regardless of which identifiers each side happen
 
 ---
 
-### [ ] P1-3: Promote approvals to a first-class queue
+### [x] P1-3: Promote approvals to a first-class queue
+
+> **Completed:** 2026-06-10 — dev / no PR — Built before the P1-8 decomposition (ApprovalsPanel is a new component wired into page.tsx); skipped the optional server-side posterUrl join; added a Reset action on rejected/error rows using P0-5's reset endpoint; route already supported includeResolved so only a route test was added.
 
 **Problem:**
 Pending approvals render inside the Settings modal (`page.tsx`, "Pending approvals" section), behind a gear icon whose badge doubles as the "Radarr setup needed" dot. Approval errors are routed into `settingsError`, rendered far away near the form. The defining feature of `requiresManualApproval` groups is effectively hidden.
