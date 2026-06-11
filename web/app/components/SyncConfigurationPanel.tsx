@@ -129,15 +129,34 @@ function draftFromGroup(group: ReviewerGroupDto): GroupDraft {
   };
 }
 
+function LockIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.75}
+      viewBox="0 0 24 24"
+    >
+      <rect height="11" rx="2" width="18" x="3" y="11" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  );
+}
+
 function ReviewerChip({
   handle,
   draggable,
+  locked,
   onDragEnd,
   onDragStart,
   onRemove,
 }: {
   handle: string;
   draggable: boolean;
+  locked?: boolean;
   onDragEnd?: () => void;
   onDragStart?: (event: DragEvent<HTMLElement>) => void;
   onRemove?: () => void;
@@ -148,10 +167,18 @@ function ReviewerChip({
         draggable ? "cursor-grab active:cursor-grabbing" : ""
       }`}
       draggable={draggable}
+      title={
+        locked
+          ? "Set by the REVIEWER environment variable — remove it from your container configuration to delete this reviewer."
+          : undefined
+      }
       onDragEnd={onDragEnd}
       onDragStart={onDragStart}
     >
       <span className="truncate">@{handle}</span>
+      {locked && (
+        <LockIcon aria-label={`@${handle} is set by the environment`} className="h-3 w-3 flex-shrink-0 text-cornsilk/55" />
+      )}
       {onRemove && (
         <button
           aria-label={`Remove @${handle}`}
@@ -380,12 +407,13 @@ export function SyncConfigurationPanel({
                     key={reviewer.handle}
                     draggable
                     handle={reviewer.handle}
+                    locked={reviewer.fromEnv}
                     onDragEnd={() => {
                       setDraggedReviewer(null);
                       setActiveDropZone(null);
                     }}
                     onDragStart={(event) => startReviewerDrag(event, { handle: reviewer.handle, source: "pool" })}
-                    onRemove={() => void onRemoveReviewer(reviewer.handle)}
+                    onRemove={reviewer.fromEnv ? undefined : () => void onRemoveReviewer(reviewer.handle)}
                   />
                 ))}
                 {reviewers.length === 0 && (

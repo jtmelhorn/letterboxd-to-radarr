@@ -11,12 +11,21 @@ interface ReviewerRequestBody {
   handle?: unknown;
 }
 
+function envReviewerHandle(): string {
+  return getConfiguredReviewer().trim().toLowerCase();
+}
+
 function publicReviewers() {
   const configured = getConfiguredReviewer();
   if (configured && isValidHandle(configured)) {
     getOrCreateUser(configured);
   }
-  return listUsers().map((reviewer) => ({ id: reviewer.id, handle: reviewer.handle }));
+  const envHandle = envReviewerHandle();
+  return listUsers().map((reviewer) => ({
+    id: reviewer.id,
+    handle: reviewer.handle,
+    fromEnv: envHandle.length > 0 && reviewer.handle === envHandle,
+  }));
 }
 
 export async function GET(request: Request) {
@@ -60,6 +69,19 @@ export async function DELETE(request: Request) {
   const handle = searchParams.get("handle")?.trim() ?? "";
   if (!handle || !isValidHandle(handle)) {
     return NextResponse.json({ message: "A valid Letterboxd handle is required." }, { status: 400 });
+  }
+
+  // The env reviewer would be re-seeded on the next GET, so deleting it only
+  // looks like it worked. Refuse with an explanation instead.
+  const envHandle = envReviewerHandle();
+  if (envHandle && handle.toLowerCase() === envHandle) {
+    return NextResponse.json(
+      {
+        message:
+          "This reviewer is set by the REVIEWER/LETTERBOXD_REVIEWER environment variable. Remove it from your container configuration to delete it here.",
+      },
+      { status: 400 },
+    );
   }
 
   deleteUser(handle);

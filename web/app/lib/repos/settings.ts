@@ -95,5 +95,7 @@ export function toPublicSettings(target: ResolvedRadarrTarget): PublicSettings {
     authEnabled: isAuthEnabled(),
     setupComplete: isSetupComplete(),
     syncCronOverride: isSyncCronOverrideActive(),
+    radarrUrlFromEnv: configuredRadarrUrl().length > 0,
+    radarrApiKeyFromEnv: configuredRadarrApiKey().length > 0,
   };
 }

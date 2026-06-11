@@ -45,6 +45,8 @@ export interface ReviewDto extends MovieReview {
 export interface ReviewerDto {
   id: number;
   handle: string;
+  /** True when this reviewer is seeded by REVIEWER/LETTERBOXD_REVIEWER and cannot be deleted. */
+  fromEnv?: boolean;
 }
 
 export type SyncYearFilterMode = "any" | "exact" | "gte" | "lte" | "between";
@@ -205,6 +207,10 @@ export interface PublicSettings {
   setupComplete: boolean;
   /** True when SYNC_CRON globally overrides per-group sync intervals. */
   syncCronOverride: boolean;
+  /** True when the Radarr URL comes from the RADARR/RADARR_URL environment variable. */
+  radarrUrlFromEnv: boolean;
+  /** True when the Radarr API key comes from the RADARR_API_KEY/API_KEY environment variable. */
+  radarrApiKeyFromEnv: boolean;
 }
 
 export interface AuthStatusResponse {

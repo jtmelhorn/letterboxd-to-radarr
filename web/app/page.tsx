@@ -92,6 +92,8 @@ const defaultSettings: PublicSettings = {
   authEnabled: false,
   setupComplete: false,
   syncCronOverride: false,
+  radarrUrlFromEnv: false,
+  radarrApiKeyFromEnv: false,
 };
 
 function resolveBootPhase(status: AuthStatusResponse): BootPhase {

@@ -187,8 +187,11 @@ export function ControlPanelForm({
     isSetup && !canSubmit
       ? [
           !letterboxdUsername?.trim() && "Letterboxd username",
-          !settingsDraft.radarrUrl.trim() && "Radarr base URL",
-          !settingsDraft.radarrApiKey.trim() && !settings.hasRadarrApiKey && "Radarr API key",
+          !settingsDraft.radarrUrl.trim() && !settings.radarrUrlFromEnv && "Radarr base URL",
+          !settingsDraft.radarrApiKey.trim() &&
+            !settings.hasRadarrApiKey &&
+            !settings.radarrApiKeyFromEnv &&
+            "Radarr API key",
           settingsDraft.qualityProfileId === "" && "Quality profile",
           !settingsDraft.rootFolderPath.trim() && "Root folder",
         ].filter(Boolean)
@@ -235,13 +238,20 @@ export function ControlPanelForm({
             <input
               autoComplete="url"
               className={inputCls}
+              disabled={settings.radarrUrlFromEnv}
               id={`${idPrefix}-radarr-url`}
               inputMode="url"
               placeholder="http://192.168.1.100:7878"
-              value={settingsDraft.radarrUrl}
+              value={settings.radarrUrlFromEnv ? settings.radarrUrl : settingsDraft.radarrUrl}
               onBlur={onAutoTestConnection}
               onChange={(e) => onDraftChange((current) => ({ ...current, radarrUrl: e.target.value }))}
             />
+            {settings.radarrUrlFromEnv && (
+              <p className={helperCls}>
+                Set by the RADARR environment variable — remove it from your container
+                configuration to edit it here.
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -251,13 +261,26 @@ export function ControlPanelForm({
             <input
               autoComplete="off"
               className={inputCls}
+              disabled={settings.radarrApiKeyFromEnv}
               id={`${idPrefix}-radarr-api-key`}
-              placeholder={settings.hasRadarrApiKey ? "Saved — leave blank to keep unchanged" : "Paste API key"}
+              placeholder={
+                settings.radarrApiKeyFromEnv
+                  ? "Set by environment"
+                  : settings.hasRadarrApiKey
+                    ? "Saved — leave blank to keep unchanged"
+                    : "Paste API key"
+              }
               type="password"
-              value={settingsDraft.radarrApiKey}
+              value={settings.radarrApiKeyFromEnv ? "" : settingsDraft.radarrApiKey}
               onBlur={onAutoTestConnection}
               onChange={(e) => onDraftChange((current) => ({ ...current, radarrApiKey: e.target.value }))}
             />
+            {settings.radarrApiKeyFromEnv && (
+              <p className={helperCls}>
+                Set by the API_KEY environment variable — remove it from your container
+                configuration to edit it here.
+              </p>
+            )}
             {onAutoTestConnection && (
               <p className={helperCls}>
                 Use “Test connection” to load profiles and folders. The form also checks once after you leave
@@ -270,7 +293,7 @@ export function ControlPanelForm({
         <div className="flex flex-wrap items-center gap-3">
           <button
             className="inline-flex h-10 items-center justify-center rounded-[var(--radius-control)] border border-white/10 bg-white/[0.035] px-5 text-sm font-bold text-cornsilk/85 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-cornsilk disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={isTestingConnection || !settingsDraft.radarrUrl}
+            disabled={isTestingConnection || (!settingsDraft.radarrUrl && !settings.radarrUrlFromEnv)}
             onClick={onTestConnection}
             type="button"
           >
@@ -443,8 +466,10 @@ export function canCompleteSetup(
 ): boolean {
   return (
     letterboxdUsername.trim().length > 0 &&
-    settingsDraft.radarrUrl.trim().length > 0 &&
-    (settingsDraft.radarrApiKey.trim().length > 0 || settings.hasRadarrApiKey) &&
+    (settingsDraft.radarrUrl.trim().length > 0 || settings.radarrUrlFromEnv) &&
+    (settingsDraft.radarrApiKey.trim().length > 0 ||
+      settings.hasRadarrApiKey ||
+      settings.radarrApiKeyFromEnv) &&
     settingsDraft.qualityProfileId !== "" &&
     settingsDraft.rootFolderPath.trim().length > 0 &&
     Number.isFinite(settingsDraft.autoThreshold)

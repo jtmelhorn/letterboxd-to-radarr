@@ -621,7 +621,9 @@ One scheduler code path; `SYNC_CRON` documented as a global override; each group
 
 ---
 
-### [ ] P1-6: Make environment overrides visible (settings + reviewers)
+### [x] P1-6: Make environment overrides visible (settings + reviewers)
+
+> **Completed:** 2026-06-11 — dev / no PR — No spec deviation; lock tooltip uses the chip's title attribute rather than a custom tooltip component; local SQLite-backed Vitest suites were skipped by the existing harness.
 
 **Problem:**
 `getRadarrTarget` (`web/app/lib/repos/settings.ts`) prefers `RADARR`/`API_KEY` env over stored values, but the settings form happily lets users edit stored values that are then silently ignored. `publicReviewers()` (`web/app/api/reviewers/route.ts`) re-creates the env `REVIEWER` on every GET, so the env-seeded reviewer is undeletable with no explanation.
