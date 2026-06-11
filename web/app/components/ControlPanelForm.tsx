@@ -1,6 +1,7 @@
 "use client";
 
 import type { FormEvent, ReactNode } from "react";
+import { CheckIcon, ExclamationIcon } from "@/app/components/icons";
 
 import type { PublicSettings, RadarrOptionsResponse } from "@/app/types/movie";
 
@@ -51,37 +52,7 @@ const selectCls =
 const labelCls = "text-sm font-semibold text-cornsilk";
 const helperCls = "text-xs leading-relaxed text-cornsilk/65";
 
-function CheckIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2.5}
-      viewBox="0 0 24 24"
-    >
-      <path d="M5 13l4 4L19 7" />
-    </svg>
-  );
-}
 
-function ExclamationIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      viewBox="0 0 24 24"
-    >
-      <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-    </svg>
-  );
-}
 
 function SectionCard({
   title,

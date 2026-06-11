@@ -4,11 +4,48 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 
 import { ApprovalsPanel } from "@/app/components/ApprovalsPanel";
+import { ActivityPanel } from "@/app/components/ActivityPanel";
+import { LoadingScreen, LoginScreen, PasswordSetupScreen } from "@/app/components/AuthGate";
+import { MovieGrid } from "@/app/components/MovieGrid";
+import { MovieDetailModal } from "@/app/components/MovieDetailModal";
+import { RemoveMovieDialog } from "@/app/components/RemoveMovieDialog";
+import { SyncedPanel } from "@/app/components/SyncedPanel";
+import { PosterRadarrAction, posterRingClass } from "@/app/components/PosterCard";
+import { AlertBanner, ModalHeader, StatCard } from "@/app/components/ui";
+import {
+  ArrowPathIcon,
+  CheckIcon,
+  ClockIcon,
+  ExclamationIcon,
+  FilmIcon,
+  GearIcon,
+  InboxIcon,
+  InfoIcon,
+  LockIcon,
+  RadarrIcon,
+  ServerIcon,
+  SparklesIcon,
+  StarIcon,
+  TrashIcon,
+  UserIcon,
+  XIcon,
+} from "@/app/components/icons";
 import { canCompleteSetup, ControlPanelForm } from "@/app/components/ControlPanelForm";
 import { SyncConfigurationPanel } from "@/app/components/SyncConfigurationPanel";
 import { useClickAway } from "@/app/hooks/useClickAway";
 import { useFocusTrap } from "@/app/hooks/useFocusTrap";
-import { formatRelativeTime } from "@/app/lib/format";
+import {
+  activityMatchesSearch,
+  blocklistMatchesSearch,
+  formatRelativeTime,
+  movieGenres,
+  movieMatchesSearch,
+  sortMoviesByRating,
+  statusToSendState,
+  syncResultToActivity,
+  UNKNOWN_GENRE,
+} from "@/app/lib/format";
+import type { ActivityEntry, ActivityStatus, SendState } from "@/app/lib/format";
 import { evaluateSyncFilters, normalizeGenreKey, normalizeGenreLabel } from "@/app/lib/syncFilters";
 import type {
   AggregatedMovieDto,
@@ -31,23 +68,6 @@ interface LocalConfig {
   searchQuery?: string;
 }
 
-type SendState = "idle" | "loading" | "added" | "error";
-
-type ActivityStatus = "added" | "exists" | "error" | "skipped" | "removed" | "blocklisted" | "failed_remove";
-
-interface ActivityEntry {
-  id: string;
-  reviewId: number | null;
-  filmId: string | null;
-  title: string;
-  year: number | null;
-  status: ActivityStatus;
-  outcome: "added" | "error" | "skipped";
-  message: string;
-  at: number;
-  auto: boolean;
-}
-
 function isActivityBadgeWorthy(entry: ActivityEntry): boolean {
   return entry.status === "error";
 }
@@ -59,7 +79,6 @@ interface AutoSyncSummary {
 
 const STORAGE_KEY = "letterboxdarr-local-config";
 const LEGACY_STORAGE_KEY = "letterboxd-to-radarr-local-config";
-const UNKNOWN_GENRE = "Unknown genre";
 const ratingOptions = Array.from({ length: 9 }, (_, i) => 1 + i * 0.5);
 // -1 is the backend's "automation disabled" threshold (isValidAutoThreshold).
 const groupRatingOptions = [-1, ...ratingOptions];
@@ -114,617 +133,9 @@ function apiMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
-function reviewTime(movie: AggregatedMovieDto): number {
-  if (!movie.latestReviewedAt) return 0;
-  const time = Date.parse(movie.latestReviewedAt);
-  return Number.isNaN(time) ? 0 : time;
-}
-
-function sortMoviesByRating(movies: AggregatedMovieDto[]): AggregatedMovieDto[] {
-  return [...movies].sort((a, b) => {
-    const ratingDifference = b.averageRating - a.averageRating;
-    if (ratingDifference !== 0) return ratingDifference;
-
-    const recencyDifference = reviewTime(b) - reviewTime(a);
-    if (recencyDifference !== 0) return recencyDifference;
-
-    const titleDifference = a.title.localeCompare(b.title);
-    if (titleDifference !== 0) return titleDifference;
-
-    return (b.year ?? 0) - (a.year ?? 0);
-  });
-}
-
 function isAddedToRadarr(movie: AggregatedMovieDto, sendStates: Record<string, SendState>): boolean {
   const state = sendStates[movieKey(movie)] ?? statusToSendState(movie.status);
   return state === "added";
-}
-
-function movieGenres(movie: AggregatedMovieDto): string[] {
-  return movie.genres.length > 0 ? movie.genres.map(normalizeGenreLabel).filter(Boolean) : [UNKNOWN_GENRE];
-}
-
-function searchText(value: string): string {
-  return value.trim().toLowerCase();
-}
-
-function movieMatchesSearch(movie: AggregatedMovieDto, query: string): boolean {
-  const q = searchText(query);
-  if (!q) return true;
-  return (
-    movie.title.toLowerCase().includes(q) ||
-    (typeof movie.year === "number" && String(movie.year).includes(q)) ||
-    movie.reviewerHandles.some((handle) => handle.toLowerCase().includes(q)) ||
-    movie.genres.some((genre) => genre.toLowerCase().includes(q)) ||
-    movie.id.toLowerCase().includes(q)
-  );
-}
-
-function activityMatchesSearch(entry: ActivityEntry, query: string): boolean {
-  const q = searchText(query);
-  if (!q) return true;
-  return (
-    entry.title.toLowerCase().includes(q) ||
-    (typeof entry.year === "number" && String(entry.year).includes(q)) ||
-    entry.message.toLowerCase().includes(q) ||
-    entry.status.toLowerCase().includes(q)
-  );
-}
-
-function blocklistMatchesSearch(movie: BlocklistedMovieDto, query: string): boolean {
-  const q = searchText(query);
-  if (!q) return true;
-  return (
-    movie.title.toLowerCase().includes(q) ||
-    (typeof movie.year === "number" && String(movie.year).includes(q)) ||
-    movie.source.toLowerCase().includes(q) ||
-    (movie.imdbId?.toLowerCase().includes(q) ?? false) ||
-    (typeof movie.tmdbId === "number" && String(movie.tmdbId).includes(q))
-  );
-}
-
-function statusToSendState(status: AggregatedMovieDto["status"]): SendState {
-  if (status === "added" || status === "exists") return "added";
-  if (status === "error") return "error";
-  return "idle";
-}
-
-function syncResultToActivity(item: SyncResultItem): ActivityEntry {
-  const status: ActivityStatus =
-    item.status === "error"
-      ? "error"
-      : item.status === "skipped"
-        ? "skipped"
-        : item.status === "exists"
-          ? "exists"
-          : item.status === "removed" || item.status === "missing_in_radarr"
-            ? "removed"
-            : item.status === "blocklisted"
-              ? "blocklisted"
-              : item.status === "failed_remove"
-                ? "failed_remove"
-                : "added";
-  return {
-    id: String(item.id),
-    reviewId: item.reviewId,
-    filmId: item.filmId ?? null,
-    title: item.title,
-    year: item.year,
-    status,
-    outcome:
-      status === "error" || status === "failed_remove"
-        ? "error"
-        : status === "skipped" || status === "removed" || status === "blocklisted"
-          ? "skipped"
-          : "added",
-    message: item.message,
-    at: item.at,
-    auto: item.auto,
-  };
-}
-
-// ── SVG Icons ────────────────────────────────────────────────────────────────
-
-function FilmIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.5}
-      viewBox="0 0 24 24"
-    >
-      <rect height="18" rx="2" width="20" x="2" y="3" />
-      <line x1="7" x2="7" y1="3" y2="21" />
-      <line x1="17" x2="17" y1="3" y2="21" />
-      <line x1="2" x2="22" y1="8" y2="8" />
-      <line x1="2" x2="22" y1="16" y2="16" />
-    </svg>
-  );
-}
-
-function GearIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.75}
-      viewBox="0 0 24 24"
-    >
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
-  );
-}
-
-function CheckIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2.5}
-      viewBox="0 0 24 24"
-    >
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  );
-}
-
-function XIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2.5}
-      viewBox="0 0 24 24"
-    >
-      <line x1="18" x2="6" y1="6" y2="18" />
-      <line x1="6" x2="18" y1="6" y2="18" />
-    </svg>
-  );
-}
-
-function RadarrIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.75}
-      viewBox="0 0 24 24"
-    >
-      <circle cx="12" cy="12" r="2" />
-      <path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14" />
-    </svg>
-  );
-}
-
-function ArrowPathIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      viewBox="0 0 24 24"
-    >
-      <path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
-    </svg>
-  );
-}
-
-function SparklesIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.75}
-      viewBox="0 0 24 24"
-    >
-      <path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m11.314 11.314l.707.707M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" />
-    </svg>
-  );
-}
-
-function ServerIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.75}
-      viewBox="0 0 24 24"
-    >
-      <rect height="6" rx="2" width="20" x="2" y="2" />
-      <rect height="6" rx="2" width="20" x="2" y="9" />
-      <rect height="6" rx="2" width="20" x="2" y="16" />
-      <line x1="6" x2="6" y1="5" y2="5" />
-      <line x1="6" x2="6" y1="12" y2="12" />
-      <line x1="6" x2="6" y1="19" y2="19" />
-    </svg>
-  );
-}
-
-function UserIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.75}
-      viewBox="0 0 24 24"
-    >
-      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-      <circle cx="12" cy="7" r="4" />
-    </svg>
-  );
-}
-
-function ExclamationIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      viewBox="0 0 24 24"
-    >
-      <circle cx="12" cy="12" r="10" />
-      <line x1="12" x2="12" y1="8" y2="12" />
-      <line x1="12" x2="12.01" y1="16" y2="16" />
-    </svg>
-  );
-}
-
-function StarIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="currentColor" viewBox="0 0 24 24">
-      <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
-    </svg>
-  );
-}
-
-function ClockIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.75}
-      viewBox="0 0 24 24"
-    >
-      <circle cx="12" cy="12" r="9" />
-      <polyline points="12 7 12 12 15.5 14" />
-    </svg>
-  );
-}
-
-function InboxIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.75}
-      viewBox="0 0 24 24"
-    >
-      <path d="M22 12h-6l-2 3h-4l-2-3H2" />
-      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-    </svg>
-  );
-}
-
-function InfoIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.75}
-      viewBox="0 0 24 24"
-    >
-      <circle cx="12" cy="12" r="10" />
-      <line x1="12" x2="12" y1="11" y2="16" />
-      <line x1="12" x2="12.01" y1="8" y2="8" />
-    </svg>
-  );
-}
-
-function TrashIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.75}
-      viewBox="0 0 24 24"
-    >
-      <polyline points="3 6 5 6 21 6" />
-      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-      <path d="M10 11v6M14 11v6" />
-      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-    </svg>
-  );
-}
-
-function LockIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.75}
-      viewBox="0 0 24 24"
-    >
-      <rect height="11" rx="2" width="18" x="3" y="11" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-    </svg>
-  );
-}
-
-// ── Status badge ring class ─────────────────────────────────────────────────
-
-function posterRingClass(state: SendState): string {
-  if (state === "added") return "ring-2 ring-inset ring-chartreuse/80";
-  if (state === "error") return "ring-2 ring-inset ring-rose-500/70";
-  if (state === "loading") return "ring-2 ring-inset ring-gold/50 animate-pulse";
-  return "ring-1 ring-inset ring-cornsilk/5";
-}
-
-function PosterRadarrAction({
-  movie,
-  sendState,
-  onSend,
-  onRemove,
-}: {
-  movie: AggregatedMovieDto;
-  sendState: SendState;
-  onSend: (movie: AggregatedMovieDto) => void;
-  onRemove?: (movie: AggregatedMovieDto) => void;
-}) {
-  if (sendState === "loading") {
-    return (
-      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-ink/85 backdrop-blur-sm border border-cornsilk/10">
-        <span className="h-3 w-3 animate-spin rounded-full border-2 border-cornsilk/30 border-t-cornsilk" />
-      </span>
-    );
-  }
-
-  if (sendState === "idle") {
-    return (
-      <div className="poster-reveal transition-opacity duration-200">
-        <button
-          aria-label={`Send ${movie.title} to Radarr`}
-          className="poster-action-btn"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onSend(movie);
-          }}
-          type="button"
-        >
-          <RadarrIcon className="h-3.5 w-3.5" />
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative">
-      <div className="poster-swap-out transition-opacity duration-200">
-        {sendState === "added" ? (
-          <div className="flex h-5 w-5 items-center justify-center rounded-full bg-chartreuse/90 border border-chartreuse/40">
-            <CheckIcon className="h-3 w-3 text-ink" />
-          </div>
-        ) : (
-          <div className="flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 border border-rose-400/20">
-            <XIcon className="h-2.5 w-2.5 text-cornsilk" />
-          </div>
-        )}
-      </div>
-      <div className="poster-hover-only absolute right-0 top-0 flex gap-1 transition-opacity duration-200">
-        <button
-          aria-label={sendState === "added" ? `Resend ${movie.title} to Radarr` : `Retry sending ${movie.title} to Radarr`}
-          className="poster-action-btn"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onSend(movie);
-          }}
-          type="button"
-        >
-          <ArrowPathIcon className="h-3.5 w-3.5" />
-        </button>
-        {sendState === "added" && onRemove && (
-          <button
-            aria-label={`Remove ${movie.title} from Radarr`}
-            className="poster-action-btn border-rose-500/30 hover:bg-rose-500/15 hover:text-rose-300"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onRemove(movie);
-            }}
-            type="button"
-          >
-            <TrashIcon className="h-3.5 w-3.5" />
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function AlertBanner({
-  tone,
-  title,
-  children,
-  action,
-}: {
-  tone: "success" | "error" | "info";
-  title: string;
-  children: ReactNode;
-  action?: ReactNode;
-}) {
-  const styles = {
-    success: "border-pine/30 bg-pine/10 text-cornsilk",
-    error: "border-rose-500/25 bg-rose-500/10 text-rose-100",
-    info: "border-azure/20 bg-azure/10 text-cornsilk",
-  }[tone];
-  const icon =
-    tone === "success" ? (
-      <SparklesIcon className="h-4 w-4 text-pine" />
-    ) : tone === "error" ? (
-      <ExclamationIcon className="h-4 w-4 text-rose-300" />
-    ) : (
-      <InfoIcon className="h-4 w-4 text-azure" />
-    );
-
-  return (
-    <div
-      className={`animate-fade-in flex flex-col gap-3 rounded-[var(--radius-card)] border px-4 py-3 sm:flex-row sm:items-center ${styles}`}
-      role={tone === "error" ? "alert" : "status"}
-    >
-      <div className="flex min-w-0 flex-1 items-start gap-3">
-        <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-black/20">
-          {icon}
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-extrabold">{title}</p>
-          <div className="mt-0.5 text-xs leading-relaxed text-cornsilk/70">{children}</div>
-        </div>
-      </div>
-      {action && <div className="flex flex-shrink-0 items-center gap-2 sm:justify-end">{action}</div>}
-    </div>
-  );
-}
-
-function StatCard({
-  icon,
-  label,
-  value,
-  detail,
-  onClick,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: ReactNode;
-  detail: string;
-  onClick?: () => void;
-}) {
-  const content = (
-    <>
-      <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-black/25 text-gold">
-          {icon}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-bold uppercase tracking-wide text-cornsilk/70">{label}</p>
-          <div className="mt-1 truncate text-lg font-black leading-tight text-cornsilk">{value}</div>
-          <p className="mt-1 text-xs text-cornsilk/62">{detail}</p>
-        </div>
-        {onClick && (
-          <span aria-hidden="true" className="self-center text-lg text-cornsilk/45 transition group-hover/stat:text-gold">
-            ›
-          </span>
-        )}
-      </div>
-    </>
-  );
-
-  if (onClick) {
-    return (
-      <button
-        className="glass-card group/stat rounded-[var(--radius-card)] p-3 text-left transition hover:border-gold/25 hover:bg-white/[0.055] hover:ring-1 hover:ring-gold/20 sm:p-4"
-        onClick={onClick}
-        type="button"
-      >
-        {content}
-      </button>
-    );
-  }
-
-  return (
-    <div className="glass-card rounded-[var(--radius-card)] p-3 sm:p-4">
-      {content}
-    </div>
-  );
-}
-
-function ModalHeader({
-  eyebrow,
-  title,
-  titleId,
-  onClose,
-  closeLabel,
-}: {
-  eyebrow: string;
-  title: string;
-  titleId?: string;
-  onClose: () => void;
-  closeLabel: string;
-}) {
-  return (
-    <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-white/10 px-6 pb-4 pt-5">
-      <div>
-        <p className="mb-0.5 text-[11px] font-bold uppercase tracking-widest text-cornsilk/70">{eyebrow}</p>
-        <h2 className="text-xl font-black tracking-tight text-cornsilk" id={titleId}>{title}</h2>
-      </div>
-      <button
-        aria-label={closeLabel}
-        className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-cornsilk/65 transition hover:bg-white/[0.08] hover:text-cornsilk"
-        onClick={onClose}
-        type="button"
-      >
-        <XIcon className="h-4 w-4" />
-      </button>
-    </div>
-  );
-}
-
-function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(false);
-  useEffect(() => {
-    const media = window.matchMedia(query);
-    setMatches(media.matches);
-    const listener = (e: MediaQueryListEvent) => setMatches(e.matches);
-    media.addEventListener("change", listener);
-    return () => media.removeEventListener("change", listener);
-  }, [query]);
-  return matches;
 }
 
 // ── Main component ──────────────────────────────────────────────────────────
@@ -838,7 +249,6 @@ export default function Home() {
   useClickAway(genreDropdownRef, () => setIsGenreFilterOpen(false), isGenreFilterOpen);
   useClickAway(ratingTooltipRef, () => setIsRatingTooltipOpen(false), isRatingTooltipOpen);
 
-  const isDesktop = useMediaQuery("(min-width: 640px)");
 
   const activityUnreadCount = useMemo(
     () => activityLog.filter((entry) => isActivityBadgeWorthy(entry) && entry.at > activitySeenAt).length,
@@ -1984,127 +1394,32 @@ export default function Home() {
 
   // ── Boot gates ─────────────────────────────────────────────────────────
   if (bootPhase === "loading") {
-    return (
-      <div className="flex min-h-screen items-center justify-center px-4">
-        <div className="flex flex-col items-center gap-3 text-cornsilk/60">
-          <span className="h-8 w-8 animate-spin rounded-full border-2 border-cornsilk/20 border-t-cornsilk" />
-          <p className="text-sm font-semibold">Loading…</p>
-        </div>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   if (bootPhase === "needsPasswordSetup") {
     return (
-      <div className="flex min-h-screen items-center justify-center px-4 py-10">
-        <div className="glass-card w-full max-w-md rounded-[var(--radius-card)] p-7 sm:p-8 space-y-6">
-          <div className="flex flex-col items-center gap-3 text-center">
-            <div className={`${brandIconCls} h-12 w-12`}>
-              <LockIcon className="h-6 w-6" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-black tracking-tight text-cornsilk">Set admin password</h1>
-              <p className="mt-2 text-sm leading-relaxed text-cornsilk/65">
-                Create a password to protect this instance. It will be stored in your data volume.
-              </p>
-            </div>
-          </div>
-          <form className="space-y-4" onSubmit={submitSetupPassword}>
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-cornsilk" htmlFor="setup-admin-password">
-                Password
-              </label>
-              <input
-                autoComplete="new-password"
-                autoFocus
-                className={`${inputCls} w-full`}
-                id="setup-admin-password"
-                placeholder="Minimum 8 characters"
-                type="password"
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-cornsilk" htmlFor="setup-admin-confirm">
-                Confirm password
-              </label>
-              <input
-                autoComplete="new-password"
-                className={`${inputCls} w-full`}
-                id="setup-admin-confirm"
-                placeholder="Re-enter password"
-                type="password"
-                value={confirmPasswordInput}
-                onChange={(e) => setConfirmPasswordInput(e.target.value)}
-              />
-            </div>
-            {loginError && (
-              <div className="rounded-[var(--radius-control)] border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-sm text-rose-200" role="alert">
-                {loginError}
-              </div>
-            )}
-            <button
-              className={`${primaryBtnCls} h-11 w-full text-sm`}
-              disabled={
-                isSettingPassword ||
-                passwordInput.length < 8 ||
-                passwordInput !== confirmPasswordInput
-              }
-              type="submit"
-            >
-              {isSettingPassword ? "Saving…" : "Continue"}
-            </button>
-          </form>
-        </div>
-      </div>
+      <PasswordSetupScreen
+        confirmPasswordInput={confirmPasswordInput}
+        isSettingPassword={isSettingPassword}
+        loginError={loginError}
+        passwordInput={passwordInput}
+        onConfirmPasswordChange={setConfirmPasswordInput}
+        onPasswordChange={setPasswordInput}
+        onSubmit={submitSetupPassword}
+      />
     );
   }
 
   if (bootPhase === "needsLogin") {
     return (
-      <div className="flex min-h-screen items-center justify-center px-4 py-10">
-        <div className="glass-card w-full max-w-md rounded-[var(--radius-card)] p-7 sm:p-8 space-y-6">
-          <div className="flex flex-col items-center gap-3 text-center">
-            <div className={`${brandIconCls} h-12 w-12`}>
-              <LockIcon className="h-6 w-6" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-black tracking-tight text-cornsilk">Sign in</h1>
-              <p className="mt-2 text-sm text-cornsilk/65">This instance is password protected.</p>
-            </div>
-          </div>
-          <form className="space-y-4" onSubmit={submitLogin}>
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-cornsilk" htmlFor="login-password">
-                Password
-              </label>
-              <input
-                autoComplete="current-password"
-                autoFocus
-                className={`${inputCls} w-full`}
-                id="login-password"
-                placeholder="Enter password"
-                type="password"
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-              />
-            </div>
-            {loginError && (
-              <div className="rounded-[var(--radius-control)] border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-sm text-rose-200" role="alert">
-                {loginError}
-              </div>
-            )}
-            <button
-              className={`${primaryBtnCls} h-11 w-full text-sm`}
-              disabled={isLoggingIn || !passwordInput}
-              type="submit"
-            >
-              {isLoggingIn ? "Signing in…" : "Sign in"}
-            </button>
-          </form>
-        </div>
-      </div>
+      <LoginScreen
+        isLoggingIn={isLoggingIn}
+        loginError={loginError}
+        passwordInput={passwordInput}
+        onPasswordChange={setPasswordInput}
+        onSubmit={submitLogin}
+      />
     );
   }
 
@@ -2625,77 +1940,13 @@ export default function Home() {
               </div>
             ) : (
               <div className="min-h-0 flex-1 sm:overflow-y-auto">
-                <div className="poster-grid animate-fade-in">
-                  {filteredMovies.map((movie) => {
-                    const key = movieKey(movie);
-                    const sendState = sendStates[key] ?? "idle";
-
-                    return (
-                      <div
-                        key={key}
-                        className={`poster-card group w-full min-h-0 aspect-[2/3] overflow-hidden rounded-2xl bg-ink/60 text-left ${posterRingClass(sendState)}`}
-                      >
-                        <button
-                          aria-label={`${movie.title} (${movie.year ?? "unknown"}) — ${movie.averageRating.toFixed(1)} average stars${
-                            sendState === "added" ? " — already in Radarr" : ""
-                          }`}
-                          className="absolute inset-0 h-full w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-pine/80"
-                          onClick={() => setActiveMovieKey(key)}
-                          type="button"
-                        >
-                          {movie.posterUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              alt=""
-                              className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                              loading="lazy"
-                              src={movie.posterUrl}
-                            />
-                          ) : (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-pine to-ink p-4">
-                              <FilmIcon className="h-9 w-9 text-granite/70" />
-                              <span className="line-clamp-3 text-center text-[11px] font-bold leading-tight text-cornsilk/75">
-                                {movie.title}
-                              </span>
-                            </div>
-                          )}
-
-                          <div className="poster-gradient absolute inset-0 pointer-events-none" />
-
-                          <div className="absolute inset-x-2 top-2 flex justify-start pointer-events-none">
-                            <div className="rounded-lg bg-black/60 px-2 py-0.5 backdrop-blur-md border border-cornsilk/5">
-                              <span className="text-[11px] font-bold text-gold flex items-center gap-0.5">
-                                ★ {movie.averageRating.toFixed(1)}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-3">
-                            <span className="rounded-full bg-black/0 px-3 py-1 text-center text-[11px] font-extrabold uppercase tracking-wide text-transparent transition duration-200 group-hover:bg-black/45 group-hover:text-gold group-focus-within:bg-black/45 group-focus-within:text-gold">
-                              Click for review
-                            </span>
-                          </div>
-
-                          <div className="absolute inset-x-0 bottom-0 p-3.5 pointer-events-none">
-                            <p className="mb-0.5 text-[11px] font-bold text-cornsilk/70">{movie.year ?? "—"}</p>
-                            <h3 className="line-clamp-2 text-xs font-extrabold leading-snug text-cornsilk group-hover:text-gold transition-colors">
-                              {movie.title}
-                            </h3>
-                          </div>
-                        </button>
-
-                        <div className="absolute top-2 right-2 z-10">
-                          <PosterRadarrAction
-                            movie={movie}
-                            onSend={(m) => void sendToRadarr(m)}
-                            onRemove={(m) => setRemovingMovie(m)}
-                            sendState={sendState}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                <MovieGrid
+                  movies={filteredMovies}
+                  sendStates={sendStates}
+                  onOpenMovie={(key) => setActiveMovieKey(key)}
+                  onRemove={(m) => setRemovingMovie(m)}
+                  onSend={(m) => void sendToRadarr(m)}
+                />
               </div>
             )}
           </div>
@@ -2891,390 +2142,35 @@ export default function Home() {
 
       {/* ── Movie Detail Modal ─────────────────────────────────────────────── */}
       {activeMovieKey && activeMovie && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/85 p-0 backdrop-blur-xl sm:items-center sm:p-4 transition-all duration-300"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setActiveMovieKey(null);
-          }}
-        >
-          <div
-            ref={movieModalRef}
-            aria-labelledby="movie-detail-title"
-            aria-modal="true"
-            className="glass-modal animate-fade-in flex max-h-[90vh] min-h-0 w-full flex-col overflow-hidden rounded-t-3xl border border-cornsilk/10 shadow-2xl transition-all sm:max-w-4xl sm:rounded-[var(--radius-card)]"
-            role="dialog"
-          >
-            {/* Header bar */}
-            <div className="flex flex-shrink-0 items-center justify-between px-6 py-4 border-b border-cornsilk/5">
-              {activeMovie.letterboxdUrl ? (
-                <a
-                  className="inline-flex items-center gap-1 rounded-full bg-ink/60 px-3 py-1 text-xs font-bold text-cornsilk/80 backdrop-blur-md border border-cornsilk/5 hover:bg-ink transition-all hover:text-cornsilk"
-                  href={activeMovie.letterboxdUrl}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  Letterboxd ↗
-                </a>
-              ) : (
-                <div />
-              )}
-
-              <button
-                aria-label="Close details"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-ink/60 text-cornsilk/60 backdrop-blur-sm border border-cornsilk/5 transition hover:text-cornsilk hover:bg-ink"
-                onClick={() => setActiveMovieKey(null)}
-                type="button"
-              >
-                <XIcon className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">
-              <div className="flex flex-col gap-5 md:flex-row md:items-start md:gap-6">
-                <aside className="modal-movie-card md:sticky md:top-0">
-                  <div className="modal-poster-frame">
-                    {activeMovie.posterUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img alt="" src={activeMovie.posterUrl} />
-                    ) : (
-                      <div className="modal-poster-placeholder">
-                        <FilmIcon className="h-12 w-12 text-cornsilk/45" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="px-1 pt-3 text-center">
-                    <h2
-                      className="text-base font-extrabold leading-tight text-cornsilk tracking-tight"
-                      id="movie-detail-title"
-                    >
-                      {activeMovie.title}
-                    </h2>
-                    <p className="mt-1 text-xs font-semibold text-cornsilk/60">
-                      {activeMovie.year ?? "Unknown year"}
-                    </p>
-                  </div>
-                </aside>
-
-                <section className="min-w-0 flex-1 overflow-hidden rounded-2xl border border-cornsilk/10 bg-ink/20">
-                  <div className="flex items-start justify-between gap-4 border-b border-cornsilk/5 px-4 py-4 sm:px-5">
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-cornsilk/70">
-                        Reviewer notes
-                      </p>
-                    </div>
-
-                    <div className="flex flex-shrink-0 flex-col items-end">
-                      <span className="flex items-center gap-1 text-xl font-black text-gold">
-                        ★ {activeMovie.averageRating.toFixed(1)}
-                      </span>
-                      <span className="text-[11px] font-medium text-cornsilk/70">
-                        {activeMovie.reviewerCount} reviewer{activeMovie.reviewerCount === 1 ? "" : "s"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4 border-b border-cornsilk/5 px-4 py-5 sm:px-5">
-                    <div className="rounded-xl border border-cornsilk/10 bg-black/15 p-3">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="min-w-0">
-                          <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-cornsilk/70">
-                            Genres
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            {movieGenres(activeMovie).map((genre) => (
-                              <span
-                                key={genre}
-                                className={`rounded-full border px-2.5 py-1 text-xs font-bold ${
-                                  genre === UNKNOWN_GENRE
-                                    ? "border-cornsilk/10 bg-cornsilk/5 text-cornsilk/60"
-                                    : "border-pine/25 bg-pine/10 text-chartreuse"
-                                }`}
-                              >
-                                {genre}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <button
-                          className="inline-flex h-9 flex-shrink-0 items-center justify-center gap-2 rounded-[var(--radius-control)] border border-cornsilk/10 bg-ink/60 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-gold/30 hover:bg-ink hover:text-cornsilk disabled:cursor-not-allowed disabled:opacity-55"
-                          disabled={activeMetadataRefreshing}
-                          onClick={() => void refreshMetadata(activeMovie)}
-                          type="button"
-                        >
-                          {activeMetadataRefreshing ? (
-                            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-cornsilk/25 border-t-cornsilk" />
-                          ) : (
-                            <ArrowPathIcon className="h-3.5 w-3.5" />
-                          )}
-                          Refresh metadata
-                        </button>
-                      </div>
-                      {activeMetadataMessage && (
-                        <p className="mt-3 text-xs leading-relaxed text-cornsilk/60">
-                          {activeMetadataMessage}
-                        </p>
-                      )}
-                    </div>
-
-                    {activeMovie.reviews.map((review) => (
-                      <div key={review.id} className="rounded-xl border border-cornsilk/10 bg-black/15 p-3">
-                        <div className="mb-2 flex items-center justify-between gap-3">
-                          <span className="truncate text-xs font-extrabold text-cornsilk">
-                            @{review.reviewerHandle}
-                          </span>
-                          <span className="text-sm font-black text-gold">★ {review.rating.toFixed(1)}</span>
-                        </div>
-                        {review.reviewText ? (
-                          <p className="whitespace-pre-wrap text-sm leading-relaxed text-cornsilk/78 italic">
-                            &quot;{review.reviewText}&quot;
-                          </p>
-                        ) : (
-                          <p className="text-xs italic text-cornsilk/70">No written review for this film.</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="bg-ink/40 px-4 py-5 sm:px-5">
-                    {activeSendState === "added" ? (
-                      <div className="space-y-3 animate-fade-in">
-                        <div className="flex items-center gap-3.5 rounded-xl border border-chartreuse/30 bg-chartreuse/10 p-4">
-                          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-chartreuse">
-                            <CheckIcon className="h-4 w-4 text-ink" />
-                          </div>
-                          <div>
-                            <p className="text-sm font-extrabold text-cornsilk">Sent to Radarr</p>
-                            <p className="mt-0.5 text-xs text-cornsilk/70">
-                              {activeMessage || "Film successfully synchronized."}
-                            </p>
-                          </div>
-                        </div>
-                        <button
-                          className="flex w-full items-center justify-center gap-2 rounded-xl border border-cornsilk/10 bg-ink/60 py-3 text-sm font-bold text-cornsilk transition hover:border-gold/30 hover:bg-ink focus:outline-none focus:ring-2 focus:ring-gold/40"
-                          onClick={() => void sendToRadarr(activeMovie)}
-                          type="button"
-                        >
-                          <ArrowPathIcon className="h-4 w-4" />
-                          Resend to Radarr
-                        </button>
-                        <button
-                          className="flex w-full items-center justify-center gap-2 rounded-xl border border-rose-500/20 bg-rose-500/10 py-3 text-sm font-bold text-rose-300 transition hover:border-rose-500/40 hover:bg-rose-500/20 focus:outline-none focus:ring-2 focus:ring-rose-500/40"
-                          onClick={() => setRemovingMovie(activeMovie)}
-                          type="button"
-                        >
-                          <TrashIcon className="h-4 w-4" />
-                          Remove from Radarr
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        <button
-                          className={`${primaryBtnCls} flex w-full items-center justify-center gap-2 py-3.5 text-sm font-extrabold`}
-                          disabled={activeSendState === "loading"}
-                          onClick={() => void sendToRadarr(activeMovie)}
-                          type="button"
-                        >
-                          {activeSendState === "loading" ? (
-                            <>
-                              <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink/30 border-t-ink" />
-                              Sending to Radarr…
-                            </>
-                          ) : activeSendState === "error" ? (
-                            <>
-                              <ArrowPathIcon className="h-4 w-4" />
-                              Retry add to Radarr
-                            </>
-                          ) : (
-                            <>
-                              <RadarrIcon className="h-4 w-4" />
-                              Add to Radarr Library
-                            </>
-                          )}
-                        </button>
-
-                        {activeSendState === "error" && activeMessage && (
-                          <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-3 text-center text-xs text-rose-400 animate-fade-in flex items-start gap-2">
-                            <ExclamationIcon className="h-4 w-4 flex-shrink-0 text-rose-500" />
-                            <span className="text-left leading-relaxed">{activeMessage}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </section>
-              </div>
-            </div>
-          </div>
-        </div>
+        <MovieDetailModal
+          message={activeMessage ?? null}
+          metadataMessage={activeMetadataMessage ?? null}
+          metadataRefreshing={activeMetadataRefreshing}
+          modalRef={movieModalRef}
+          movie={activeMovie}
+          sendState={activeSendState}
+          onClose={() => setActiveMovieKey(null)}
+          onRefreshMetadata={(movie) => void refreshMetadata(movie)}
+          onRemove={(movie) => setRemovingMovie(movie)}
+          onSend={(movie) => void sendToRadarr(movie)}
+        />
       )}
 
       {/* ── Sync Activity Slide-over ───────────────────────────────────────── */}
       {isActivityOpen && (
-        <div
-          className="fixed inset-0 z-50 flex justify-end bg-black/70 backdrop-blur-sm transition-all duration-300"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsActivityOpen(false);
-          }}
-        >
-          <aside
-            ref={activityPanelRef}
-            aria-labelledby="activity-title"
-            aria-modal="true"
-            className="glass-modal animate-fade-in flex h-full w-full max-w-md flex-col border-l border-cornsilk/10 shadow-2xl"
-            role="dialog"
-          >
-            <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-white/10 px-6 pb-4 pt-5">
-              <div>
-                <p className="mb-0.5 text-[11px] font-bold uppercase tracking-widest text-cornsilk/70">
-                  Recent syncs
-                </p>
-                <h2 className="text-xl font-black tracking-tight text-cornsilk" id="activity-title">
-                  Sync Activity
-                </h2>
-              </div>
-              <div className="flex items-center gap-2">
-                {activityLog.length > 0 && (
-                  <button
-                    aria-label="Clear activity"
-                    className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-control)] border border-cornsilk/10 bg-white/[0.035] text-cornsilk/60 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300"
-                    onClick={() => setIsClearActivityConfirmOpen(true)}
-                    type="button"
-                  >
-                    <TrashIcon className="h-4 w-4" />
-                  </button>
-                )}
-                <button
-                  aria-label="Refresh activity"
-                  className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-control)] border border-cornsilk/10 bg-white/[0.035] text-cornsilk/60 transition hover:bg-white/[0.08] hover:text-cornsilk"
-                  onClick={() => void loadActivity()}
-                  type="button"
-                >
-                  <ArrowPathIcon className="h-4 w-4" />
-                </button>
-                <button
-                  aria-label="Close activity"
-                  className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-cornsilk/10 bg-white/[0.035] text-cornsilk/60 transition hover:bg-white/[0.08] hover:text-cornsilk"
-                  onClick={() => setIsActivityOpen(false)}
-                  type="button"
-                >
-                  <XIcon className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-
-            <div className="px-4 pb-1 pt-3">
-              <input
-                aria-label="Search sync activity"
-                className="h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
-                placeholder="Search by title, year, status, or message…"
-                value={activitySearch}
-                onChange={(e) => setActivitySearch(e.target.value)}
-              />
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-4 py-4">
-              {activityLog.length === 0 ? (
-                <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-ink text-cornsilk/55">
-                    <ClockIcon className="h-6 w-6" />
-                  </div>
-                  <h3 className="text-base font-extrabold text-cornsilk">No sync activity yet</h3>
-                  <p className="mt-1 max-w-xs text-xs text-cornsilk/70">
-                    Sync results appear here. The badge only highlights new failures that need attention.
-                  </p>
-                </div>
-              ) : filteredActivityLog.length === 0 ? (
-                <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-ink text-cornsilk/55">
-                    <ClockIcon className="h-6 w-6" />
-                  </div>
-                  <h3 className="text-base font-extrabold text-cornsilk">No activity matches</h3>
-                  <p className="mt-1 max-w-xs text-xs text-cornsilk/70">
-                    Try a different movie, year, status, or message.
-                  </p>
-                </div>
-              ) : (
-                <ul className="space-y-2">
-                  {filteredActivityLog.map((entry) => (
-                    <li
-                      key={entry.id}
-                      className="flex items-start gap-3 rounded-xl border border-cornsilk/5 bg-ink/30 p-3"
-                    >
-                      <div
-                        className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${
-                          entry.outcome === "added"
-                            ? "bg-pine/20 text-cornsilk"
-                            : entry.outcome === "skipped"
-                              ? "bg-azure/15 text-azure"
-                              : "bg-rose-500/15 text-rose-400"
-                        }`}
-                      >
-                        {entry.outcome === "added" ? (
-                          <CheckIcon className="h-3.5 w-3.5" />
-                        ) : entry.outcome === "skipped" ? (
-                          <InfoIcon className="h-3.5 w-3.5" />
-                        ) : (
-                          <ExclamationIcon className="h-3.5 w-3.5" />
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <h4 className="truncate text-sm font-bold text-cornsilk">
-                            {entry.title}
-                            {entry.year != null && (
-                              <span className="ml-1 font-medium text-cornsilk/70">{entry.year}</span>
-                            )}
-                          </h4>
-                        </div>
-                        <p
-                          className={`mt-0.5 line-clamp-2 text-xs leading-relaxed ${
-                            entry.outcome === "added"
-                              ? "text-cornsilk/60"
-                              : entry.outcome === "skipped"
-                                ? "text-azure/80"
-                                : "text-rose-400/80"
-                          }`}
-                        >
-                          {entry.message}
-                        </p>
-                        <div className="mt-1.5 flex items-center gap-2">
-                          <span
-                            className={`rounded px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${
-                              entry.outcome === "skipped"
-                                ? "bg-azure/10 text-azure border border-azure/20"
-                                : entry.auto
-                                ? "bg-granite/20 text-cornsilk/75 border border-granite/30"
-                                : "bg-cornsilk/5 text-cornsilk/70 border border-cornsilk/5"
-                            }`}
-                          >
-                            {entry.outcome === "skipped" ? "Skipped" : entry.auto ? "Auto" : "Manual"}
-                          </span>
-                          <span className="text-[11px] text-cornsilk/70">{formatRelativeTime(entry.at)}</span>
-                          {entry.outcome === "error" && (entry.filmId != null || entry.reviewId != null) && (
-                            <button
-                              className="ml-auto rounded-md border border-cornsilk/10 bg-ink/60 px-2 py-0.5 text-[11px] font-bold text-cornsilk/80 transition hover:border-gold/30 hover:text-cornsilk disabled:opacity-50"
-                              disabled={entry.filmId != null && sendStates[entry.filmId] === "loading"}
-                              onClick={() => void retryFromActivity(entry)}
-                              type="button"
-                            >
-                              {entry.filmId != null && sendStates[entry.filmId] === "loading"
-                                ? "Sending…"
-                                : "Retry"}
-                            </button>
-                          )}
-                        </div>
-                        {activityRetryNotices[entry.id] && (
-                          <p className="mt-1 text-[11px] text-azure/80">{activityRetryNotices[entry.id]}</p>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </aside>
-        </div>
+        <ActivityPanel
+          activityLog={activityLog}
+          activityRetryNotices={activityRetryNotices}
+          activitySearch={activitySearch}
+          filteredActivityLog={filteredActivityLog}
+          panelRef={activityPanelRef}
+          sendStates={sendStates}
+          onClearRequest={() => setIsClearActivityConfirmOpen(true)}
+          onClose={() => setIsActivityOpen(false)}
+          onRefresh={() => void loadActivity()}
+          onRetry={(entry) => void retryFromActivity(entry)}
+          onSearchChange={setActivitySearch}
+        />
       )}
 
       {/* ── Approval Queue Slide-over ────────────────────────────────────── */}
@@ -3293,166 +2189,28 @@ export default function Home() {
 
       {/* ── Synced Movies Slide-over ─────────────────────────────────────── */}
       {isSyncedOpen && (
-        <div
-          className="fixed inset-0 z-50 flex justify-end bg-black/70 backdrop-blur-sm transition-all duration-300"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsSyncedOpen(false);
+        <SyncedPanel
+          allSyncedCount={allSyncedCount}
+          filteredSyncedMovies={filteredSyncedMovies}
+          isAllScope={currentScope.type === "all"}
+          isReconciling={isReconciling}
+          panelRef={syncedPanelRef}
+          reconcileResult={reconcileResult}
+          syncedMovies={syncedMovies}
+          syncedSearch={syncedSearch}
+          onClose={() => {
+            setIsSyncedOpen(false);
+            setSyncedSearch("");
           }}
-        >
-          <aside
-            ref={syncedPanelRef}
-            aria-labelledby="synced-title"
-            aria-modal="true"
-            className="glass-modal animate-fade-in flex h-full w-full max-w-md flex-col border-l border-cornsilk/10 shadow-2xl"
-            role="dialog"
-          >
-            <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-white/10 px-6 pb-4 pt-5">
-              <div>
-                <p className="mb-0.5 text-[11px] font-bold uppercase tracking-widest text-cornsilk/70">
-                  Radarr library
-                </p>
-                <h2 className="text-xl font-black tracking-tight text-cornsilk" id="synced-title">
-                  Synced Movies
-                </h2>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  className="flex h-9 items-center rounded-[var(--radius-control)] border border-cornsilk/10 bg-white/[0.035] px-3 text-xs font-bold text-cornsilk/70 transition hover:bg-white/[0.08] hover:text-cornsilk disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={isReconciling}
-                  onClick={() => void reconcileSyncedMovies()}
-                  type="button"
-                >
-                  {isReconciling ? "Verifying…" : "Verify against Radarr"}
-                </button>
-                <button
-                  aria-label="Refresh synced movies"
-                  className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-control)] border border-cornsilk/10 bg-white/[0.035] text-cornsilk/60 transition hover:bg-white/[0.08] hover:text-cornsilk"
-                  onClick={() => void loadSyncedMovies()}
-                  type="button"
-                >
-                  <ArrowPathIcon className="h-4 w-4" />
-                </button>
-                <button
-                  aria-label="Close synced movies"
-                  className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-cornsilk/10 bg-white/[0.035] text-cornsilk/60 transition hover:bg-white/[0.08] hover:text-cornsilk"
-                  onClick={() => {
-                    setIsSyncedOpen(false);
-                    setSyncedSearch("");
-                  }}
-                  type="button"
-                >
-                  <XIcon className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-
-            {reconcileResult && (
-              <div className="px-4 pt-3">
-                <AlertBanner
-                  title="Radarr verification"
-                  tone={reconcileResult.error ? "error" : "success"}
-                >
-                  {reconcileResult.message}
-                </AlertBanner>
-              </div>
-            )}
-
-            <div className="px-4 pt-3 pb-1">
-              <input
-                aria-label="Search synced movies"
-                className="h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
-                placeholder="Search movies, year, reviewer, or genre…"
-                value={syncedSearch}
-                onChange={(e) => setSyncedSearch(e.target.value)}
-              />
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-4 py-4">
-              {syncedMovies.length === 0 ? (
-                <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-ink text-cornsilk/55">
-                    <CheckIcon className="h-6 w-6" />
-                  </div>
-                  {currentScope.type !== "all" && (allSyncedCount ?? 0) > 0 ? (
-                    <>
-                      <h3 className="text-base font-extrabold text-cornsilk">No synced movies in this scope</h3>
-                      <p className="mt-1 max-w-xs text-xs text-cornsilk/70">
-                        Switch the scope to “All enabled groups” to see {allSyncedCount} synced{" "}
-                        {allSyncedCount === 1 ? "movie" : "movies"}.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <h3 className="text-base font-extrabold text-cornsilk">No synced movies yet</h3>
-                      <p className="mt-1 max-w-xs text-xs text-cornsilk/70">
-                        Movies successfully added to Radarr will appear here.
-                      </p>
-                    </>
-                  )}
-                </div>
-              ) : filteredSyncedMovies.length === 0 ? (
-                <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-ink text-cornsilk/55">
-                    <FilmIcon className="h-6 w-6" />
-                  </div>
-                  <h3 className="text-base font-extrabold text-cornsilk">No synced movies match</h3>
-                  <p className="mt-1 max-w-xs text-xs text-cornsilk/70">
-                    Try a different title, year, reviewer, or genre.
-                  </p>
-                </div>
-              ) : (
-                <ul className="space-y-2">
-                  {filteredSyncedMovies.map((movie) => (
-                    <li key={movie.id} className="group relative">
-                      <button
-                        className="flex w-full items-center gap-3 rounded-xl border border-cornsilk/5 bg-ink/30 p-3 text-left transition hover:border-gold/20 hover:bg-ink/45"
-                        onClick={() => {
-                          setIsSyncedOpen(false);
-                          setActiveMovieKey(movie.id);
-                        }}
-                        type="button"
-                      >
-                        <div className="h-14 w-10 flex-shrink-0 overflow-hidden rounded-md bg-black/30">
-                          {movie.posterUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img alt="" className="h-full w-full object-cover" src={movie.posterUrl} />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center">
-                              <FilmIcon className="h-4 w-4 text-cornsilk/40" />
-                            </div>
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <h4 className="truncate text-sm font-bold text-cornsilk">
-                            {movie.title}
-                            {movie.year != null && (
-                              <span className="ml-1 font-medium text-cornsilk/70">{movie.year}</span>
-                            )}
-                          </h4>
-                          <p className="mt-0.5 text-xs text-cornsilk/60">
-                            ★ {movie.averageRating.toFixed(1)} average from {movie.reviewerCount} reviewer
-                            {movie.reviewerCount === 1 ? "" : "s"}
-                          </p>
-                        </div>
-                        <button
-                          aria-label={`Remove ${movie.title} from Radarr`}
-                          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-cornsilk/10 bg-black/30 text-cornsilk/70 opacity-0 transition hover:border-rose-500/40 hover:bg-rose-500/15 hover:text-rose-300 group-hover:opacity-100 focus:opacity-100"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setRemovingMovie(movie);
-                          }}
-                          type="button"
-                        >
-                          <TrashIcon className="h-3.5 w-3.5" />
-                        </button>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </aside>
-        </div>
+          onOpenMovie={(movie) => {
+            setIsSyncedOpen(false);
+            setActiveMovieKey(movie.id);
+          }}
+          onReconcile={() => void reconcileSyncedMovies()}
+          onRefresh={() => void loadSyncedMovies()}
+          onRemoveMovie={(movie) => setRemovingMovie(movie)}
+          onSearchChange={setSyncedSearch}
+        />
       )}
 
       {/* ── Clear activity confirmation dialog ────────────────────────────── */}
@@ -3491,84 +2249,22 @@ export default function Home() {
 
       {/* ── Remove confirmation dialog ─────────────────────────────────────── */}
       {removingMovie && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div
-            ref={removeDialogRef}
-            aria-modal="true"
-            className="glass-modal w-full max-w-sm rounded-[var(--radius-card)] border border-cornsilk/10 p-5 shadow-2xl"
-            role="dialog"
-          >
-            <h3 className="text-base font-extrabold text-cornsilk">Remove from Radarr?</h3>
-            <p className="mt-2 text-sm text-cornsilk/70">
-              This will remove <strong className="text-cornsilk">{removingMovie.title}</strong>
-              {removingMovie.year != null && <span className="text-cornsilk/70"> ({removingMovie.year})</span>} from your
-              Radarr library.
-            </p>
-
-            <div className="mt-4 space-y-3">
-              <label className="flex cursor-pointer items-start gap-3">
-                <input
-                  checked={deleteFiles}
-                  className="mt-0.5 h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                  onChange={(e) => setDeleteFiles(e.target.checked)}
-                  type="checkbox"
-                />
-                <div>
-                  <span className="text-sm font-bold text-cornsilk/80">Also delete files from disk</span>
-                  <p className="mt-0.5 text-xs text-cornsilk/70">
-                    Deletes the movie folder and files through Radarr.
-                  </p>
-                </div>
-              </label>
-              <label className="flex cursor-pointer items-start gap-3">
-                <input
-                  checked={blockFutureSync}
-                  className="mt-0.5 h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                  onChange={(e) => setBlockFutureSync(e.target.checked)}
-                  type="checkbox"
-                />
-                <div>
-                  <span className="text-sm font-bold text-cornsilk/80">Block this movie from future auto-sync</span>
-                  <p className="mt-0.5 text-xs text-cornsilk/70">
-                    Prevents this app from adding the movie again during future syncs.
-                  </p>
-                </div>
-              </label>
-            </div>
-
-            {removeError && (
-              <p
-                className="mt-4 rounded-[var(--radius-control)] border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-200"
-                role="alert"
-              >
-                {removeError}
-              </p>
-            )}
-
-            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button
-                className="h-9 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-4 text-xs font-bold text-cornsilk/70 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-cornsilk"
-                disabled={isRemoving}
-                onClick={() => {
-                  setRemovingMovie(null);
-                  setDeleteFiles(false);
-                  setBlockFutureSync(true);
-                }}
-                type="button"
-              >
-                Cancel
-              </button>
-              <button
-                className="h-9 rounded-[var(--radius-control)] bg-rose-500 px-4 text-xs font-bold text-white transition hover:bg-rose-600 disabled:opacity-50"
-                disabled={isRemoving}
-                onClick={() => void removeSyncedMovie()}
-                type="button"
-              >
-                {isRemoving ? "Removing..." : "Remove"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <RemoveMovieDialog
+          blockFutureSync={blockFutureSync}
+          deleteFiles={deleteFiles}
+          dialogRef={removeDialogRef}
+          isRemoving={isRemoving}
+          movie={removingMovie}
+          removeError={removeError}
+          onBlockFutureSyncChange={setBlockFutureSync}
+          onCancel={() => {
+            setRemovingMovie(null);
+            setDeleteFiles(false);
+            setBlockFutureSync(true);
+          }}
+          onConfirm={() => void removeSyncedMovie()}
+          onDeleteFilesChange={setDeleteFiles}
+        />
       )}
 
       {/* ── Settings Modal ─────────────────────────────────────────────────── */}

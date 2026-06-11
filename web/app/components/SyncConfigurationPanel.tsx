@@ -11,6 +11,7 @@ import {
 } from "@/app/components/SyncFilterControls";
 import type { SyncFilterDraft } from "@/app/components/SyncFilterControls";
 import { formatRelativeTime } from "@/app/lib/format";
+import { LockIcon, TrashIcon, XIcon } from "@/app/components/icons";
 import type { ReviewerDto, ReviewerGroupDto, SyncInterval } from "@/app/types/movie";
 
 type GroupUpdate = Partial<
@@ -78,41 +79,7 @@ function lastSyncedLabel(lastSyncedAt: string | null): string {
   return Number.isNaN(at) ? "Never synced" : `Last synced ${formatRelativeTime(at)}`;
 }
 
-function XIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2.5}
-      viewBox="0 0 24 24"
-    >
-      <line x1="18" x2="6" y1="6" y2="18" />
-      <line x1="6" x2="18" y1="6" y2="18" />
-    </svg>
-  );
-}
 
-function TrashIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.75}
-      viewBox="0 0 24 24"
-    >
-      <polyline points="3 6 5 6 21 6" />
-      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-      <path d="M10 11v6M14 11v6" />
-      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-    </svg>
-  );
-}
 
 function ratingOptionLabel(rating: number): string {
   return rating === -1 ? "Disabled (no auto-sync)" : `Avg >= ${rating.toFixed(1)} stars`;
@@ -129,22 +96,6 @@ function draftFromGroup(group: ReviewerGroupDto): GroupDraft {
   };
 }
 
-function LockIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.75}
-      viewBox="0 0 24 24"
-    >
-      <rect height="11" rx="2" width="18" x="3" y="11" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-    </svg>
-  );
-}
 
 function ReviewerChip({
   handle,

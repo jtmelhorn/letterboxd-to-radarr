@@ -3,58 +3,11 @@
 import { useState, type RefObject } from "react";
 
 import { formatRelativeTime } from "@/app/lib/format";
+import { ArrowPathIcon, InboxIcon, XIcon } from "@/app/components/icons";
 import type { PendingApprovalDto } from "@/app/types/movie";
 
-function ArrowPathIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.75}
-      viewBox="0 0 24 24"
-    >
-      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-      <polyline points="21 3 21 9 15 9" />
-    </svg>
-  );
-}
 
-function XIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.75}
-      viewBox="0 0 24 24"
-    >
-      <line x1="18" x2="6" y1="6" y2="18" />
-      <line x1="6" x2="18" y1="6" y2="18" />
-    </svg>
-  );
-}
 
-function InboxIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.75}
-      viewBox="0 0 24 24"
-    >
-      <path d="M22 12h-6l-2 3h-4l-2-3H2" />
-      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-    </svg>
-  );
-}
 
 export function pendingApprovalMatchesSearch(approval: PendingApprovalDto, query: string): boolean {
   const q = query.trim().toLowerCase();
