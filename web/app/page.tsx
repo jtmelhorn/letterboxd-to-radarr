@@ -797,6 +797,9 @@ export default function Home() {
   const [activitySearch, setActivitySearch] = useState("");
   const [blocklistSearch, setBlocklistSearch] = useState("");
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [isStaleData, setIsStaleData] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const [hasDegradedLoads, setHasDegradedLoads] = useState(false);
   const [sendStates, setSendStates] = useState<Record<string, SendState>>({});
   const [sendMessages, setSendMessages] = useState<Record<string, string>>({});
   const [metadataMessages, setMetadataMessages] = useState<Record<string, string>>({});
@@ -936,26 +939,34 @@ export default function Home() {
     return { scope: "all" };
   }, [currentScope]);
 
+  // Secondary loaders stay non-fatal, but failures flip a shared degraded
+  // flag so they are not completely invisible (P1-7).
   const loadReviewers = useCallback(async () => {
     try {
       const res = await fetch("/api/reviewers", { cache: "no-store" });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setHasDegradedLoads(true);
+        return;
+      }
       const body = (await res.json()) as { reviewers?: ReviewerDto[] };
       setReviewers(body.reviewers ?? []);
     } catch {
-      // non-fatal
+      setHasDegradedLoads(true);
     }
   }, []);
 
   const loadReviewerGroups = useCallback(async () => {
     try {
       const res = await fetch("/api/reviewer-groups", { cache: "no-store" });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setHasDegradedLoads(true);
+        return;
+      }
       const body = (await res.json()) as { groups?: ReviewerGroupDto[] };
       setReviewerGroups(body.groups ?? []);
       setHasLoadedGroups(true);
     } catch {
-      // non-fatal
+      setHasDegradedLoads(true);
     }
   }, []);
 
@@ -963,33 +974,42 @@ export default function Home() {
     try {
       // includeResolved so errored approvals stay visible; counts filter on status.
       const res = await fetch("/api/pending-approvals?includeResolved=1", { cache: "no-store" });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setHasDegradedLoads(true);
+        return;
+      }
       const body = (await res.json()) as { pendingApprovals?: PendingApprovalDto[] };
       setPendingApprovals(body.pendingApprovals ?? []);
     } catch {
-      // non-fatal
+      setHasDegradedLoads(true);
     }
   }, []);
 
   const loadBlocklist = useCallback(async () => {
     try {
       const res = await fetch("/api/blocklist", { cache: "no-store" });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setHasDegradedLoads(true);
+        return;
+      }
       const body = (await res.json()) as { blocklist?: BlocklistedMovieDto[] };
       setBlocklistedMovies(body.blocklist ?? []);
     } catch {
-      // non-fatal
+      setHasDegradedLoads(true);
     }
   }, []);
 
   const loadActivity = useCallback(async () => {
     try {
       const res = await fetch(`/api/sync?${scopeQuery()}`, { cache: "no-store" });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setHasDegradedLoads(true);
+        return;
+      }
       const body = (await res.json()) as { results: SyncResultItem[] };
       setActivityLog(body.results.map(syncResultToActivity));
     } catch {
-      // non-fatal
+      setHasDegradedLoads(true);
     }
   }, [scopeQuery]);
 
@@ -1027,13 +1047,23 @@ export default function Home() {
         if (!res.ok || !body?.reviews) {
           throw new Error(apiMessage(body, "Unable to fetch Letterboxd reviews."));
         }
+        // stale:true means Letterboxd was unreachable and the API served its
+        // cache; label it instead of silently showing old data (P1-7).
+        setIsStaleData(body.stale === true);
         const sorted = sortMoviesByRating(body.reviews);
         setMovies(sorted);
         const states: Record<string, SendState> = {};
         for (const review of sorted) {
           states[movieKey(review)] = statusToSendState(review.status);
         }
-        setSendStates(states);
+        // Merge instead of replace: keep in-flight "loading" entries so a
+        // background reload doesn't wipe a manual add's spinner.
+        setSendStates((previous) => {
+          for (const [key, value] of Object.entries(previous)) {
+            if (value === "loading") states[key] = value;
+          }
+          return states;
+        });
         setSendMessages({});
         void loadActivity();
       } catch (err) {
@@ -1048,7 +1078,10 @@ export default function Home() {
   const loadSyncedMovies = useCallback(async () => {
     try {
       const res = await fetch(`/api/radarr/synced?${scopeQuery()}`, { cache: "no-store" });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setHasDegradedLoads(true);
+        return;
+      }
       const body = (await res.json()) as { movies?: AggregatedMovieDto[] };
       const scoped = body.movies ?? [];
       setSyncedMovies(scoped);
@@ -1112,6 +1145,7 @@ export default function Home() {
       return;
     }
     setIsRemoving(true);
+    setRemoveError(null);
     try {
       const res = await fetch(`/api/movies/${encodeURIComponent(removingMovie.id)}/remove`, {
         method: "POST",
@@ -1125,16 +1159,17 @@ export default function Home() {
       if (res.ok) {
         setSyncedMovies((current) => current.filter((m) => m.id !== removingMovie.id));
         await Promise.all([loadActivity(), loadBlocklist(), loadReviews(false)]);
+        setRemovingMovie(null);
+        setDeleteFiles(false);
+        setBlockFutureSync(true);
       } else {
-        alert(body?.message ?? "Failed to remove movie from Radarr.");
+        // Keep the dialog open so the user can retry or cancel (P1-7).
+        setRemoveError(body?.message ?? "Failed to remove movie from Radarr.");
       }
     } catch {
-      alert("Failed to remove movie from Radarr.");
+      setRemoveError("Failed to remove movie from Radarr.");
     } finally {
       setIsRemoving(false);
-      setRemovingMovie(null);
-      setDeleteFiles(false);
-      setBlockFutureSync(true);
     }
   }, [removingMovie, deleteFiles, blockFutureSync, loadActivity, loadBlocklist, loadReviews]);
 
@@ -1243,6 +1278,11 @@ export default function Home() {
     const t = setTimeout(() => setAutoSyncSummary(null), 6000);
     return () => clearTimeout(t);
   }, [autoSyncSummary]);
+
+  // Reset any stale removal error whenever the remove dialog opens or closes.
+  useEffect(() => {
+    setRemoveError(null);
+  }, [removingMovie]);
 
   // ── Derived state ──────────────────────────────────────────────────────
   const genreOptions = useMemo(() => {
@@ -2255,6 +2295,39 @@ export default function Home() {
               {fetchError && (
                 <AlertBanner title="Sync needs attention" tone="error">
                   {fetchError}
+                </AlertBanner>
+              )}
+
+              {isStaleData && !fetchError && (
+                <AlertBanner title="Showing cached reviews" tone="info">
+                  Letterboxd is unreachable — showing cached reviews until it responds again.
+                </AlertBanner>
+              )}
+
+              {hasDegradedLoads && (
+                <AlertBanner
+                  action={
+                    <button
+                      className="rounded-[var(--radius-control)] border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-bold text-cornsilk/80 transition hover:bg-white/[0.08] hover:text-cornsilk"
+                      onClick={() => {
+                        setHasDegradedLoads(false);
+                        void loadReviewers();
+                        void loadReviewerGroups();
+                        void loadPendingApprovals();
+                        void loadBlocklist();
+                        void loadActivity();
+                        void loadSyncedMovies();
+                      }}
+                      type="button"
+                    >
+                      Retry
+                    </button>
+                  }
+                  title="Some data failed to load"
+                  tone="info"
+                >
+                  Parts of the dashboard (reviewers, groups, approvals, blocklist, or activity) may
+                  be out of date.
                 </AlertBanner>
               )}
 
@@ -3462,6 +3535,15 @@ export default function Home() {
                 </div>
               </label>
             </div>
+
+            {removeError && (
+              <p
+                className="mt-4 rounded-[var(--radius-control)] border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-200"
+                role="alert"
+              >
+                {removeError}
+              </p>
+            )}
 
             <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button

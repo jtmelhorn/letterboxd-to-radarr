@@ -667,7 +667,9 @@ The UI shows which values come from the environment, renders them read-only, and
 
 ---
 
-### [ ] P1-7: Honest fetch/error states in the dashboard
+### [x] P1-7: Honest fetch/error states in the dashboard
+
+> **Completed:** 2026-06-11 — dev / no PR — Implemented directly in page.tsx (P1-8 decomposition has not landed), so no hook-level tests were possible; manual devtools verification skipped (no confirmed local run workflow); degraded flag also covers non-OK responses, not just thrown fetches.
 
 **Problem:**
 Three related issues in `web/app/page.tsx`:
