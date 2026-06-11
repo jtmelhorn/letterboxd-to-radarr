@@ -10,6 +10,7 @@ import {
   validateSyncFilterDraft,
 } from "@/app/components/SyncFilterControls";
 import type { SyncFilterDraft } from "@/app/components/SyncFilterControls";
+import { formatRelativeTime } from "@/app/lib/format";
 import type { ReviewerDto, ReviewerGroupDto, SyncInterval } from "@/app/types/movie";
 
 type GroupUpdate = Partial<
@@ -32,6 +33,8 @@ interface SyncConfigurationPanelProps {
   pendingApprovalCount: number;
   ratingOptions: number[];
   syncIntervalOptions: Array<{ value: SyncInterval; label: string }>;
+  /** True when SYNC_CRON globally overrides per-group sync intervals. */
+  syncCronOverride?: boolean;
   onAddReviewer: (handle: string) => Promise<boolean>;
   onRemoveReviewer: (handle: string) => Promise<void>;
   onCreateGroup: (input: { name: string; ratingThreshold: number }) => Promise<boolean>;
@@ -68,6 +71,12 @@ const dangerBtnCls =
   "rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 font-bold text-cornsilk/65 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-45";
 const labelCls = "text-[11px] font-bold uppercase tracking-wider text-cornsilk/70";
 const helperCls = "text-xs leading-relaxed text-cornsilk/70";
+
+function lastSyncedLabel(lastSyncedAt: string | null): string {
+  if (!lastSyncedAt) return "Never synced";
+  const at = Date.parse(lastSyncedAt);
+  return Number.isNaN(at) ? "Never synced" : `Last synced ${formatRelativeTime(at)}`;
+}
 
 function XIcon({ className }: { className?: string }) {
   return (
@@ -164,6 +173,7 @@ export function SyncConfigurationPanel({
   reviewerGroups,
   reviewers,
   syncIntervalOptions,
+  syncCronOverride = false,
   onAddReviewer,
   onCreateGroup,
   onDeleteGroup,
@@ -423,6 +433,12 @@ export function SyncConfigurationPanel({
             <p className="mt-1 text-[11px] leading-relaxed text-cornsilk/70">
               Enabled groups control sync timing, threshold, approvals, and movie filters. Custom groups are optional.
             </p>
+            {syncCronOverride && (
+              <p className="mt-1 text-[11px] font-bold leading-relaxed text-gold/90">
+                Background schedule overridden by SYNC_CRON — every enabled group runs on that
+                global cron and per-group intervals are ignored for scheduled syncs.
+              </p>
+            )}
           </div>
 
           {reviewerGroups.map((group) => {
@@ -437,6 +453,7 @@ export function SyncConfigurationPanel({
                 }`}
               >
                 <div className="space-y-3">
+                  <p className="text-[11px] text-cornsilk/55">{lastSyncedLabel(group.lastSyncedAt)}</p>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
                     <label className="space-y-1">
                       <span className={labelCls}>Group name</span>

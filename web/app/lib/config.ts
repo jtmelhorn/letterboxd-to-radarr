@@ -58,3 +58,13 @@ export function configuredAppPassword(): string {
 export function isAuthEnabled(): boolean {
   return configuredAppPassword().length > 0 || hasStoredAdminPassword();
 }
+
+/**
+ * True when SYNC_CRON is set to a real schedule, which makes the scheduler run
+ * every schedulable group on that single cron and ignore per-group intervals.
+ */
+export function isSyncCronOverrideActive(): boolean {
+  const raw = (process.env.SYNC_CRON ?? "").trim();
+  if (!raw || raw.toLowerCase() === "off") return false;
+  return process.env.AUTO_SYNC?.toLowerCase() !== "false";
+}

@@ -574,7 +574,9 @@ Scripts/integrations corrupt group settings; membership moves can half-apply.
 
 ---
 
-### [ ] P1-5: Coherent, visible scheduling (last sync time per group)
+### [x] P1-5: Coherent, visible scheduling (last sync time per group)
+
+> **Completed:** 2026-06-11 — dev / no PR — formatRelativeTime was already extracted to lib/format.ts during P1-3; the SYNC_CRON flag rides on PublicSettings (syncCronOverride) rather than the groups response; scheduler unit tests run mock-based, while the SQLite-backed stamp tests were skipped by the existing harness.
 
 **Problem:**
 Two scheduling models coexist in `web/app/lib/scheduler.ts`: if `SYNC_CRON` is set, **all** schedulable groups run on that single cron and per-group intervals are ignored (`runScheduledSync`); if unset, five hardcoded interval crons run (`runScheduledInterval`). The two functions are near-duplicates. Nothing records or displays when a group last synced, so users can't tell whether background sync works at all. `README.md` documents only the `SYNC_CRON` model.

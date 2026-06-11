@@ -11,6 +11,7 @@ import {
   groupCoversReviewer,
   getReviewerGroup,
   listReviewerGroups,
+  stampReviewerGroupLastSynced,
 } from "@/app/lib/repos/reviewerGroups";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
 import { getRecentSyncResults, recordSyncResult } from "@/app/lib/repos/syncResults";
@@ -207,7 +208,12 @@ async function executeGroupSync(
   const fetched = await refreshHandles(run.handles, {
     fetchMetadata: syncFiltersNeedGenreMetadata(group.filters),
   });
-  return syncCachedGroup(run, options, fetched);
+  const summary = await syncCachedGroup(run, options, fetched);
+  // Stamp after any completed run (manual or scheduled, even with 0 adds) so
+  // the UI can show "Last synced"; the manual-interval auto skip above never
+  // reaches this point.
+  stampReviewerGroupLastSynced(group.id);
+  return summary;
 }
 
 async function syncCachedGroup(

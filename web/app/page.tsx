@@ -91,6 +91,7 @@ const defaultSettings: PublicSettings = {
   dataDir: "",
   authEnabled: false,
   setupComplete: false,
+  syncCronOverride: false,
 };
 
 function resolveBootPhase(status: AuthStatusResponse): BootPhase {
@@ -3516,6 +3517,7 @@ export default function Home() {
                 ratingOptions={groupRatingOptions}
                 reviewerGroups={reviewerGroups}
                 reviewers={reviewers}
+                syncCronOverride={settings.syncCronOverride}
                 syncIntervalOptions={syncIntervalOptions}
                 onAddReviewer={addReviewer}
                 onCreateGroup={createReviewerGroup}

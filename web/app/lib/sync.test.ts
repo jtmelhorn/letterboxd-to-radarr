@@ -1049,6 +1049,10 @@ describeWithSqlite("sync filtering", () => {
     expect(summary.skipped).toBe(1);
     expect(summary.added).toBe(2);
     expect(addCalls).toBe(2);
+
+    // Completed runs stamp the group's last-synced timestamp (P1-5).
+    const { getReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+    expect(getReviewerGroup(group.id)?.lastSyncedAt).toBeTruthy();
     expect(
       summary.results.some(
         (result) => result.title === "Action Future" && result.message.includes("blocklisted"),

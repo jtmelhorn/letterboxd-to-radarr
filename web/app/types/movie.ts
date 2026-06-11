@@ -96,6 +96,8 @@ export interface ReviewerGroupDto {
   requiresManualApproval: boolean;
   filters: SyncFilters;
   reviewerHandles: string[];
+  /** ISO timestamp of the last completed sync run for this group, if any. */
+  lastSyncedAt: string | null;
 }
 
 export type SyncInterval = "manual" | "30m" | "1h" | "12h" | "1d" | "1w";
@@ -201,6 +203,8 @@ export interface PublicSettings {
   dataDir: string;
   authEnabled: boolean;
   setupComplete: boolean;
+  /** True when SYNC_CRON globally overrides per-group sync intervals. */
+  syncCronOverride: boolean;
 }
 
 export interface AuthStatusResponse {

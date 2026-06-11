@@ -389,6 +389,30 @@ describeWithSqlite("reviewer group filters", () => {
     });
   });
 
+  it("stamps and exposes lastSyncedAt without touching it on regular saves", async () => {
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { getReviewerGroup, stampReviewerGroupLastSynced, upsertReviewerGroup } = await import(
+      "@/app/lib/repos/reviewerGroups"
+    );
+
+    getOrCreateUser("alice");
+    const saved = upsertReviewerGroup({
+      name: "Stamped",
+      ratingThreshold: 4,
+      reviewerHandles: ["alice"],
+    });
+    expect(getReviewerGroup(saved.id)?.lastSyncedAt).toBeNull();
+
+    stampReviewerGroupLastSynced(saved.id);
+    const stamped = getReviewerGroup(saved.id)?.lastSyncedAt;
+    expect(stamped).toBeTruthy();
+    expect(Number.isNaN(Date.parse(stamped!))).toBe(false);
+
+    // A config save must not reset the stamp.
+    upsertReviewerGroup({ id: saved.id, ratingThreshold: 3.5 });
+    expect(getReviewerGroup(saved.id)?.lastSyncedAt).toBe(stamped);
+  });
+
   it("rejects unknown reviewer handles by name", async () => {
     const { getOrCreateUser } = await import("@/app/lib/repos/users");
     const { upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");

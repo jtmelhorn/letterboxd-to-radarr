@@ -33,29 +33,18 @@ function seedConfiguredReviewer(): void {
   }
 }
 
-async function runScheduledSync(): Promise<void> {
+/**
+ * Run every schedulable group, optionally limited to groups whose configured
+ * sync interval matches. SYNC_CRON mode passes no filter (all groups run on
+ * the single global cron); interval mode passes the firing interval.
+ */
+export async function runScheduledGroups(
+  intervalFilter?: keyof typeof intervalSchedules,
+): Promise<void> {
   seedConfiguredReviewer();
-  const groups = listSchedulableReviewerGroups();
-  for (const group of groups) {
-    try {
-      const summary = await runSyncScope(
-        { type: "group", groupId: group.id },
-        { auto: true, threshold: group.ratingThreshold },
-      );
-      if (summary.added > 0 || summary.failed > 0 || (summary.pending ?? 0) > 0 || (summary.skipped ?? 0) > 0) {
-        console.info(
-          `[scheduler] ${group.name}: +${summary.added} added, ${summary.exists} existing, ${summary.failed} failed, ${summary.pending ?? 0} pending, ${summary.skipped ?? 0} skipped`,
-        );
-      }
-    } catch (error) {
-      console.error(`[scheduler] sync failed for group "${group.name}"`, error);
-    }
-  }
-}
-
-async function runScheduledInterval(interval: keyof typeof intervalSchedules): Promise<void> {
-  seedConfiguredReviewer();
-  const groups = listSchedulableReviewerGroups().filter((group) => group.syncInterval === interval);
+  const groups = listSchedulableReviewerGroups().filter(
+    (group) => intervalFilter === undefined || group.syncInterval === intervalFilter,
+  );
   for (const group of groups) {
     try {
       const summary = await runSyncScope(
@@ -88,9 +77,11 @@ export function startScheduler(): void {
   }
 
   if ((process.env.SYNC_CRON ?? "").trim()) {
-    console.info(`[scheduler] background sync scheduled: "${schedule}"`);
+    console.info(
+      `[scheduler] background sync scheduled: "${schedule}" (SYNC_CRON overrides per-group sync intervals)`,
+    );
     cron.schedule(schedule, () => {
-      void runScheduledSync();
+      void runScheduledGroups();
     });
     return;
   }
@@ -99,7 +90,7 @@ export function startScheduler(): void {
     if (!cron.validate(groupSchedule)) continue;
     console.info(`[scheduler] interval ${interval} scheduled: "${groupSchedule}"`);
     cron.schedule(groupSchedule, () => {
-      void runScheduledInterval(interval as keyof typeof intervalSchedules);
+      void runScheduledGroups(interval as keyof typeof intervalSchedules);
     });
   }
 }

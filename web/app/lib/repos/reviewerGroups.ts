@@ -50,7 +50,17 @@ function toReviewerGroupDto(group: typeof reviewerGroups.$inferSelect): Reviewer
     requiresManualApproval: group.requiresManualApproval,
     filters: parseSyncFiltersJson(group.filtersJson),
     reviewerHandles: handlesForGroup(group.id),
+    lastSyncedAt: group.lastSyncedAt ?? null,
   };
+}
+
+/** Record that a sync run completed for the group (any trigger, even 0 adds). */
+export function stampReviewerGroupLastSynced(groupId: number): void {
+  getDb()
+    .update(reviewerGroups)
+    .set({ lastSyncedAt: new Date().toISOString() })
+    .where(eq(reviewerGroups.id, groupId))
+    .run();
 }
 
 export function listReviewerGroups(): ReviewerGroupDto[] {

@@ -24,6 +24,7 @@ export const reviewerGroups = sqliteTable("reviewer_groups", {
   syncInterval: text("sync_interval").notNull().default("1d"),
   requiresManualApproval: integer("requires_manual_approval", { mode: "boolean" }).notNull().default(false),
   filtersJson: text("filters_json").notNull().default('{"year":{"mode":"any"},"genres":{"include":[],"exclude":[]}}'),
+  lastSyncedAt: text("last_synced_at"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),

@@ -6,6 +6,7 @@ import {
   getConfiguredReviewer,
   getDataDir,
   isAuthEnabled,
+  isSyncCronOverrideActive,
 } from "@/app/lib/config";
 import { decryptSecret, encryptSecret } from "@/app/lib/crypto";
 import { getDb } from "@/app/lib/db";
@@ -93,5 +94,6 @@ export function toPublicSettings(target: ResolvedRadarrTarget): PublicSettings {
     dataDir: getDataDir(),
     authEnabled: isAuthEnabled(),
     setupComplete: isSetupComplete(),
+    syncCronOverride: isSyncCronOverrideActive(),
   };
 }

@@ -35,6 +35,7 @@ function group(input: Partial<ReviewerGroupDto> & { id: number; name: string }):
     requiresManualApproval: input.requiresManualApproval ?? false,
     filters: input.filters ?? emptyFilters,
     reviewerHandles: input.reviewerHandles ?? [],
+    lastSyncedAt: input.lastSyncedAt ?? null,
   };
 }
 

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS reviewer_groups (
   sync_interval TEXT NOT NULL DEFAULT '1d',
   requires_manual_approval INTEGER NOT NULL DEFAULT 0,
   filters_json TEXT NOT NULL DEFAULT '{"year":{"mode":"any"},"genres":{"include":[],"exclude":[]}}',
+  last_synced_at TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
@@ -276,6 +277,7 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
     "filters_json",
     `filters_json TEXT NOT NULL DEFAULT '{"year":{"mode":"any"},"genres":{"include":[],"exclude":[]}}'`,
   );
+  ensureColumn(sqlite, "reviewer_groups", "last_synced_at", "last_synced_at TEXT");
   ensureColumn(
     sqlite,
     "radarr_targets",
