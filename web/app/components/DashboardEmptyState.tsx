@@ -33,7 +33,7 @@ export function WelcomeHero({
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
-          <div className="glass-card flex gap-3 rounded-[var(--radius-card)] p-4">
+          <div className="ui-card flex gap-3 p-4">
             <div className="text-gold mt-0.5">
               <CheckIcon className="h-5 w-5" />
             </div>
@@ -44,7 +44,7 @@ export function WelcomeHero({
               </p>
             </div>
           </div>
-          <div className="glass-card flex gap-3 rounded-[var(--radius-card)] p-4">
+          <div className="ui-card flex gap-3 p-4">
             <div className="text-gold mt-0.5">
               <CheckIcon className="h-5 w-5" />
             </div>
@@ -59,7 +59,7 @@ export function WelcomeHero({
       </div>
 
       <div className="lg:col-span-5">
-        <div className="glass-card rounded-[var(--radius-card)] p-6 md:p-8 space-y-6">
+        <div className="ui-card p-6 md:p-8 space-y-6">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-gold">Get started</p>
             <h3 className="mt-1 text-xl font-black tracking-tight text-cornsilk">Connection checklist</h3>
@@ -120,7 +120,7 @@ export function WelcomeHero({
                   <div className="mt-2.5 flex max-w-xs gap-1.5">
                     <input
                       aria-label="Letterboxd username"
-                      className="h-9 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 focus:outline-none focus:ring-2 focus:ring-gold/30"
+                      className="ui-input h-9 px-3 text-xs"
                       placeholder="e.g. username"
                       value={username}
                       onChange={(e) => onUsernameChange(e.target.value)}
@@ -147,7 +147,7 @@ export function WelcomeHero({
                 </p>
                 {isRadarrSetup && isUserSetup && (
                   <button
-                    className="mt-3 inline-flex items-center gap-2 rounded-[var(--radius-control)] bg-pine px-4 py-2 text-xs font-extrabold text-ink transition hover:bg-pine/90"
+                    className="mt-3 ui-btn ui-btn-primary"
                     onClick={(e) => {
                       e.preventDefault();
                       onSyncNow();
@@ -168,7 +168,7 @@ export function WelcomeHero({
 export function LoadingSkeletonGrid({ isSyncing }: { isSyncing: boolean }) {
   return (
     <div className="flex flex-1 flex-col gap-3 overflow-hidden">
-      <div className="rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] px-4 py-3">
+      <div className="ui-section px-4 py-3">
         <div className="flex items-center gap-3">
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-cornsilk/25 border-t-pine" />
           <div>
@@ -184,7 +184,7 @@ export function LoadingSkeletonGrid({ isSyncing }: { isSyncing: boolean }) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="poster-grid">
           {Array.from({ length: 14 }).map((_, i) => (
-            <div key={i} className="glass-card aspect-[2/3] overflow-hidden rounded-2xl shimmer-wrapper">
+            <div key={i} className="ui-card aspect-[2/3] overflow-hidden shimmer-wrapper">
               <div className="h-full w-full bg-ink/40 flex flex-col justify-between p-3.5">
                 <div className="h-6 w-11 rounded bg-cornsilk/5 animate-pulse" />
                 <div className="space-y-2">

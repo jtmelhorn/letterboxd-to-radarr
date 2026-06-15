@@ -3,6 +3,7 @@
 import type { RefObject } from "react";
 
 import type { AggregatedMovieDto } from "@/app/types/movie";
+import { Button } from "@/app/components/ui";
 
 export function RemoveMovieDialog({
   movie,
@@ -32,7 +33,7 @@ export function RemoveMovieDialog({
       <div
         ref={dialogRef}
         aria-modal="true"
-        className="glass-modal w-full max-w-sm rounded-[var(--radius-card)] border border-cornsilk/10 p-5 shadow-2xl"
+        className="modal-shell w-full max-w-sm rounded-[var(--radius-card)] p-5"
         role="dialog"
       >
         <h3 className="text-base font-extrabold text-cornsilk">Remove from Radarr?</h3>
@@ -83,22 +84,12 @@ export function RemoveMovieDialog({
         )}
 
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button
-            className="h-9 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-4 text-xs font-bold text-cornsilk/70 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-cornsilk"
-            disabled={isRemoving}
-            onClick={onCancel}
-            type="button"
-          >
+          <Button disabled={isRemoving} variant="secondary" onClick={onCancel}>
             Cancel
-          </button>
-          <button
-            className="h-9 rounded-[var(--radius-control)] bg-rose-500 px-4 text-xs font-bold text-white transition hover:bg-rose-600 disabled:opacity-50"
-            disabled={isRemoving}
-            onClick={onConfirm}
-            type="button"
-          >
+          </Button>
+          <Button disabled={isRemoving} variant="danger" onClick={onConfirm}>
             {isRemoving ? "Removing..." : "Remove"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

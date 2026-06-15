@@ -33,12 +33,6 @@ interface SyncFilterControlsProps {
   onChange: (draft: SyncFilterDraft) => void;
 }
 
-const inputCls =
-  "h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25";
-
-const selectCls = `${inputCls} appearance-none`;
-const labelCls = "text-[11px] font-bold uppercase tracking-wider text-cornsilk/70";
-const helperCls = "text-[11px] leading-relaxed text-cornsilk/70";
 const currentYear = String(new Date().getFullYear());
 
 const yearModeOptions: Array<{ value: SyncYearFilterMode; label: string }> = [
@@ -184,7 +178,7 @@ function MultiGenreDropdown({
   return (
     <div ref={rootRef} className="relative space-y-2">
       <div className="space-y-1">
-        <span className={labelCls}>{label}</span>
+        <span className="ui-label">{label}</span>
         <button
           aria-expanded={isOpen}
           aria-label={label}
@@ -195,13 +189,13 @@ function MultiGenreDropdown({
           <span className="block whitespace-normal">{summary}</span>
         </button>
       </div>
-      <p className={helperCls}>{helper}</p>
+      <p className="ui-helper">{helper}</p>
 
       {isOpen && (
         <div className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-ink p-2 shadow-2xl">
           <input
             aria-label={`Search ${label.toLowerCase()}`}
-            className={inputCls}
+            className="ui-input ui-input-sm"
             placeholder="Search genres"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -230,7 +224,7 @@ function MultiGenreDropdown({
             )}
           </div>
           <button
-            className="mt-2 h-8 w-full rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/70 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-cornsilk"
+            className="ui-btn ui-btn-secondary ui-btn-sm mt-2 w-full"
             type="button"
             onClick={() => setIsOpen(false)}
           >
@@ -274,19 +268,19 @@ export function SyncFilterControls({ draft, error, genreOptions, onChange }: Syn
   };
 
   return (
-    <div className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 p-3">
+    <div className="ui-surface p-3">
       <div className="mb-3 space-y-1">
-        <p className={labelCls}>Movie filters</p>
-        <p className={helperCls}>Filters apply before approvals or Radarr adds for this group.</p>
-        <p className={helperCls}>Genre filters require a movie metadata lookup during sync.</p>
+        <p className="ui-label">Movie filters</p>
+        <p className="ui-helper">Filters apply before approvals or Radarr adds for this group.</p>
+        <p className="ui-helper">Genre filters require a movie metadata lookup during sync.</p>
       </div>
 
       <div className="space-y-4">
         <div className="space-y-2">
           <label className="space-y-1">
-            <span className={labelCls}>Release year filter</span>
+            <span className="ui-label">Release year filter</span>
             <select
-              className={selectCls}
+              className="ui-select"
               value={draft.year.mode}
               onChange={(event) => updateYearMode(event.target.value as SyncYearFilterMode)}
             >
@@ -300,9 +294,9 @@ export function SyncFilterControls({ draft, error, genreOptions, onChange }: Syn
 
           {draft.year.mode === "exact" && (
             <label className="space-y-1">
-              <span className={labelCls}>Exact year</span>
+              <span className="ui-label">Exact year</span>
               <input
-                className={inputCls}
+                className="ui-input"
                 inputMode="numeric"
                 max={MAX_SYNC_YEAR}
                 min={MIN_SYNC_YEAR}
@@ -316,9 +310,9 @@ export function SyncFilterControls({ draft, error, genreOptions, onChange }: Syn
 
           {draft.year.mode === "gte" && (
             <label className="space-y-1">
-              <span className={labelCls}>Minimum year</span>
+              <span className="ui-label">Minimum year</span>
               <input
-                className={inputCls}
+                className="ui-input"
                 inputMode="numeric"
                 max={MAX_SYNC_YEAR}
                 min={MIN_SYNC_YEAR}
@@ -332,9 +326,9 @@ export function SyncFilterControls({ draft, error, genreOptions, onChange }: Syn
 
           {draft.year.mode === "lte" && (
             <label className="space-y-1">
-              <span className={labelCls}>Maximum year</span>
+              <span className="ui-label">Maximum year</span>
               <input
-                className={inputCls}
+                className="ui-input"
                 inputMode="numeric"
                 max={MAX_SYNC_YEAR}
                 min={MIN_SYNC_YEAR}
@@ -349,9 +343,9 @@ export function SyncFilterControls({ draft, error, genreOptions, onChange }: Syn
           {draft.year.mode === "between" && (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <label className="space-y-1">
-                <span className={labelCls}>Minimum year</span>
+                <span className="ui-label">Minimum year</span>
                 <input
-                  className={inputCls}
+                  className="ui-input"
                   inputMode="numeric"
                   max={MAX_SYNC_YEAR}
                   min={MIN_SYNC_YEAR}
@@ -362,9 +356,9 @@ export function SyncFilterControls({ draft, error, genreOptions, onChange }: Syn
                 />
               </label>
               <label className="space-y-1">
-                <span className={labelCls}>Maximum year</span>
+                <span className="ui-label">Maximum year</span>
                 <input
-                  className={inputCls}
+                  className="ui-input"
                   inputMode="numeric"
                   max={MAX_SYNC_YEAR}
                   min={MIN_SYNC_YEAR}

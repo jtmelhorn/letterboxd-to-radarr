@@ -3,11 +3,9 @@
 import { useState, type RefObject } from "react";
 
 import { formatRelativeTime } from "@/app/lib/format";
-import { ArrowPathIcon, InboxIcon, XIcon } from "@/app/components/icons";
+import { ArrowPathIcon, InboxIcon } from "@/app/components/icons";
+import { Badge, Button, DrawerHeader, EmptyState, IconButton, Input } from "@/app/components/ui";
 import type { PendingApprovalDto } from "@/app/types/movie";
-
-
-
 
 export function pendingApprovalMatchesSearch(approval: PendingApprovalDto, query: string): boolean {
   const q = query.trim().toLowerCase();
@@ -85,7 +83,7 @@ export function ApprovalsPanel({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex justify-end bg-black/70 backdrop-blur-sm transition-all duration-300"
+      className="fixed inset-0 z-50 flex justify-end bg-black/70 backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -94,42 +92,25 @@ export function ApprovalsPanel({
         ref={panelRef}
         aria-labelledby="approvals-title"
         aria-modal="true"
-        className="glass-modal animate-fade-in flex h-full w-full max-w-md flex-col border-l border-cornsilk/10 shadow-2xl"
+        className="drawer-shell animate-fade-in w-full max-w-md"
         role="dialog"
       >
-        <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-white/10 px-6 pb-4 pt-5">
-          <div>
-            <p className="mb-0.5 text-[11px] font-bold uppercase tracking-widest text-cornsilk/70">
-              Manual approvals
-            </p>
-            <h2 className="text-xl font-black tracking-tight text-cornsilk" id="approvals-title">
-              Approval Queue
-            </h2>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              aria-label="Refresh approval queue"
-              className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-control)] border border-cornsilk/10 bg-white/[0.035] text-cornsilk/60 transition hover:bg-white/[0.08] hover:text-cornsilk"
-              onClick={onRefresh}
-              type="button"
-            >
-              <ArrowPathIcon className="h-4 w-4" />
-            </button>
-            <button
-              aria-label="Close approval queue"
-              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-cornsilk/10 bg-white/[0.035] text-cornsilk/60 transition hover:bg-white/[0.08] hover:text-cornsilk"
-              onClick={onClose}
-              type="button"
-            >
-              <XIcon className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
+        <DrawerHeader
+          closeLabel="Close approval queue"
+          eyebrow="Manual approvals"
+          onClose={onClose}
+          title="Approval Queue"
+          titleId="approvals-title"
+        >
+          <IconButton aria-label="Refresh approval queue" onClick={onRefresh}>
+            <ArrowPathIcon className="h-4 w-4" />
+          </IconButton>
+        </DrawerHeader>
 
-        <div className="px-4 pt-3 pb-1">
-          <input
+        <div className="px-4 pb-2 pt-3">
+          <Input
             aria-label="Search approvals"
-            className="h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
+            className="ui-input-sm"
             placeholder="Search by title, year, group, or status…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -138,23 +119,17 @@ export function ApprovalsPanel({
 
         <div className="flex-1 overflow-y-auto px-4 py-4">
           {approvals.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-              <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-ink text-cornsilk/55">
-                <InboxIcon className="h-6 w-6" />
-              </div>
-              <h3 className="text-base font-extrabold text-cornsilk">No approvals yet</h3>
-              <p className="mt-1 max-w-xs text-xs text-cornsilk/70">
-                Movies from groups that require manual approval will wait here before being sent to
-                Radarr.
-              </p>
-            </div>
+            <EmptyState
+              description="Movies from groups that require manual approval will wait here before being sent to Radarr."
+              icon={<InboxIcon className="h-6 w-6" />}
+              title="No approvals yet"
+            />
           ) : matching.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-              <h3 className="text-base font-extrabold text-cornsilk">No approvals match</h3>
-              <p className="mt-1 max-w-xs text-xs text-cornsilk/70">
-                Try a different title, year, group, or status.
-              </p>
-            </div>
+            <EmptyState
+              description="Try a different title, year, group, or status."
+              icon={<InboxIcon className="h-6 w-6" />}
+              title="No approvals match"
+            />
           ) : (
             <div className="space-y-4">
               <ul className="space-y-2">
@@ -181,32 +156,30 @@ export function ApprovalsPanel({
                         )}
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <button
-                          className="h-9 rounded-[var(--radius-control)] bg-pine px-3 text-xs font-bold text-ink transition hover:bg-pine/90 disabled:cursor-not-allowed disabled:opacity-50"
+                        <Button
                           disabled={Boolean(busyAction)}
+                          size="sm"
+                          variant="primary"
                           onClick={() => void runRowAction(approval, "approve", onApprove)}
-                          type="button"
                         >
                           {busyAction === "approve" ? "Approving…" : "Approve"}
-                        </button>
-                        <button
-                          className="h-9 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/70 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
+                        </Button>
+                        <Button
                           disabled={Boolean(busyAction)}
+                          size="sm"
+                          variant="secondary"
                           onClick={() => void runRowAction(approval, "reject", onReject)}
-                          type="button"
                         >
                           {busyAction === "reject" ? "Rejecting…" : "Reject"}
-                        </button>
-                        <button
-                          className="h-9 rounded-[var(--radius-control)] border border-rose-500/25 bg-rose-500/10 px-3 text-xs font-bold text-rose-200 transition hover:border-rose-400/50 hover:bg-rose-500/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        </Button>
+                        <Button
                           disabled={Boolean(busyAction)}
-                          onClick={() =>
-                            void runRowAction(approval, "reject_blocklist", onRejectAndBlocklist)
-                          }
-                          type="button"
+                          size="sm"
+                          variant="danger"
+                          onClick={() => void runRowAction(approval, "reject_blocklist", onRejectAndBlocklist)}
                         >
                           {busyAction === "reject_blocklist" ? "Blocking…" : "Reject + blocklist"}
-                        </button>
+                        </Button>
                       </div>
                     </li>
                   );
@@ -227,12 +200,12 @@ export function ApprovalsPanel({
                     {resolved.map((approval) => {
                       const busyAction = busyRows[approval.id];
                       const error = rowErrors[approval.id];
-                      const chip =
+                      const tone =
                         approval.status === "approved"
-                          ? "border-pine/30 bg-pine/10 text-chartreuse"
+                          ? "green"
                           : approval.status === "error"
-                            ? "border-rose-500/25 bg-rose-500/10 text-rose-200"
-                            : "border-cornsilk/15 bg-black/20 text-cornsilk/70";
+                            ? "red"
+                            : "slate";
                       return (
                         <li
                           key={approval.id}
@@ -258,21 +231,19 @@ export function ApprovalsPanel({
                                 </p>
                               )}
                             </div>
-                            <span
-                              className={`w-fit flex-shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-bold capitalize ${chip}`}
-                            >
+                            <Badge tone={tone} className="capitalize">
                               {approval.status}
-                            </span>
+                            </Badge>
                           </div>
                           {(approval.status === "rejected" || approval.status === "error") && (
-                            <button
-                              className="h-8 w-fit rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/70 transition hover:border-white/20 hover:text-cornsilk disabled:cursor-not-allowed disabled:opacity-50"
+                            <Button
                               disabled={Boolean(busyAction)}
+                              size="sm"
+                              variant="secondary"
                               onClick={() => void runRowAction(approval, "reset", onReset)}
-                              type="button"
                             >
                               {busyAction === "reset" ? "Resetting…" : "Reset"}
-                            </button>
+                            </Button>
                           )}
                         </li>
                       );

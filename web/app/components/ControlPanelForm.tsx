@@ -43,16 +43,8 @@ interface ControlPanelFormProps {
   canSubmit?: boolean;
 }
 
-const inputCls =
-  "h-11 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-4 text-sm text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25 disabled:cursor-not-allowed disabled:opacity-60";
-
-const selectCls =
-  "h-11 w-full appearance-none rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-4 pr-10 text-sm text-cornsilk transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25 disabled:cursor-not-allowed disabled:opacity-60";
-
 const labelCls = "text-sm font-semibold text-cornsilk";
-const helperCls = "text-xs leading-relaxed text-cornsilk/65";
-
-
+const helperCls = "ui-helper";
 
 function SectionCard({
   title,
@@ -64,7 +56,7 @@ function SectionCard({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
+    <section className="ui-section p-4 sm:p-5">
       <div className="mb-4 space-y-1">
         <h3 className="text-base font-extrabold tracking-tight text-cornsilk">{title}</h3>
         {description && <p className={helperCls}>{description}</p>}
@@ -86,7 +78,11 @@ function FieldLabel({
   return (
     <label className={labelCls} htmlFor={htmlFor}>
       {children}
-      {required && <span className="ml-1 text-gold" aria-label="required">*</span>}
+      {required && (
+        <span className="ml-1 text-gold" aria-label="required">
+          *
+        </span>
+      )}
     </label>
   );
 }
@@ -108,14 +104,6 @@ function Alert({
     <div className={`rounded-[var(--radius-control)] border px-4 py-3 text-sm ${styles}`} role="status">
       {children}
     </div>
-  );
-}
-
-function SelectChevron() {
-  return (
-    <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs text-cornsilk/55">
-      ▼
-    </span>
   );
 }
 
@@ -181,7 +169,7 @@ export function ControlPanelForm({
             </FieldLabel>
             <input
               autoComplete="username"
-              className={inputCls}
+              className="ui-input"
               id={`${idPrefix}-letterboxd-username`}
               placeholder="your-letterboxd-handle"
               value={letterboxdUsername ?? ""}
@@ -208,7 +196,7 @@ export function ControlPanelForm({
             </div>
             <input
               autoComplete="url"
-              className={inputCls}
+              className="ui-input"
               disabled={settings.radarrUrlFromEnv}
               id={`${idPrefix}-radarr-url`}
               inputMode="url"
@@ -231,7 +219,7 @@ export function ControlPanelForm({
             </FieldLabel>
             <input
               autoComplete="off"
-              className={inputCls}
+              className="ui-input"
               disabled={settings.radarrApiKeyFromEnv}
               id={`${idPrefix}-radarr-api-key`}
               placeholder={
@@ -263,7 +251,7 @@ export function ControlPanelForm({
 
         <div className="flex flex-wrap items-center gap-3">
           <button
-            className="inline-flex h-10 items-center justify-center rounded-[var(--radius-control)] border border-white/10 bg-white/[0.035] px-5 text-sm font-bold text-cornsilk/85 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-cornsilk disabled:cursor-not-allowed disabled:opacity-50"
+            className="ui-btn ui-btn-secondary"
             disabled={isTestingConnection || (!settingsDraft.radarrUrl && !settings.radarrUrlFromEnv)}
             onClick={onTestConnection}
             type="button"
@@ -305,55 +293,49 @@ export function ControlPanelForm({
             <FieldLabel htmlFor={`${idPrefix}-quality-profile`} required={isSetup}>
               Quality profile
             </FieldLabel>
-            <div className="relative">
-              <select
-                className={selectCls}
-                disabled={!radarrOptions}
-                id={`${idPrefix}-quality-profile`}
-                value={settingsDraft.qualityProfileId === "" ? "" : String(settingsDraft.qualityProfileId)}
-                onChange={(e) =>
-                  onDraftChange((current) => ({
-                    ...current,
-                    qualityProfileId: e.target.value === "" ? "" : Number(e.target.value),
-                  }))
-                }
-              >
-                {!isSetup && <option value="">{profilePlaceholder}</option>}
-                {isSetup && settingsDraft.qualityProfileId === "" && (
-                  <option value="">{profilePlaceholder}</option>
-                )}
-                {radarrOptions?.qualityProfiles.map((profile) => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.name}
-                  </option>
-                ))}
-              </select>
-              <SelectChevron />
-            </div>
+            <select
+              className="ui-select"
+              disabled={!radarrOptions}
+              id={`${idPrefix}-quality-profile`}
+              value={settingsDraft.qualityProfileId === "" ? "" : String(settingsDraft.qualityProfileId)}
+              onChange={(e) =>
+                onDraftChange((current) => ({
+                  ...current,
+                  qualityProfileId: e.target.value === "" ? "" : Number(e.target.value),
+                }))
+              }
+            >
+              {!isSetup && <option value="">{profilePlaceholder}</option>}
+              {isSetup && settingsDraft.qualityProfileId === "" && (
+                <option value="">{profilePlaceholder}</option>
+              )}
+              {radarrOptions?.qualityProfiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="space-y-2">
             <FieldLabel htmlFor={`${idPrefix}-root-folder`} required={isSetup}>
               Root folder
             </FieldLabel>
-            <div className="relative">
-              <select
-                className={selectCls}
-                disabled={!radarrOptions}
-                id={`${idPrefix}-root-folder`}
-                value={settingsDraft.rootFolderPath}
-                onChange={(e) => onDraftChange((current) => ({ ...current, rootFolderPath: e.target.value }))}
-              >
-                {!isSetup && <option value="">{folderPlaceholder}</option>}
-                {isSetup && !settingsDraft.rootFolderPath && <option value="">{folderPlaceholder}</option>}
-                {radarrOptions?.rootFolders.map((folder) => (
-                  <option key={folder.path} value={folder.path}>
-                    {folder.path}
-                  </option>
-                ))}
-              </select>
-              <SelectChevron />
-            </div>
+            <select
+              className="ui-select"
+              disabled={!radarrOptions}
+              id={`${idPrefix}-root-folder`}
+              value={settingsDraft.rootFolderPath}
+              onChange={(e) => onDraftChange((current) => ({ ...current, rootFolderPath: e.target.value }))}
+            >
+              {!isSetup && <option value="">{folderPlaceholder}</option>}
+              {isSetup && !settingsDraft.rootFolderPath && <option value="">{folderPlaceholder}</option>}
+              {radarrOptions?.rootFolders.map((folder) => (
+                <option key={folder.path} value={folder.path}>
+                  {folder.path}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </SectionCard>
@@ -365,23 +347,20 @@ export function ControlPanelForm({
         >
           <div className="space-y-2">
             <FieldLabel htmlFor={`${idPrefix}-auto-threshold`}>Auto-sync threshold</FieldLabel>
-            <div className="relative">
-              <select
-                className={selectCls}
-                id={`${idPrefix}-auto-threshold`}
-                value={settingsDraft.autoThreshold}
-                onChange={(e) =>
-                  onDraftChange((current) => ({ ...current, autoThreshold: Number(e.target.value) }))
-                }
-              >
-                {ratingOptions.map((rating) => (
-                  <option key={rating} value={rating}>
-                    Sync rated ≥ {rating.toFixed(1)} ★
-                  </option>
-                ))}
-              </select>
-              <SelectChevron />
-            </div>
+            <select
+              className="ui-select"
+              id={`${idPrefix}-auto-threshold`}
+              value={settingsDraft.autoThreshold}
+              onChange={(e) =>
+                onDraftChange((current) => ({ ...current, autoThreshold: Number(e.target.value) }))
+              }
+            >
+              {ratingOptions.map((rating) => (
+                <option key={rating} value={rating}>
+                  Sync rated ≥ {rating.toFixed(1)} ★
+                </option>
+              ))}
+            </select>
           </div>
         </SectionCard>
       )}
@@ -408,7 +387,7 @@ export function ControlPanelForm({
         {isSetup && onSkipRadarr && !canSubmit && Boolean(letterboxdUsername?.trim()) && (
           <div className="flex flex-col gap-1 sm:mr-auto">
             <button
-              className="inline-flex h-11 items-center justify-center rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-5 text-sm font-bold text-cornsilk/75 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-cornsilk disabled:cursor-not-allowed disabled:opacity-50"
+              className="ui-btn ui-btn-secondary"
               disabled={isSaving}
               type="button"
               onClick={onSkipRadarr}
@@ -419,7 +398,7 @@ export function ControlPanelForm({
           </div>
         )}
         <button
-          className="inline-flex h-11 items-center justify-center rounded-[var(--radius-control)] bg-pine px-6 text-sm font-extrabold text-ink transition hover:bg-pine/90 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-pine/35 disabled:cursor-not-allowed disabled:opacity-50"
+          className="ui-btn ui-btn-primary"
           disabled={isSaving || !canSubmit}
           type="submit"
         >

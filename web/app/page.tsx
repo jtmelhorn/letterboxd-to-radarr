@@ -5,13 +5,16 @@ import type { FormEvent, ReactNode } from "react";
 
 import { ApprovalsPanel } from "@/app/components/ApprovalsPanel";
 import { ActivityPanel } from "@/app/components/ActivityPanel";
+import { LoadingSkeletonGrid, WelcomeHero } from "@/app/components/DashboardEmptyState";
+import { DashboardNav } from "@/app/components/DashboardNav";
 import { LoadingScreen, LoginScreen, PasswordSetupScreen } from "@/app/components/AuthGate";
 import { MovieGrid } from "@/app/components/MovieGrid";
 import { MovieDetailModal } from "@/app/components/MovieDetailModal";
 import { RemoveMovieDialog } from "@/app/components/RemoveMovieDialog";
+import { SettingsModal } from "@/app/components/SettingsModal";
 import { SyncedPanel } from "@/app/components/SyncedPanel";
 import { PosterRadarrAction, posterRingClass } from "@/app/components/PosterCard";
-import { AlertBanner, ModalHeader, StatCard } from "@/app/components/ui";
+import { AlertBanner, Button, EmptyState, Input, Select, StatCard } from "@/app/components/ui";
 import {
   ArrowPathIcon,
   CheckIcon,
@@ -20,7 +23,6 @@ import {
   FilmIcon,
   GearIcon,
   InboxIcon,
-  InfoIcon,
   LockIcon,
   RadarrIcon,
   ServerIcon,
@@ -31,7 +33,6 @@ import {
   XIcon,
 } from "@/app/components/icons";
 import { canCompleteSetup, ControlPanelForm } from "@/app/components/ControlPanelForm";
-import { SyncConfigurationPanel } from "@/app/components/SyncConfigurationPanel";
 import { useClickAway } from "@/app/hooks/useClickAway";
 import { useFocusTrap } from "@/app/hooks/useFocusTrap";
 import {
@@ -223,7 +224,6 @@ export default function Home() {
   const [activitySeenAt, setActivitySeenAt] = useState(() => Date.now());
   const [isActivityOpen, setIsActivityOpen] = useState(false);
   const [isClearActivityConfirmOpen, setIsClearActivityConfirmOpen] = useState(false);
-  const [isRatingTooltipOpen, setIsRatingTooltipOpen] = useState(false);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
 
   const movieModalRef = useRef<HTMLDivElement>(null);
@@ -234,7 +234,6 @@ export default function Home() {
   const removeDialogRef = useRef<HTMLDivElement>(null);
   const clearActivityDialogRef = useRef<HTMLDivElement>(null);
   const genreDropdownRef = useRef<HTMLDivElement>(null);
-  const ratingTooltipRef = useRef<HTMLSpanElement>(null);
 
   // Nested overlays (remove/clear dialogs above a modal) stay correct because
   // each trap listens on its own container — only the topmost layer sees Tab.
@@ -247,7 +246,6 @@ export default function Home() {
   useFocusTrap(clearActivityDialogRef, isClearActivityConfirmOpen);
 
   useClickAway(genreDropdownRef, () => setIsGenreFilterOpen(false), isGenreFilterOpen);
-  useClickAway(ratingTooltipRef, () => setIsRatingTooltipOpen(false), isRatingTooltipOpen);
 
 
   const activityUnreadCount = useMemo(
@@ -669,6 +667,10 @@ export default function Home() {
         setIsGenreFilterOpen(false);
         return;
       }
+      if (isMobileFiltersOpen) {
+        setIsMobileFiltersOpen(false);
+        return;
+      }
       if (isSyncedOpen) {
         setIsSyncedOpen(false);
         return;
@@ -681,7 +683,7 @@ export default function Home() {
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [activeMovieKey, bootPhase, isActivityOpen, isApprovalsOpen, isGenreFilterOpen, isSettingsOpen, isSyncedOpen]);
+  }, [activeMovieKey, bootPhase, isActivityOpen, isApprovalsOpen, isGenreFilterOpen, isMobileFiltersOpen, isSettingsOpen, isSyncedOpen]);
 
   useEffect(() => {
     if (!autoSyncSummary) return;
@@ -1487,94 +1489,41 @@ export default function Home() {
   return (
     <>
       {/* ── Fixed glassmorphic navigation bar ──────────────────────────────── */}
-      <nav className="fixed inset-x-0 top-0 z-40 h-16 border-b border-white/10 bg-ink/90 backdrop-blur-xl transition-all duration-200">
-        <div className="content-shell flex h-full items-center justify-between gap-4">
-          <div className="flex flex-shrink-0 items-center gap-3">
-            <div className={`${brandIconCls} h-9 w-9`}>
-              <FilmIcon className="h-5 w-5" />
-            </div>
-            <span className="brand-wordmark text-lg">letterboxdarr</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              aria-label="Sync Letterboxd feed"
-              className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-white/10 bg-white/[0.035] text-cornsilk/70 transition hover:bg-white/[0.075] hover:text-cornsilk disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={busy}
-              onClick={() => void syncFeed()}
-              type="button"
-            >
-              <ArrowPathIcon className={`h-5 w-5 ${busy ? "animate-spin" : ""}`} />
-            </button>
-            <button
-              aria-label="Open sync activity"
-              className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-white/10 bg-white/[0.035] text-cornsilk/70 transition hover:bg-white/[0.075] hover:text-cornsilk"
-              onClick={openActivity}
-              type="button"
-            >
-              <ClockIcon className="h-5 w-5" />
-              {activityUnreadCount > 0 && (
-                <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gold px-1 text-[11px] font-bold text-ink shadow">
-                  {activityUnreadCount > 99 ? "99+" : activityUnreadCount}
-                </span>
-              )}
-            </button>
-            <button
-              aria-label="Open approval queue"
-              className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-white/10 bg-white/[0.035] text-cornsilk/70 transition hover:bg-white/[0.075] hover:text-cornsilk"
-              onClick={() => {
-                void loadPendingApprovals();
-                setIsApprovalsOpen(true);
-              }}
-              type="button"
-            >
-              <InboxIcon className="h-5 w-5" />
-              {pendingApprovalCount > 0 && (
-                <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gold px-1 text-[11px] font-bold text-ink shadow">
-                  {pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}
-                </span>
-              )}
-            </button>
-            <button
-              aria-label="Open settings"
-              className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-white/10 bg-white/[0.035] text-cornsilk/70 transition hover:bg-white/[0.075] hover:text-cornsilk"
-              onClick={() => {
-                setSettingsDraft({
-                  radarrUrl: settings.radarrUrl,
-                  radarrApiKey: "",
-                  autoThreshold: settings.autoThreshold,
-                  qualityProfileId: settings.qualityProfileId ?? "",
-                  rootFolderPath: settings.rootFolderPath ?? "",
-                });
-                setSettingsMessage(null);
-                setSettingsError(null);
-                setConnectionTestResult(null);
-                lastAutoTestRef.current = null;
-                setIsSettingsOpen(true);
-                void loadReviewers();
-                void loadReviewerGroups();
-                void loadPendingApprovals();
-                if (settings.radarrUrl && settings.hasRadarrApiKey) void loadRadarrOptions();
-              }}
-              type="button"
-            >
-              <GearIcon className="h-5 w-5" />
-              {!isRadarrSetup && (
-                <span
-                  aria-label="Radarr setup needed"
-                  className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 animate-pulse rounded-full bg-gold ring-2 ring-ink"
-                />
-              )}
-            </button>
-          </div>
-        </div>
-      </nav>
+      <DashboardNav
+        activityUnreadCount={activityUnreadCount}
+        busy={busy}
+        isRadarrSetup={Boolean(isRadarrSetup)}
+        pendingApprovalCount={pendingApprovalCount}
+        onOpenActivity={openActivity}
+        onOpenApprovals={() => {
+          void loadPendingApprovals();
+          setIsApprovalsOpen(true);
+        }}
+        onOpenSettings={() => {
+          setSettingsDraft({
+            radarrUrl: settings.radarrUrl,
+            radarrApiKey: "",
+            autoThreshold: settings.autoThreshold,
+            qualityProfileId: settings.qualityProfileId ?? "",
+            rootFolderPath: settings.rootFolderPath ?? "",
+          });
+          setSettingsMessage(null);
+          setSettingsError(null);
+          setConnectionTestResult(null);
+          lastAutoTestRef.current = null;
+          setIsSettingsOpen(true);
+          void loadReviewers();
+          void loadReviewerGroups();
+          void loadPendingApprovals();
+          if (settings.radarrUrl && settings.hasRadarrApiKey) void loadRadarrOptions();
+        }}
+        onSyncFeed={() => void syncFeed()}
+      />
 
       {/* ── Main Dashboard Layout ────────────────────────────────────────── */}
-      {/* Below sm the page scrolls naturally; from sm: up the dashboard keeps the locked-viewport layout. */}
-      <main className="flex min-h-[100dvh] flex-col pt-16 sm:h-[100dvh] sm:min-h-0 sm:overflow-hidden">
+      <main className="flex min-h-[100dvh] flex-col overflow-y-auto pt-16">
         {movies.length > 0 ? (
-          <div className="content-shell flex flex-col gap-3 py-3 sm:h-full sm:min-h-0 sm:overflow-hidden">
+          <div className="content-shell flex flex-col gap-4 py-4">
             <div className="shrink-0 flex flex-col gap-3">
               {autoSyncSummary && (
                 <AlertBanner
@@ -1719,235 +1668,193 @@ export default function Home() {
                 />
               </div>
 
-              <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] px-3 py-3 sm:px-4">
-                <div className="flex min-w-[min(100%,14rem)] flex-[1_1_220px] flex-wrap items-center gap-x-2 gap-y-1 text-sm text-cornsilk/60">
-                  <span>Displaying</span>
-                  <strong className="text-cornsilk font-extrabold">{stats.filtered}</strong>
-                  <span>of</span>
-                  <strong className="text-cornsilk/80">{stats.total}</strong>
-                  <span>cached movies.</span>
-                </div>
-
-                <div className="flex min-w-0 flex-[0_1_auto] flex-wrap items-center gap-2 sm:gap-3">
-                  <div className="relative max-w-full flex-[0_1_14rem]">
-                    <select
-                      aria-label="Reviewer scope"
-                      className="h-10 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 pr-8 text-xs font-bold text-cornsilk focus:outline-none focus:ring-2 focus:ring-gold/30"
-                      value={scopeSelection}
-                      onChange={(event) => {
-                        setScopeSelection(event.target.value as ScopeSelection);
-                        setHasAutoFetched(false);
-                      }}
-                    >
-                      <option value="all">All enabled groups</option>
-                      {reviewers.map((reviewer) => (
-                        <option key={reviewer.handle} value={`reviewer:${reviewer.handle}`}>
-                          @{reviewer.handle}
-                        </option>
-                      ))}
-                      {reviewerGroups.map((group) => (
-                        <option key={group.id} value={`group:${group.id}`}>
-                          Group: {group.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <button
-                    aria-expanded={isMobileFiltersOpen}
-                    className="flex h-10 flex-[0_0_auto] items-center gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-white/20 hover:text-cornsilk lg:hidden"
-                    onClick={() => setIsMobileFiltersOpen((open) => !open)}
-                    type="button"
-                  >
-                    Filters
-                    <span aria-hidden="true" className="text-cornsilk/45">
-                      {isMobileFiltersOpen ? "▲" : "▼"}
+              <div className="ui-section sticky top-0 z-10 px-3 py-2.5">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                  <div className="flex min-w-0 flex-[1_1_auto] items-center gap-2 sm:gap-3">
+                    <div className="relative flex-[0_1_auto]">
+                      <select
+                        aria-label="Reviewer scope"
+                        className="ui-select ui-select-sm w-auto min-w-[10rem] pr-8 font-bold"
+                        value={scopeSelection}
+                        onChange={(event) => {
+                          setScopeSelection(event.target.value as ScopeSelection);
+                          setHasAutoFetched(false);
+                        }}
+                      >
+                        <option value="all">All enabled groups</option>
+                        {reviewers.map((reviewer) => (
+                          <option key={reviewer.handle} value={`reviewer:${reviewer.handle}`}>
+                            @{reviewer.handle}
+                          </option>
+                        ))}
+                        {reviewerGroups.map((group) => (
+                          <option key={group.id} value={`group:${group.id}`}>
+                            Group: {group.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <span className="hidden text-xs text-cornsilk/55 sm:inline">
+                      {stats.filtered} of {stats.total}
                     </span>
-                  </button>
+                  </div>
+
                   <div
                     className={`${
                       isMobileFiltersOpen ? "flex" : "hidden"
-                    } w-full flex-wrap items-center gap-2 sm:gap-3 lg:flex lg:w-auto`}
+                    } w-full flex-wrap items-center gap-2 lg:flex lg:w-auto`}
                   >
-                  {currentScope.type === "group" ? (
-                    <span className="flex h-10 flex-[0_0_auto] items-center rounded-[var(--radius-control)] border border-pine/20 bg-pine/10 px-3 text-xs font-bold text-chartreuse">
-                      Using group filters
-                    </span>
-                  ) : (
-                    <>
-                      <span
-                        ref={ratingTooltipRef}
-                        className="group relative flex h-10 flex-[0_0_auto] items-center gap-1.5"
-                      >
-                        <label className="text-xs font-bold uppercase tracking-wider text-cornsilk/70">
-                          Min. rating ≥
-                        </label>
-                        <button
-                          aria-describedby="min-rating-tooltip"
-                          aria-expanded={isRatingTooltipOpen}
-                          aria-label="About the rating filter"
-                          className="text-cornsilk/70 transition-colors hover:text-cornsilk focus:text-cornsilk"
-                          onClick={() => setIsRatingTooltipOpen((open) => !open)}
-                          type="button"
-                        >
-                          <InfoIcon className="h-3.5 w-3.5" />
-                        </button>
-                        <span
-                          className={`pointer-events-none absolute left-0 top-full z-20 mt-2 w-60 rounded-lg border border-cornsilk/10 bg-ink px-3 py-2 text-[11px] font-medium leading-relaxed text-cornsilk/80 shadow-xl transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 ${
-                            isRatingTooltipOpen ? "opacity-100" : "opacity-0"
-                          }`}
-                          id="min-rating-tooltip"
-                          role="tooltip"
-                        >
-                          Filter which movies appear in the grid. Auto-sync to Radarr uses thresholds in Sync groups.
-                        </span>
-                      </span>
-                      <div className="flex min-h-10 flex-[0_1_auto] flex-wrap rounded-[var(--radius-control)] border border-white/10 bg-black/20 p-0.5">
-                        <button
-                          className={`h-9 rounded-md px-2.5 text-xs font-bold transition-all sm:px-3 ${
-                            minimumRating === 0 ? "bg-pine text-ink shadow" : "text-cornsilk/65 hover:text-cornsilk"
-                          }`}
-                          onClick={() => setMinimumRating(0)}
-                          type="button"
-                        >
-                          All
-                        </button>
-                        {[3.0, 3.5, 4.0, 4.5, 5.0].map((val) => (
+                    {currentScope.type === "group" ? (
+                      <span className="ui-badge ui-badge-green">Using group filters</span>
+                    ) : (
+                      <>
+                        <div className="flex h-8 flex-wrap items-center gap-1 rounded-[var(--radius-control)] border border-white/10 bg-black/20 p-0.5">
                           <button
-                            key={val}
-                            className={`h-9 rounded-md px-2.5 text-xs font-bold transition-all sm:px-3 ${
-                              minimumRating === val
+                            className={`h-7 rounded-md px-2 text-[11px] font-bold transition-all ${
+                              minimumRating === 0
                                 ? "bg-pine text-ink shadow"
                                 : "text-cornsilk/65 hover:text-cornsilk"
                             }`}
-                            onClick={() => setMinimumRating(val)}
+                            onClick={() => setMinimumRating(0)}
                             type="button"
                           >
-                            {val.toFixed(1)}★
+                            All
                           </button>
-                        ))}
-                      </div>
+                          {[3.0, 3.5, 4.0, 4.5, 5.0].map((val) => (
+                            <button
+                              key={val}
+                              className={`h-7 rounded-md px-2 text-[11px] font-bold transition-all ${
+                                minimumRating === val
+                                  ? "bg-pine text-ink shadow"
+                                  : "text-cornsilk/65 hover:text-cornsilk"
+                              }`}
+                              onClick={() => setMinimumRating(val)}
+                              type="button"
+                            >
+                              {val.toFixed(1)}★
+                            </button>
+                          ))}
+                        </div>
 
-                      <div ref={genreDropdownRef} className="relative max-w-full flex-[0_1_10rem]">
-                        <button
-                          className="flex h-10 w-full min-w-32 items-center justify-between gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-white/20 hover:text-cornsilk"
-                          onClick={() => setIsGenreFilterOpen((open) => !open)}
-                          type="button"
-                        >
-                          <span className="truncate">{genreFilterLabel}</span>
-                          <span className="text-cornsilk/45">▼</span>
-                        </button>
-                        {isGenreFilterOpen && (
-                          <div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border border-cornsilk/10 bg-ink p-2 shadow-2xl">
-                            <div className="flex items-center justify-between gap-2 border-b border-cornsilk/10 px-2 pb-2">
-                              <span className="text-xs font-extrabold text-cornsilk">Genres</span>
-                              {selectedGenres.length > 0 && (
-                                <button
-                                  className="text-xs font-bold text-pine transition hover:text-chartreuse"
-                                  onClick={() => setSelectedGenres([])}
-                                  type="button"
-                                >
-                                  Clear
-                                </button>
-                              )}
-                            </div>
-                            <div className="max-h-64 overflow-y-auto py-1">
-                              <button
-                                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06] disabled:cursor-default disabled:opacity-50"
-                                disabled={selectedGenres.length === 0}
-                                onClick={() => setSelectedGenres([])}
-                                type="button"
-                              >
-                                {selectedGenres.length === 0 ? "All genres shown" : "Clear selection"}
-                              </button>
-                              {genreOptions.length === 0 ? (
-                                <p className="px-2 py-3 text-xs leading-relaxed text-cornsilk/70">
-                                  Cached genres will appear after metadata refresh.
-                                </p>
-                              ) : (
-                                genreOptions.map((genre) => (
-                                  <label
-                                    key={genre}
-                                    className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]"
+                        <div ref={genreDropdownRef} className="relative flex-[0_1_auto]">
+                          <button
+                            className="ui-input ui-input-sm flex h-8 w-auto min-w-[8rem] items-center justify-between gap-2 pr-8 font-bold"
+                            onClick={() => setIsGenreFilterOpen((open) => !open)}
+                            type="button"
+                          >
+                            <span className="truncate">{genreFilterLabel}</span>
+                            <span className="pointer-events-none absolute right-2.5 text-cornsilk/45">▼</span>
+                          </button>
+                          {isGenreFilterOpen && (
+                            <div className="absolute left-0 top-full z-30 mt-2 w-60 rounded-xl border border-cornsilk/10 bg-ink p-2 shadow-2xl">
+                              <div className="flex items-center justify-between gap-2 border-b border-cornsilk/10 px-2 pb-2">
+                                <span className="text-xs font-extrabold text-cornsilk">Genres</span>
+                                {selectedGenres.length > 0 && (
+                                  <button
+                                    className="text-xs font-bold text-pine transition hover:text-chartreuse"
+                                    onClick={() => setSelectedGenres([])}
+                                    type="button"
                                   >
-                                    <input
-                                      checked={selectedGenres.includes(genre)}
-                                      className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                                      onChange={(e) =>
-                                        setSelectedGenres((current) =>
-                                          e.target.checked
-                                            ? [...new Set([...current, genre])]
-                                            : current.filter((item) => item !== genre),
-                                        )
-                                      }
-                                      type="checkbox"
-                                    />
-                                    <span className="truncate">{genre}</span>
-                                  </label>
-                                ))
-                              )}
+                                    Clear
+                                  </button>
+                                )}
+                              </div>
+                              <div className="max-h-56 overflow-y-auto py-1">
+                                {genreOptions.length === 0 ? (
+                                  <p className="px-2 py-3 text-xs leading-relaxed text-cornsilk/70">
+                                    Cached genres will appear after metadata refresh.
+                                  </p>
+                                ) : (
+                                  genreOptions.map((genre) => (
+                                    <label
+                                      key={genre}
+                                      className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]"
+                                    >
+                                      <input
+                                        checked={selectedGenres.includes(genre)}
+                                        className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                                        onChange={(e) =>
+                                          setSelectedGenres((current) =>
+                                            e.target.checked
+                                              ? [...new Set([...current, genre])]
+                                              : current.filter((item) => item !== genre),
+                                          )
+                                        }
+                                        type="checkbox"
+                                      />
+                                      <span className="truncate">{genre}</span>
+                                    </label>
+                                  ))
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
+                          )}
+                        </div>
 
-                  <label className="flex h-10 flex-[0_0_auto] cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3">
-                    <input
-                      checked={hideAdded}
-                      className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                      onChange={(e) => setHideAdded(e.target.checked)}
-                      type="checkbox"
-                    />
-                    <span className="text-xs font-bold text-cornsilk/70 whitespace-nowrap">Hide movies already in Radarr</span>
-                  </label>
+                        <label className="ui-input ui-input-sm flex h-8 w-auto cursor-pointer items-center gap-2 pr-3">
+                          <input
+                            checked={hideAdded}
+                            className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                            onChange={(e) => setHideAdded(e.target.checked)}
+                            type="checkbox"
+                          />
+                          <span className="whitespace-nowrap text-[11px] font-bold text-cornsilk/70">
+                            Hide added
+                          </span>
+                        </label>
+                      </>
+                    )}
                   </div>
-                </div>
 
-                <div className="min-w-[min(100%,260px)] flex-[1_1_280px] lg:ml-auto lg:max-w-sm xl:max-w-md">
-                  <input
-                    aria-label="Search movies"
-                    className="h-10 w-full min-w-0 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
-                    placeholder="Search movies, year, reviewer, or genre…"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
+                  <div className="flex min-w-[12rem] flex-[1_1_220px] items-center gap-2 lg:ml-auto lg:max-w-sm">
+                    <Button
+                      className="lg:hidden"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setIsMobileFiltersOpen((open) => !open)}
+                    >
+                      Filters
+                    </Button>
+                    <Input
+                      aria-label="Search movies"
+                      className="ui-input-sm h-8"
+                      placeholder="Search movies, year, reviewer, or genre…"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
 
             {filteredMovies.length === 0 ? (
-              <div className="flex flex-1 flex-col items-center justify-center py-12 text-center">
-                <div className="glass-card flex w-full flex-col items-center justify-center rounded-[var(--radius-card)] px-6 py-14">
-                  <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-black/25 text-cornsilk/65">
-                    <FilmIcon className="h-6 w-6" />
-                  </div>
-                  <h3 className="text-xl font-black tracking-tight text-cornsilk">No movies match this filter</h3>
-                   <p className="mt-2 max-w-sm text-sm leading-relaxed text-cornsilk/65">
-                    {hideAdded
+              <div className="py-8">
+                <EmptyState
+                  icon={<FilmIcon className="h-6 w-6" />}
+                  title="No movies match this filter"
+                  description={
+                    hideAdded
                       ? "All visible movies are already in Radarr, or none meet the current filter. Adjust the filters above."
                       : searchQuery.trim()
                         ? "No movies match your search. Try a different query."
                         : activeReviewerGroup
-                        ? "No movies match this group's threshold and filters. Adjust them in Sync groups."
-                        : selectedGenres.length > 0
-                        ? "No movies match the selected genre filter. Clear genres or choose a different selection above."
-                        : minimumRating > 0
-                        ? `No movies rated ${minimumRating.toFixed(1)}★ or higher. Choose All or lower the minimum rating above.`
-                        : "No movies cached yet. Sync your Letterboxd feed to get started."}
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="min-h-0 flex-1 sm:overflow-y-auto">
-                <MovieGrid
-                  movies={filteredMovies}
-                  sendStates={sendStates}
-                  onOpenMovie={(key) => setActiveMovieKey(key)}
-                  onRemove={(m) => setRemovingMovie(m)}
-                  onSend={(m) => void sendToRadarr(m)}
+                          ? "No movies match this group's threshold and filters. Adjust them in Sync groups."
+                          : selectedGenres.length > 0
+                            ? "No movies match the selected genre filter. Clear genres or choose a different selection above."
+                            : minimumRating > 0
+                              ? `No movies rated ${minimumRating.toFixed(1)}★ or higher. Choose All or lower the minimum rating above.`
+                              : "No movies cached yet. Sync your Letterboxd feed to get started."
+                  }
                 />
               </div>
+            ) : (
+              <MovieGrid
+                movies={filteredMovies}
+                sendStates={sendStates}
+                onOpenMovie={(key) => setActiveMovieKey(key)}
+                onRemove={(m) => setRemovingMovie(m)}
+                onSend={(m) => void sendToRadarr(m)}
+              />
             )}
           </div>
         ) : (
@@ -1958,184 +1865,17 @@ export default function Home() {
             </AlertBanner>
           )}
           {movies.length === 0 && !busy && (
-            <div className="animate-fade-in flex flex-1 flex-col justify-center gap-8 overflow-y-auto py-4 lg:grid lg:grid-cols-12 lg:items-center">
-              <div className="lg:col-span-7 space-y-6 text-left">
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-gold/15 bg-gold/10 px-3 py-1 text-xs font-bold text-gold">
-                  <SparklesIcon className="h-3.5 w-3.5" />
-                  Private media automation
-                </span>
-                <h1 className="text-4xl font-black leading-tight tracking-tight text-cornsilk md:text-5xl">
-                  <span className="brand-wordmark">letterboxdarr</span> turns high-rated reviews into Radarr adds.
-                </h1>
-                <p className="max-w-xl text-base leading-relaxed text-cornsilk/68 md:text-lg">
-                  Configure Radarr once, enter your public Letterboxd handle, then sync. Movies that meet
-                  enabled group rules can be queued automatically while the dashboard stays readable and manual.
-                </p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
-                  <div className="glass-card flex gap-3 rounded-[var(--radius-card)] p-4">
-                    <div className="text-gold mt-0.5">
-                      <CheckIcon className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-cornsilk">Background Syncing</h4>
-                      <p className="mt-1 text-xs leading-relaxed text-cornsilk/65">
-                        A server scheduler keeps Radarr in sync even when this tab is closed.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="glass-card flex gap-3 rounded-[var(--radius-card)] p-4">
-                    <div className="text-gold mt-0.5">
-                      <CheckIcon className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-cornsilk">Sync Groups</h4>
-                      <p className="mt-1 text-xs leading-relaxed text-cornsilk/65">
-                        Set thresholds, timing, approvals, and filters for hands-off downloads.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="lg:col-span-5">
-                <div className="glass-card rounded-[var(--radius-card)] p-6 md:p-8 space-y-6">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-gold">Get started</p>
-                    <h3 className="mt-1 text-xl font-black tracking-tight text-cornsilk">Connection checklist</h3>
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="flex gap-4 relative">
-                      <div className="absolute left-[17px] top-9 bottom-0 w-[1px] bg-pine" />
-                      <div
-                        className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border font-bold transition-all duration-300 ${
-                          isRadarrSetup
-                            ? "border-pine/30 bg-pine/15 text-cornsilk"
-                            : "border-cornsilk/10 bg-ink/60 text-cornsilk/60"
-                        }`}
-                      >
-                        {isRadarrSetup ? <CheckIcon className="h-4 w-4" /> : "1"}
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-bold text-cornsilk">Configure Radarr Server</h4>
-                          {!isRadarrSetup && (
-                            <span className="rounded bg-gold/10 px-1.5 py-0.5 text-[11px] font-bold text-gold border border-gold/10">
-                              Setup Needed
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs leading-relaxed text-cornsilk/65">
-                          Configure your Radarr base URL and API key in Settings to permit syncs.
-                        </p>
-                        {!isRadarrSetup && (
-                          <button
-                            className="mt-2 text-xs font-semibold text-gold hover:text-cornsilk inline-flex items-center gap-1 transition-colors"
-                            onClick={() => setIsSettingsOpen(true)}
-                          >
-                            Configure Connection ↗
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex gap-4 relative">
-                      <div className="absolute left-[17px] top-9 bottom-0 w-[1px] bg-pine" />
-                      <div
-                        className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border font-bold transition-all duration-300 ${
-                          isUserSetup
-                            ? "border-pine/30 bg-pine/15 text-cornsilk"
-                            : "border-cornsilk/10 bg-ink/60 text-cornsilk/60"
-                        }`}
-                      >
-                        {isUserSetup ? <CheckIcon className="h-4 w-4" /> : "2"}
-                      </div>
-                      <div className="space-y-1">
-                        <h4 className="text-sm font-bold text-cornsilk">Enter Letterboxd Handle</h4>
-                        <p className="text-xs leading-relaxed text-cornsilk/65">
-                          Enter your Letterboxd username, then use Sync Feed to fetch reviews.
-                        </p>
-                        {!isUserSetup && (
-                          <div className="mt-2.5 flex max-w-xs gap-1.5">
-                            <input
-                              aria-label="Letterboxd username"
-                              className="h-9 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 focus:outline-none focus:ring-2 focus:ring-gold/30"
-                              placeholder="e.g. username"
-                              value={config.username}
-                              onChange={(e) => updateConfig("username", e.target.value)}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex gap-4">
-                      <div
-                        className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border font-bold transition-all duration-300 ${
-                          isRadarrSetup && isUserSetup
-                            ? "border-gold/20 bg-gold/10 text-gold"
-                            : "border-cornsilk/10 bg-ink/60 text-cornsilk/60"
-                        }`}
-                      >
-                        <SparklesIcon className="h-4.5 w-4.5" />
-                      </div>
-                      <div className="space-y-1">
-                        <h4 className="text-sm font-bold text-cornsilk">Load Feed &amp; Start Syncing</h4>
-                        <p className="text-xs leading-relaxed text-cornsilk/65">
-                          Click Sync Feed to inspect, filter, and send movies into Radarr.
-                        </p>
-                        {isRadarrSetup && isUserSetup && (
-                          <button
-                            className="mt-3 inline-flex items-center gap-2 rounded-[var(--radius-control)] bg-pine px-4 py-2 text-xs font-extrabold text-ink transition hover:bg-pine/90"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              void syncFeed();
-                            }}
-                          >
-                            Sync Now
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <WelcomeHero
+              isRadarrSetup={Boolean(isRadarrSetup)}
+              isUserSetup={isUserSetup}
+              username={config.username}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              onSyncNow={() => void syncFeed()}
+              onUsernameChange={(value) => updateConfig("username", value)}
+            />
           )}
 
-          {busy && movies.length === 0 && (
-            <div className="flex flex-1 flex-col gap-3 overflow-hidden">
-              <div className="rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-cornsilk/25 border-t-pine" />
-                  <div>
-                    <p className="text-sm font-extrabold text-cornsilk">
-                      {isSyncing ? "Syncing Letterboxd and Radarr…" : "Loading Letterboxd reviews…"}
-                    </p>
-                    <p className="mt-0.5 text-xs text-cornsilk/60">
-                      Posters and review details will appear as soon as the feed is ready.
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto">
-                <div className="poster-grid">
-                  {Array.from({ length: 14 }).map((_, i) => (
-                    <div key={i} className="glass-card aspect-[2/3] overflow-hidden rounded-2xl shimmer-wrapper">
-                      <div className="h-full w-full bg-ink/40 flex flex-col justify-between p-3.5">
-                        <div className="h-6 w-11 rounded bg-cornsilk/5 animate-pulse" />
-                        <div className="space-y-2">
-                          <div className="h-3 w-10 rounded bg-cornsilk/5 animate-pulse" />
-                          <div className="h-4 w-3/4 rounded bg-cornsilk/5 animate-pulse" />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
+          {busy && movies.length === 0 && <LoadingSkeletonGrid isSyncing={isSyncing} />}
         </div>
         )}
       </main>
@@ -2269,151 +2009,48 @@ export default function Home() {
 
       {/* ── Settings Modal ─────────────────────────────────────────────────── */}
       {isSettingsOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/85 p-0 backdrop-blur-xl sm:items-center sm:p-4 transition-all duration-300"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsSettingsOpen(false);
+        <SettingsModal
+          blocklistSearch={blocklistSearch}
+          blocklistedMovies={blocklistedMovies}
+          connectionDot={connectionDot}
+          connectionTestResult={connectionTestResult}
+          erroredApprovalCount={erroredApprovalCount}
+          filteredBlocklistedMovies={filteredBlocklistedMovies}
+          groupGenreOptions={groupGenreOptions}
+          groupRatingOptions={groupRatingOptions}
+          hasManualApprovalGroups={hasManualApprovalGroups}
+          isLoadingOptions={isLoadingOptions}
+          isSavingSettings={isSavingSettings}
+          isTestingConnection={isTestingConnection}
+          modalRef={settingsModalRef}
+          pendingApprovalCount={pendingApprovalCount}
+          radarrOptions={radarrOptions}
+          ratingOptions={ratingOptions}
+          reviewerGroups={reviewerGroups}
+          reviewers={reviewers}
+          settings={settings}
+          settingsDraft={settingsDraft}
+          settingsError={settingsError}
+          settingsMessage={settingsMessage}
+          syncIntervalOptions={syncIntervalOptions}
+          onAddReviewer={addReviewer}
+          onAutoTestConnection={maybeAutoTestConnection}
+          onBlocklistSearchChange={setBlocklistSearch}
+          onClose={() => setIsSettingsOpen(false)}
+          onCreateGroup={createReviewerGroup}
+          onDeleteGroup={deleteGroup}
+          onDraftChange={(updater) => setSettingsDraft(updater)}
+          onOpenApprovals={() => {
+            setIsSettingsOpen(false);
+            void loadPendingApprovals();
+            setIsApprovalsOpen(true);
           }}
-        >
-          <div
-            ref={settingsModalRef}
-            aria-labelledby="settings-title"
-            aria-modal="true"
-            className="glass-modal flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-3xl border border-cornsilk/10 shadow-2xl sm:max-w-4xl sm:rounded-[var(--radius-card)]"
-            role="dialog"
-          >
-            <ModalHeader
-              closeLabel="Close settings"
-              eyebrow="Control panel"
-              onClose={() => setIsSettingsOpen(false)}
-              title="Sync Configuration"
-              titleId="settings-title"
-            />
-
-            <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
-              <SyncConfigurationPanel
-                genreOptions={groupGenreOptions}
-                pendingApprovalCount={pendingApprovalCount}
-                ratingOptions={groupRatingOptions}
-                reviewerGroups={reviewerGroups}
-                reviewers={reviewers}
-                syncCronOverride={settings.syncCronOverride}
-                syncIntervalOptions={syncIntervalOptions}
-                onAddReviewer={addReviewer}
-                onCreateGroup={createReviewerGroup}
-                onDeleteGroup={deleteGroup}
-                onRemoveReviewer={removeReviewer}
-                onSaveGroup={saveReviewerGroup}
-              />
-
-              {(hasManualApprovalGroups || pendingApprovalCount > 0 || erroredApprovalCount > 0) && (
-                <section className="flex flex-col gap-2 rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-                  <div className="space-y-1">
-                    <h3 className="text-base font-extrabold tracking-tight text-cornsilk">
-                      Pending approvals ({pendingApprovalCount})
-                    </h3>
-                    <p className="text-xs leading-relaxed text-cornsilk/65">
-                      Approvals now live in their own queue — open it from the inbox icon in the
-                      navigation bar.
-                    </p>
-                  </div>
-                  <button
-                    className="h-9 w-fit rounded-[var(--radius-control)] border border-white/10 bg-white/[0.04] px-3 text-xs font-bold text-cornsilk/80 transition hover:bg-white/[0.08] hover:text-cornsilk"
-                    onClick={() => {
-                      setIsSettingsOpen(false);
-                      void loadPendingApprovals();
-                      setIsApprovalsOpen(true);
-                    }}
-                    type="button"
-                  >
-                    Open queue
-                  </button>
-                </section>
-              )}
-
-              <section className="rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
-                <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="space-y-1">
-                    <h3 className="text-base font-extrabold tracking-tight text-cornsilk">
-                      Blocklisted movies
-                    </h3>
-                    <p className="text-xs leading-relaxed text-cornsilk/65">
-                      Movies listed here are skipped before approvals or Radarr adds.
-                    </p>
-                  </div>
-                  <span className="w-fit rounded-full border border-rose-500/20 bg-rose-500/10 px-2.5 py-1 text-xs font-bold text-rose-200">
-                    {blocklistedMovies.length} blocked
-                  </span>
-                </div>
-                <input
-                  aria-label="Search blocklisted movies"
-                  className="mb-3 h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25"
-                  placeholder="Search by title, year, source, or TMDB/IMDb id…"
-                  value={blocklistSearch}
-                  onChange={(e) => setBlocklistSearch(e.target.value)}
-                />
-                <div className="space-y-2">
-                  {filteredBlocklistedMovies.map((movie) => (
-                    <div
-                      key={movie.id}
-                      className="flex flex-col gap-3 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 p-3 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-extrabold text-cornsilk">
-                          {movie.title}
-                          {movie.year != null && (
-                            <span className="ml-1 font-medium text-cornsilk/70">{movie.year}</span>
-                          )}
-                        </p>
-                        <p className="mt-1 text-xs text-cornsilk/60">
-                          {movie.source === "removed_from_radarr" ? "Removed from Radarr" : "Manually blocked"}
-                          {movie.tmdbId != null && <span> · TMDB {movie.tmdbId}</span>}
-                        </p>
-                      </div>
-                      <button
-                        className="h-9 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/70 transition hover:border-pine/30 hover:bg-pine/10 hover:text-cornsilk"
-                        onClick={() => void unblockMovie(movie.id)}
-                        type="button"
-                      >
-                        Unblock
-                      </button>
-                    </div>
-                  ))}
-                  {blocklistedMovies.length === 0 && (
-                    <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/70">
-                      No movies are blocklisted.
-                    </p>
-                  )}
-                  {blocklistedMovies.length > 0 && filteredBlocklistedMovies.length === 0 && (
-                    <p className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 px-3 py-3 text-xs text-cornsilk/70">
-                      No blocklisted movies match your search.
-                    </p>
-                  )}
-                </div>
-              </section>
-
-              <ControlPanelForm
-                connectionDot={connectionDot}
-                connectionTestResult={connectionTestResult}
-                isLoadingOptions={isLoadingOptions}
-                isSaving={isSavingSettings}
-                isTestingConnection={isTestingConnection}
-                mode="modal"
-                onAutoTestConnection={maybeAutoTestConnection}
-                onDraftChange={(updater) => setSettingsDraft(updater)}
-                onSubmit={saveSettings}
-                onTestConnection={testConnection}
-                radarrOptions={radarrOptions}
-                ratingOptions={ratingOptions}
-                settings={settings}
-                settingsDraft={settingsDraft}
-                settingsError={settingsError}
-                settingsMessage={settingsMessage}
-                submitLabel="Save Settings"
-              />
-            </div>
-          </div>
-        </div>
+          onRemoveReviewer={removeReviewer}
+          onSaveGroup={saveReviewerGroup}
+          onSubmitSettings={saveSettings}
+          onTestConnection={testConnection}
+          onUnblockMovie={(id) => void unblockMovie(id)}
+        />
       )}
     </>
   );

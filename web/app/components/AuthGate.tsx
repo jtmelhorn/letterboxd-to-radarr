@@ -4,12 +4,6 @@ import type { FormEvent } from "react";
 
 import { LockIcon } from "@/app/components/icons";
 
-const inputCls =
-  "h-11 rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-4 text-sm text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25";
-
-const primaryBtnCls =
-  "rounded-[var(--radius-control)] bg-pine text-ink font-bold transition hover:bg-pine/90 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-pine/35 disabled:cursor-not-allowed disabled:opacity-50";
-
 const brandIconCls =
   "flex items-center justify-center rounded-2xl bg-pine text-ink shadow-lg shadow-pine/10";
 
@@ -43,7 +37,7 @@ export function PasswordSetupScreen({
 }) {
   return (
     <div className="flex min-h-screen items-center justify-center px-4 py-10">
-      <div className="glass-card w-full max-w-md rounded-[var(--radius-card)] p-7 sm:p-8 space-y-6">
+      <div className="ui-card w-full max-w-md p-7 sm:p-8 space-y-6">
         <div className="flex flex-col items-center gap-3 text-center">
           <div className={`${brandIconCls} h-12 w-12`}>
             <LockIcon className="h-6 w-6" />
@@ -63,7 +57,7 @@ export function PasswordSetupScreen({
             <input
               autoComplete="new-password"
               autoFocus
-              className={`${inputCls} w-full`}
+              className="ui-input w-full"
               id="setup-admin-password"
               placeholder="Minimum 8 characters"
               type="password"
@@ -77,7 +71,7 @@ export function PasswordSetupScreen({
             </label>
             <input
               autoComplete="new-password"
-              className={`${inputCls} w-full`}
+              className="ui-input w-full"
               id="setup-admin-confirm"
               placeholder="Re-enter password"
               type="password"
@@ -86,12 +80,15 @@ export function PasswordSetupScreen({
             />
           </div>
           {loginError && (
-            <div className="rounded-[var(--radius-control)] border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-sm text-rose-200" role="alert">
+            <div
+              className="rounded-[var(--radius-control)] border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-sm text-rose-200"
+              role="alert"
+            >
               {loginError}
             </div>
           )}
           <button
-            className={`${primaryBtnCls} h-11 w-full text-sm`}
+            className="ui-btn ui-btn-primary w-full"
             disabled={
               isSettingPassword ||
               passwordInput.length < 8 ||
@@ -122,7 +119,7 @@ export function LoginScreen({
 }) {
   return (
     <div className="flex min-h-screen items-center justify-center px-4 py-10">
-      <div className="glass-card w-full max-w-md rounded-[var(--radius-card)] p-7 sm:p-8 space-y-6">
+      <div className="ui-card w-full max-w-md p-7 sm:p-8 space-y-6">
         <div className="flex flex-col items-center gap-3 text-center">
           <div className={`${brandIconCls} h-12 w-12`}>
             <LockIcon className="h-6 w-6" />
@@ -140,7 +137,7 @@ export function LoginScreen({
             <input
               autoComplete="current-password"
               autoFocus
-              className={`${inputCls} w-full`}
+              className="ui-input w-full"
               id="login-password"
               placeholder="Enter password"
               type="password"
@@ -149,12 +146,15 @@ export function LoginScreen({
             />
           </div>
           {loginError && (
-            <div className="rounded-[var(--radius-control)] border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-sm text-rose-200" role="alert">
+            <div
+              className="rounded-[var(--radius-control)] border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-sm text-rose-200"
+              role="alert"
+            >
               {loginError}
             </div>
           )}
           <button
-            className={`${primaryBtnCls} h-11 w-full text-sm`}
+            className="ui-btn ui-btn-primary w-full"
             disabled={isLoggingIn || !passwordInput}
             type="submit"
           >

@@ -10,8 +10,9 @@ import {
   validateSyncFilterDraft,
 } from "@/app/components/SyncFilterControls";
 import type { SyncFilterDraft } from "@/app/components/SyncFilterControls";
-import { formatRelativeTime } from "@/app/lib/format";
+import { Badge } from "@/app/components/ui";
 import { LockIcon, TrashIcon, XIcon } from "@/app/components/icons";
+import { formatRelativeTime } from "@/app/lib/format";
 import type { ReviewerDto, ReviewerGroupDto, SyncInterval } from "@/app/types/movie";
 
 type GroupUpdate = Partial<
@@ -58,28 +59,11 @@ interface GroupDraft {
   filters: SyncFilterDraft;
 }
 
-
-
-const inputCls =
-  "h-11 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-4 text-sm text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25 disabled:cursor-not-allowed disabled:opacity-60";
-const smallInputCls =
-  "h-9 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-3 text-xs text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25 disabled:cursor-not-allowed disabled:opacity-60";
-const primaryBtnCls =
-  "rounded-[var(--radius-control)] bg-pine text-ink font-bold transition hover:bg-pine/90 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-pine/35 disabled:cursor-not-allowed disabled:opacity-50";
-const ghostBtnCls =
-  "rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 font-bold text-cornsilk/70 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-cornsilk disabled:cursor-not-allowed disabled:opacity-45";
-const dangerBtnCls =
-  "rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 font-bold text-cornsilk/65 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-45";
-const labelCls = "text-[11px] font-bold uppercase tracking-wider text-cornsilk/70";
-const helperCls = "text-xs leading-relaxed text-cornsilk/70";
-
 function lastSyncedLabel(lastSyncedAt: string | null): string {
   if (!lastSyncedAt) return "Never synced";
   const at = Date.parse(lastSyncedAt);
   return Number.isNaN(at) ? "Never synced" : `Last synced ${formatRelativeTime(at)}`;
 }
-
-
 
 function ratingOptionLabel(rating: number): string {
   return rating === -1 ? "Disabled (no auto-sync)" : `Avg >= ${rating.toFixed(1)} stars`;
@@ -95,7 +79,6 @@ function draftFromGroup(group: ReviewerGroupDto): GroupDraft {
     filters: filtersToDraft(group.filters),
   };
 }
-
 
 function ReviewerChip({
   handle,
@@ -114,9 +97,7 @@ function ReviewerChip({
 }) {
   return (
     <div
-      className={`group flex max-w-full items-center gap-1.5 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/25 px-2.5 py-1.5 text-xs font-bold text-cornsilk/80 ${
-        draggable ? "cursor-grab active:cursor-grabbing" : ""
-      }`}
+      className={`ui-chip ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
       draggable={draggable}
       title={
         locked
@@ -128,7 +109,10 @@ function ReviewerChip({
     >
       <span className="truncate">@{handle}</span>
       {locked && (
-        <LockIcon aria-label={`@${handle} is set by the environment`} className="h-3 w-3 flex-shrink-0 text-cornsilk/55" />
+        <LockIcon
+          aria-label={`@${handle} is set by the environment`}
+          className="h-3 w-3 flex-shrink-0 text-cornsilk/55"
+        />
       )}
       {onRemove && (
         <button
@@ -293,34 +277,32 @@ export function SyncConfigurationPanel({
   }
 
   return (
-    <section className="rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
-      <div className="mb-4 space-y-1">
+    <section className="space-y-4">
+      <div className="flex flex-col gap-1">
         <h3 className="text-base font-extrabold tracking-tight text-cornsilk">Sync Configuration</h3>
-        <p className={helperCls}>
+        <p className="ui-helper">
           Add reviewers, assign them to sync groups, and configure thresholds, timing, approval, and filters in one flow.
         </p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(240px,0.7fr)_minmax(0,1.3fr)]">
         <aside className="space-y-4">
-          <div className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 p-3">
-              <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="ui-surface p-3">
+            <div className="mb-3 flex items-center justify-between gap-3">
               <div>
-                <p className={labelCls}>Reviewer pool</p>
+                <p className="ui-label">Reviewer pool</p>
                 <p className="mt-1 text-[11px] leading-relaxed text-cornsilk/70">
                   Reviewers here can be added to custom groups.
                 </p>
               </div>
               {pendingApprovalCount > 0 && (
-                <span className="rounded-full border border-gold/20 bg-gold/10 px-2 py-0.5 text-[11px] font-bold text-gold">
-                  {pendingApprovalCount} pending
-                </span>
+                <Badge tone="gold">{pendingApprovalCount} pending</Badge>
               )}
             </div>
 
             <div className="mb-3 grid grid-cols-1 gap-2">
               <input
-                className={inputCls}
+                className="ui-input"
                 placeholder="letterboxd-handle"
                 value={newReviewerInput}
                 onChange={(event) => setNewReviewerInput(event.target.value)}
@@ -332,7 +314,7 @@ export function SyncConfigurationPanel({
                 }}
               />
               <button
-                className={`${primaryBtnCls} h-10 px-4 text-sm`}
+                className="ui-btn ui-btn-primary"
                 disabled={!newReviewerInput.trim()}
                 type="button"
                 onClick={() => void addReviewer()}
@@ -363,7 +345,9 @@ export function SyncConfigurationPanel({
                       setDraggedReviewer(null);
                       setActiveDropZone(null);
                     }}
-                    onDragStart={(event) => startReviewerDrag(event, { handle: reviewer.handle, source: "pool" })}
+                    onDragStart={(event) =>
+                      startReviewerDrag(event, { handle: reviewer.handle, source: "pool" })
+                    }
                     onRemove={reviewer.fromEnv ? undefined : () => void onRemoveReviewer(reviewer.handle)}
                   />
                 ))}
@@ -374,17 +358,17 @@ export function SyncConfigurationPanel({
             </div>
           </div>
 
-          <div className="rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 p-3">
-            <p className={labelCls}>Create group</p>
+          <div className="ui-surface p-3">
+            <p className="ui-label">Create group</p>
             <div className="mt-3 grid grid-cols-1 gap-2">
               <input
-                className={inputCls}
+                className="ui-input"
                 placeholder="Group name"
                 value={newGroupName}
                 onChange={(event) => setNewGroupName(event.target.value)}
               />
               <select
-                className={inputCls}
+                className="ui-select"
                 value={newGroupThreshold}
                 onChange={(event) => setNewGroupThreshold(Number(event.target.value))}
               >
@@ -395,7 +379,7 @@ export function SyncConfigurationPanel({
                 ))}
               </select>
               <button
-                className={`${primaryBtnCls} h-10 px-4 text-sm`}
+                className="ui-btn ui-btn-primary"
                 disabled={!newGroupName.trim()}
                 type="button"
                 onClick={() => void createGroup()}
@@ -408,7 +392,7 @@ export function SyncConfigurationPanel({
 
         <div className="space-y-3">
           <div>
-            <p className={labelCls}>Sync groups</p>
+            <p className="ui-label">Sync groups</p>
             <p className="mt-1 text-[11px] leading-relaxed text-cornsilk/70">
               Enabled groups control sync timing, threshold, approvals, and movie filters. Custom groups are optional.
             </p>
@@ -427,25 +411,29 @@ export function SyncConfigurationPanel({
             return (
               <article
                 key={group.id}
-                className={`rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/15 p-3 text-xs text-cornsilk/70 ${
+                className={`ui-surface p-3 text-xs text-cornsilk/70 ${
                   draft.enabled ? "" : "opacity-80"
                 }`}
               >
                 <div className="space-y-3">
-                  <p className="text-[11px] text-cornsilk/55">{lastSyncedLabel(group.lastSyncedAt)}</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] text-cornsilk/55">{lastSyncedLabel(group.lastSyncedAt)}</p>
+                    {draft.enabled ? <Badge tone="green">Enabled</Badge> : <Badge tone="slate">Disabled</Badge>}
+                  </div>
+
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
                     <label className="space-y-1">
-                      <span className={labelCls}>Group name</span>
+                      <span className="ui-label">Group name</span>
                       <input
                         aria-label={`${group.name} group name`}
-                        className={`${smallInputCls} font-extrabold`}
+                        className="ui-input font-extrabold"
                         value={draft.name}
                         onChange={(event) =>
                           updateDraft(group.id, (current) => ({ ...current, name: event.target.value }))
                         }
                       />
                     </label>
-                    <label className="mt-5 flex h-9 cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-white/20 hover:bg-white/[0.05]">
+                    <label className="mt-5 flex h-10 cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 text-xs font-bold text-cornsilk/75 transition hover:border-white/20 hover:bg-white/[0.05]">
                       <input
                         checked={draft.enabled}
                         className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
@@ -461,7 +449,7 @@ export function SyncConfigurationPanel({
                     </label>
                     <button
                       aria-label={`Delete ${group.name}`}
-                      className={`${dangerBtnCls} mt-5 flex h-9 w-full items-center justify-center gap-2 px-3 text-xs sm:w-auto`}
+                      className="ui-btn ui-btn-danger ui-btn-sm mt-5 w-full sm:w-auto"
                       type="button"
                       onClick={() => void onDeleteGroup(group)}
                     >
@@ -472,9 +460,9 @@ export function SyncConfigurationPanel({
 
                   <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
                     <label className="space-y-1">
-                      <span className={labelCls}>Threshold</span>
+                      <span className="ui-label">Threshold</span>
                       <select
-                        className={smallInputCls}
+                        className="ui-select"
                         value={draft.ratingThreshold}
                         onChange={(event) =>
                           updateDraft(group.id, (current) => ({
@@ -491,9 +479,9 @@ export function SyncConfigurationPanel({
                       </select>
                     </label>
                     <label className="space-y-1">
-                      <span className={labelCls}>Sync timing</span>
+                      <span className="ui-label">Sync timing</span>
                       <select
-                        className={smallInputCls}
+                        className="ui-select"
                         value={draft.syncInterval}
                         onChange={(event) =>
                           updateDraft(group.id, (current) => ({
@@ -509,7 +497,7 @@ export function SyncConfigurationPanel({
                         ))}
                       </select>
                     </label>
-                    <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 md:mt-5">
+                    <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-cornsilk/10 bg-black/20 px-3 md:mt-5">
                       <input
                         checked={draft.requiresManualApproval}
                         className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
@@ -544,11 +532,11 @@ export function SyncConfigurationPanel({
                     onDrop={(event) => void dropReviewerOnGroup(event, group)}
                   >
                     <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <p className={labelCls}>Assigned reviewers</p>
+                      <p className="ui-label">Assigned reviewers</p>
                       {reviewers.length > 0 && (
                         <select
                           aria-label={`Add reviewer to ${group.name}`}
-                          className={`${smallInputCls} sm:w-48`}
+                          className="ui-select ui-select-sm sm:w-48"
                           value=""
                           onChange={(event) => {
                             const handle = event.target.value;
@@ -604,7 +592,7 @@ export function SyncConfigurationPanel({
                       <span className="text-[11px] font-bold text-gold/80 sm:mr-1">Unsaved changes</span>
                     )}
                     <button
-                      className={`${ghostBtnCls} h-9 px-3 text-xs`}
+                      className="ui-btn ui-btn-secondary ui-btn-sm"
                       type="button"
                       onClick={() => {
                         updateDraft(group.id, () => draftFromGroup(group));
@@ -614,7 +602,7 @@ export function SyncConfigurationPanel({
                       Reset
                     </button>
                     <button
-                      className={`${primaryBtnCls} h-9 px-3 text-xs`}
+                      className="ui-btn ui-btn-primary ui-btn-sm"
                       disabled={savingGroupId === group.id || !isDirty}
                       type="button"
                       onClick={() => void saveGroupDraft(group)}

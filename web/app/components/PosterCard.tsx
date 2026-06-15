@@ -11,6 +11,9 @@ export function posterRingClass(state: SendState): string {
   return "ring-1 ring-inset ring-cornsilk/5";
 }
 
+const actionBase =
+  "pointer-events-auto flex h-7 w-7 items-center justify-center rounded-xl border border-cornsilk/10 bg-ink/85 text-cornsilk shadow-sm backdrop-blur-md transition hover:border-pine hover:bg-pine hover:text-ink";
+
 export function PosterRadarrAction({
   movie,
   sendState,
@@ -24,8 +27,8 @@ export function PosterRadarrAction({
 }) {
   if (sendState === "loading") {
     return (
-      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-ink/85 backdrop-blur-sm border border-cornsilk/10">
-        <span className="h-3 w-3 animate-spin rounded-full border-2 border-cornsilk/30 border-t-cornsilk" />
+      <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-ink/85 backdrop-blur-md border border-cornsilk/10">
+        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-cornsilk/30 border-t-cornsilk" />
       </span>
     );
   }
@@ -35,7 +38,7 @@ export function PosterRadarrAction({
       <div className="poster-reveal transition-opacity duration-200">
         <button
           aria-label={`Send ${movie.title} to Radarr`}
-          className="poster-action-btn"
+          className={actionBase}
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -53,19 +56,19 @@ export function PosterRadarrAction({
     <div className="relative">
       <div className="poster-swap-out transition-opacity duration-200">
         {sendState === "added" ? (
-          <div className="flex h-5 w-5 items-center justify-center rounded-full bg-chartreuse/90 border border-chartreuse/40">
-            <CheckIcon className="h-3 w-3 text-ink" />
+          <div className="ui-badge ui-badge-green">
+            <CheckIcon className="h-3 w-3" />
           </div>
         ) : (
-          <div className="flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 border border-rose-400/20">
-            <XIcon className="h-2.5 w-2.5 text-cornsilk" />
+          <div className="ui-badge ui-badge-red">
+            <XIcon className="h-3 w-3" />
           </div>
         )}
       </div>
-      <div className="poster-hover-only absolute right-0 top-0 flex gap-1 transition-opacity duration-200">
+      <div className="poster-hover-only absolute right-0 top-0 flex gap-1.5 transition-opacity duration-200">
         <button
           aria-label={sendState === "added" ? `Resend ${movie.title} to Radarr` : `Retry sending ${movie.title} to Radarr`}
-          className="poster-action-btn"
+          className={actionBase}
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -78,7 +81,7 @@ export function PosterRadarrAction({
         {sendState === "added" && onRemove && (
           <button
             aria-label={`Remove ${movie.title} from Radarr`}
-            className="poster-action-btn border-rose-500/30 hover:bg-rose-500/15 hover:text-rose-300"
+            className={`${actionBase} hover:border-rose-500 hover:bg-rose-500 hover:text-white`}
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
