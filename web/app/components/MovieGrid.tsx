@@ -63,7 +63,7 @@ export function MovieGrid({
                 </div>
               </div>
 
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-3 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100">
+              <div className="poster-view-details pointer-events-none absolute inset-0 flex items-center justify-center px-3 transition-opacity duration-200">
                 <span className="rounded-full bg-black/50 px-3 py-1 text-center text-[11px] font-extrabold uppercase tracking-wide text-gold backdrop-blur-sm">
                   View details
                 </span>

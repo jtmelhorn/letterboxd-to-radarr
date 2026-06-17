@@ -93,7 +93,7 @@ textarea {
 }
 
 .poster-card:hover,
-.poster-card:focus-within {
+.poster-card:has(:focus-visible) {
   transform: translateY(-3px) scale(1.015);
   z-index: 2;
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.48);
@@ -111,7 +111,7 @@ textarea {
 }
 
 .poster-card:hover .poster-gradient,
-.poster-card:focus-within .poster-gradient {
+.poster-card:has(:focus-visible) .poster-gradient {
   background: linear-gradient(
     to top,
     rgba(20, 24, 28, 0.98) 0%,
@@ -124,7 +124,11 @@ textarea {
 /* ── Poster action visibility ──────────────────────────── */
 /* Touch / no-hover pointers: the add button stays visible (dimmed) and
    retry/remove stay hidden — the detail modal covers those actions.
-   Hover-capable pointers get the hover/focus reveal behavior. */
+   Hover-capable pointers get the hover reveal behavior. Focus-driven
+   reveal uses :has(:focus-visible) instead of :focus-within so that
+   programmatic focus restoration (e.g. after the detail modal closes)
+   does not leave the hover state stuck on a mouse-clicked card; keyboard
+   focus still reveals the actions. */
 .poster-reveal {
   opacity: 0.9;
 }
@@ -134,6 +138,17 @@ textarea {
   pointer-events: none;
 }
 
+/* "View details" overlay: shown on hover and keyboard-visible focus only,
+   so closing the detail modal does not leave it stuck on a clicked card. */
+.poster-view-details {
+  opacity: 0;
+}
+
+.poster-card:hover .poster-view-details,
+.poster-card:has(:focus-visible) .poster-view-details {
+  opacity: 1;
+}
+
 @media (hover: hover) {
   .poster-reveal {
     opacity: 0;
@@ -141,19 +156,19 @@ textarea {
   }
 
   .poster-card:hover .poster-reveal,
-  .poster-card:focus-within .poster-reveal {
+  .poster-card:has(:focus-visible) .poster-reveal {
     opacity: 1;
     pointer-events: auto;
   }
 
   .poster-card:hover .poster-hover-only,
-  .poster-card:focus-within .poster-hover-only {
+  .poster-card:has(:focus-visible) .poster-hover-only {
     opacity: 1;
     pointer-events: auto;
   }
 
   .poster-card:hover .poster-swap-out,
-  .poster-card:focus-within .poster-swap-out {
+  .poster-card:has(:focus-visible) .poster-swap-out {
     opacity: 0;
     pointer-events: none;
   }

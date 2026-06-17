@@ -50,7 +50,7 @@ export function MovieDetailModal({
         ref={modalRef}
         aria-labelledby="movie-detail-title"
         aria-modal="true"
-        className="modal-shell animate-fade-in h-[92vh] w-full rounded-t-3xl border-cornsilk/10 md:h-auto md:max-h-[92vh] md:max-w-xl md:rounded-[var(--radius-card)]"
+        className="modal-shell animate-fade-in h-[92vh] w-full rounded-t-3xl border-cornsilk/10 md:h-auto md:max-h-[92vh] md:max-w-3xl md:rounded-[var(--radius-card)]"
         role="dialog"
       >
         {/* Header */}
