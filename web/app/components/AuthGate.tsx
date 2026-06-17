@@ -7,12 +7,14 @@ import { LockIcon } from "@/app/components/icons";
 const brandIconCls =
   "flex items-center justify-center rounded-2xl bg-pine text-ink shadow-lg shadow-pine/10";
 
-export function LoadingScreen() {
+export function LoadingScreen({ message = "Loading…" }: { message?: string } = {}) {
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="flex flex-col items-center gap-3 text-cornsilk/60">
         <span className="h-8 w-8 animate-spin rounded-full border-2 border-cornsilk/20 border-t-cornsilk" />
-        <p className="text-sm font-semibold">Loading…</p>
+        <p className="text-sm font-semibold" aria-live="polite">
+          {message}
+        </p>
       </div>
     </div>
   );
