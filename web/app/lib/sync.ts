@@ -8,14 +8,15 @@ import { enrichReviewsWithMetadata } from "@/app/lib/repos/movieMetadata";
 import { createPendingApproval } from "@/app/lib/repos/pendingApprovals";
 import { getReviewRows, upsertReviews } from "@/app/lib/repos/reviews";
 import {
-  DEFAULT_REVIEWER_GROUP_ID,
   groupCoversReviewer,
   getReviewerGroup,
   listReviewerGroups,
+  stampReviewerGroupLastSynced,
 } from "@/app/lib/repos/reviewerGroups";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
 import { getRecentSyncResults, recordSyncResult } from "@/app/lib/repos/syncResults";
 import { findUser, getOrCreateUser, listUsers } from "@/app/lib/repos/users";
+import { isMovieBlocklisted } from "@/app/lib/repos/movieBlocklist";
 import { evaluateSyncFilters, syncFiltersNeedGenreMetadata } from "@/app/lib/syncFilters";
 import type {
   AggregatedMovieDto,
@@ -27,6 +28,7 @@ import type {
 
 const MAX_ATTEMPTS = 3;
 const RADARR_CONCURRENCY = 3;
+const RSS_CONCURRENCY = 3;
 
 export interface SyncOptions {
   auto: boolean;
@@ -91,9 +93,6 @@ function emptySummary(threshold: number): SyncRunSummary {
 }
 
 function handlesForGroup(group: ReviewerGroupDto): string[] {
-  if (group.isDefault) {
-    return listUsers().map((user) => user.handle);
-  }
   return group.reviewerHandles;
 }
 
@@ -101,24 +100,33 @@ function fallbackThresholdForScope(scope: ReviewerScope): number {
   if (scope.type === "group" && typeof scope.groupId === "number") {
     return getReviewerGroup(scope.groupId)?.ratingThreshold ?? -1;
   }
-  return getReviewerGroup(DEFAULT_REVIEWER_GROUP_ID)?.ratingThreshold ?? getRadarrTarget().autoThreshold;
+  return getRadarrTarget().autoThreshold;
 }
 
 async function refreshHandles(
   handles: string[],
   options: { fetchMetadata?: boolean } = {},
 ): Promise<number> {
-  let fetched = 0;
-  for (const handle of handles) {
-    const user = getOrCreateUser(handle);
-    const movies = await fetchLetterboxdReviews(handle);
-    upsertReviews(user.id, movies);
-    if (options.fetchMetadata) {
-      await enrichReviewsWithMetadata(getReviewRows(user.id));
-    }
-    fetched += movies.length;
+  if (handles.length === 0) return 0;
+
+  const rssLimit = pLimit(RSS_CONCURRENCY);
+  const counts = await Promise.all(
+    handles.map((handle) =>
+      rssLimit(async () => {
+        const user = getOrCreateUser(handle);
+        const movies = await fetchLetterboxdReviews(handle);
+        upsertReviews(user.id, movies);
+        return movies.length;
+      }),
+    ),
+  );
+
+  if (options.fetchMetadata) {
+    const allRows = handles.flatMap((handle) => getReviewRows(getOrCreateUser(handle).id));
+    await enrichReviewsWithMetadata(allRows);
   }
-  return fetched;
+
+  return counts.reduce((sum, count) => sum + count, 0);
 }
 
 interface GroupSyncRun {
@@ -210,6 +218,25 @@ async function executeGroupSync(
   const fetched = await refreshHandles(run.handles, {
     fetchMetadata: syncFiltersNeedGenreMetadata(group.filters),
   });
+  const summary = await syncCachedGroup(run, options, fetched);
+  // Stamp after any completed run (manual or scheduled, even with 0 adds) so
+  // the UI can show "Last synced"; the manual-interval auto skip above never
+  // reaches this point.
+  stampReviewerGroupLastSynced(group.id);
+  return summary;
+}
+
+async function syncCachedGroup(
+  run: GroupSyncRun,
+  options: SyncOptions,
+  fetched: number,
+): Promise<SyncRunSummary> {
+  const { group } = run;
+  const threshold = typeof options.threshold === "number" ? options.threshold : group.ratingThreshold;
+  if (options.auto && group.syncInterval === "manual") {
+    return emptySummary(threshold);
+  }
+
   const target = getRadarrTarget();
 
   const summary: SyncRunSummary = {
@@ -234,13 +261,36 @@ async function executeGroupSync(
   const candidates = getAggregatedMovies(run.aggregationScope).filter((movie) => {
     if (movie.averageRating < threshold) return false;
     if (options.force) return true;
-    return movie.status !== "added" && movie.status !== "exists";
+    // "removed" and "missing_in_radarr" (recorded by reconciliation) stay
+    // re-addable on purpose; only films we still consider present in Radarr
+    // (or whose removal failed) are skipped. Blocklist is checked separately.
+    return movie.status !== "added" && movie.status !== "exists" && movie.status !== "failed_remove";
   });
 
   const allowedCandidates: AggregatedMovieDto[] = [];
   for (const movie of candidates) {
     const representativeReview = movie.reviews[0];
     if (!representativeReview) continue;
+
+    if (
+      isMovieBlocklisted({
+        tmdbId: movie.tmdbMovieId,
+        imdbId: movie.imdbId,
+        filmId: movie.id,
+        title: movie.title,
+        year: movie.year,
+      })
+    ) {
+      recordSyncResult({
+        reviewId: representativeReview.id,
+        status: "skipped",
+        message: "Skipped: movie is blocklisted.",
+        auto: options.auto,
+      });
+      summary.skipped = (summary.skipped ?? 0) + 1;
+      continue;
+    }
+
     const filterResult = evaluateSyncFilters(movie, group.filters);
     if (filterResult.allowed) {
       allowedCandidates.push(movie);
@@ -308,6 +358,7 @@ async function executeGroupSync(
           reviewId: representativeReview.id,
           status,
           radarrTmdbId: result.movie?.tmdbId ?? null,
+          radarrMovieId: result.movie?.radarrMovieId ?? null,
           message: result.message,
           auto: options.auto,
         });
@@ -337,6 +388,41 @@ export function runSyncScope(scope: ReviewerScope, options: SyncOptions): Promis
 
 export function runSync(handle: string, options: SyncOptions): Promise<SyncRunSummary> {
   return runSyncScope({ type: "reviewer", reviewer: handle }, options);
+}
+
+export async function refreshScopeReviews(scope: ReviewerScope): Promise<number> {
+  if (scope.type === "reviewer" && scope.reviewer) {
+    return refreshReviewer(scope.reviewer, { fetchMetadata: scopeNeedsGenreMetadata(scope) });
+  }
+  if (scope.type === "group" && typeof scope.groupId === "number") {
+    const group = getReviewerGroup(scope.groupId);
+    return refreshHandles(group?.reviewerHandles ?? [], { fetchMetadata: scopeNeedsGenreMetadata(scope) });
+  }
+
+  return refreshHandles(
+    listUsers().map((reviewer) => reviewer.handle),
+    { fetchMetadata: scopeNeedsGenreMetadata(scope) },
+  );
+}
+
+function scopeNeedsGenreMetadata(scope: ReviewerScope): boolean {
+  if (scope.type === "group" && typeof scope.groupId === "number") {
+    const group = getReviewerGroup(scope.groupId);
+    return Boolean(group?.enabled && syncFiltersNeedGenreMetadata(group.filters));
+  }
+
+  if (scope.type === "reviewer" && scope.reviewer) {
+    return listReviewerGroups().some(
+      (group) =>
+        group.enabled &&
+        groupCoversReviewer(group, scope.reviewer ?? "") &&
+        syncFiltersNeedGenreMetadata(group.filters),
+    );
+  }
+
+  return listReviewerGroups().some(
+    (group) => group.enabled && syncFiltersNeedGenreMetadata(group.filters),
+  );
 }
 
 export async function refreshReviewer(

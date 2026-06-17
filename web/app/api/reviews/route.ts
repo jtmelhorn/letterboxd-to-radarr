@@ -3,54 +3,11 @@ import { NextResponse } from "next/server";
 import { isRequestAuthorized } from "@/app/lib/auth";
 import { isValidHandle } from "@/app/lib/letterboxd";
 import { getAggregatedMovies } from "@/app/lib/repos/aggregatedReviews";
-import {
-  groupCoversReviewer,
-  getReviewerGroup,
-  listReviewerGroups,
-} from "@/app/lib/repos/reviewerGroups";
-import { getOrCreateUser, listUsers } from "@/app/lib/repos/users";
+import { getOrCreateUser } from "@/app/lib/repos/users";
 import { reviewerScopeFromSearchParams } from "@/app/lib/reviewerScope";
-import { refreshReviewer } from "@/app/lib/sync";
-import { syncFiltersNeedGenreMetadata } from "@/app/lib/syncFilters";
-import type { ReviewerScope } from "@/app/types/movie";
+import { refreshScopeReviews } from "@/app/lib/sync";
 
 export const runtime = "nodejs";
-
-async function refreshScope(scope: ReviewerScope): Promise<void> {
-  if (scope.type === "reviewer" && scope.reviewer) {
-    await refreshReviewer(scope.reviewer, { fetchMetadata: scopeNeedsGenreMetadata(scope) });
-    return;
-  }
-  if (scope.type === "group" && typeof scope.groupId === "number") {
-    const group = getReviewerGroup(scope.groupId);
-    for (const handle of group?.reviewerHandles ?? []) {
-      await refreshReviewer(handle, { fetchMetadata: scopeNeedsGenreMetadata(scope) });
-    }
-    return;
-  }
-  const fetchMetadata = scopeNeedsGenreMetadata(scope);
-  for (const reviewer of listUsers()) {
-    await refreshReviewer(reviewer.handle, { fetchMetadata });
-  }
-}
-
-function scopeNeedsGenreMetadata(scope: ReviewerScope): boolean {
-  if (scope.type === "group" && typeof scope.groupId === "number") {
-    const group = getReviewerGroup(scope.groupId);
-    return Boolean(group?.enabled && syncFiltersNeedGenreMetadata(group.filters));
-  }
-
-  if (scope.type === "reviewer" && scope.reviewer) {
-    return listReviewerGroups().some(
-      (group) =>
-        group.enabled &&
-        groupCoversReviewer(group, scope.reviewer ?? "") &&
-        syncFiltersNeedGenreMetadata(group.filters),
-    );
-  }
-
-  return listReviewerGroups().some((group) => group.enabled && syncFiltersNeedGenreMetadata(group.filters));
-}
 
 export async function GET(request: Request) {
   if (!isRequestAuthorized(request)) {
@@ -72,7 +29,7 @@ export async function GET(request: Request) {
 
   if (refresh) {
     try {
-      await refreshScope(scope);
+      await refreshScopeReviews(scope);
     } catch (error) {
       console.error("Failed to refresh Letterboxd reviews", error);
       const cached = getAggregatedMovies(scope);

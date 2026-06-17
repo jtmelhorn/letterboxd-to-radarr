@@ -29,13 +29,13 @@ function group(input: Partial<ReviewerGroupDto> & { id: number; name: string }):
     id: input.id,
     name: input.name,
     enabled: input.enabled ?? true,
-    isDefault: input.isDefault ?? input.id === 1,
     autoThreshold: input.autoThreshold ?? 4,
     ratingThreshold: input.ratingThreshold ?? input.autoThreshold ?? 4,
     syncInterval: input.syncInterval ?? "1d",
     requiresManualApproval: input.requiresManualApproval ?? false,
     filters: input.filters ?? emptyFilters,
     reviewerHandles: input.reviewerHandles ?? [],
+    lastSyncedAt: input.lastSyncedAt ?? null,
   };
 }
 
@@ -45,7 +45,6 @@ function renderPanel(overrides: Partial<ComponentProps<typeof SyncConfigurationP
     pendingApprovalCount: 0,
     ratingOptions: [3, 4, 5],
     reviewerGroups: [
-      group({ id: 1, name: "All reviewers", reviewerHandles: ["alice"] }),
       group({ id: 2, name: "Favorites", reviewerHandles: [] }),
     ],
     reviewers: [reviewer("alice", 1)],
@@ -85,15 +84,24 @@ describe("SyncConfigurationPanel", () => {
     );
   });
 
-  it("can create a group and save configured filters", async () => {
+  it("can create a group with full settings and save configured filters on existing groups", async () => {
     const user = userEvent.setup();
     const props = renderPanel();
 
+    await user.click(screen.getByRole("button", { name: "+ New group" }));
     await user.type(screen.getByPlaceholderText("Group name"), "Weekend picks");
     await user.selectOptions(screen.getAllByDisplayValue("Avg >= 4.0 stars")[0], "5");
     await user.click(screen.getByRole("button", { name: "Create group" }));
 
-    expect(props.onCreateGroup).toHaveBeenCalledWith({ name: "Weekend picks", ratingThreshold: 5 });
+    expect(props.onCreateGroup).toHaveBeenCalledWith({
+      name: "Weekend picks",
+      enabled: true,
+      ratingThreshold: 5,
+      syncInterval: "1d",
+      requiresManualApproval: false,
+      filters: { year: { mode: "any" }, genres: { include: [], exclude: [] } },
+      reviewerHandles: [],
+    });
 
     const favorites = screen.getByLabelText("Favorites group name").closest("article");
     expect(favorites).toBeTruthy();
@@ -121,22 +129,58 @@ describe("SyncConfigurationPanel", () => {
     );
   });
 
-  it("shows behavior-based reviewer pool labels instead of unassigned", () => {
+  it("opens the new-group draft with documented defaults", async () => {
+    const user = userEvent.setup();
     renderPanel();
 
-    expect(screen.queryByText("Unassigned")).not.toBeInTheDocument();
-    expect(screen.getByText("In All reviewers")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "+ New group" }));
+
+    const draft = screen.getByLabelText("New group name").closest("article");
+    expect(draft).toBeTruthy();
+    const scope = within(draft as HTMLElement);
+
+    expect(scope.getByLabelText("New group name")).toHaveValue("");
+    expect(scope.getByLabelText("Enabled")).toBeChecked();
+    expect(scope.getByDisplayValue("Avg >= 4.0 stars")).toBeInTheDocument();
+    expect(scope.getByDisplayValue("Daily")).toBeInTheDocument();
+    expect(scope.getByLabelText("Require approval")).not.toBeChecked();
+    expect(scope.getByLabelText("Release year filter")).toHaveValue("any");
+    expect(scope.getByLabelText("Included genres")).toHaveTextContent("Select included genres");
+    expect(scope.getByLabelText("Excluded genres")).toHaveTextContent("Select excluded genres");
   });
 
-  it("shows not syncing when a reviewer is not covered by any enabled group", () => {
-    renderPanel({
-      reviewerGroups: [
-        group({ id: 1, name: "All reviewers", enabled: false }),
-        group({ id: 2, name: "Favorites", enabled: false, reviewerHandles: [] }),
-      ],
-    });
+  it("can create a group with a reviewer pre-assigned", async () => {
+    const user = userEvent.setup();
+    const props = renderPanel();
 
-    expect(screen.getByText("Not syncing")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "+ New group" }));
+    await user.selectOptions(screen.getByLabelText("Add reviewer to new group"), "alice");
+    await user.type(screen.getByPlaceholderText("Group name"), "Cinephiles");
+    await user.click(screen.getByRole("button", { name: "Create group" }));
+
+    expect(props.onCreateGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Cinephiles", reviewerHandles: ["alice"] }),
+    );
+  });
+
+  it("canceling the new-group draft discards it without calling onCreateGroup", async () => {
+    const user = userEvent.setup();
+    const props = renderPanel();
+
+    await user.click(screen.getByRole("button", { name: "+ New group" }));
+    await user.type(screen.getByPlaceholderText("Group name"), "Throwaway");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(props.onCreateGroup).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("New group name")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ New group" })).toBeInTheDocument();
+  });
+
+  it("shows reviewer pool without group badges", () => {
+    renderPanel();
+
+    expect(screen.queryByText("In All reviewers")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not syncing")).not.toBeInTheDocument();
   });
 
   it("saves the enabled toggle with group settings", async () => {
@@ -213,7 +257,7 @@ describe("SyncConfigurationPanel", () => {
   it("loads groups without filters using default filter controls", () => {
     renderPanel({
       reviewerGroups: [
-        group({ id: 1, name: "All reviewers" }),
+        group({ id: 2, name: "Favorites" }),
         {
           ...group({ id: 3, name: "Legacy empty" }),
           filters: undefined as unknown as SyncFilters,
@@ -225,14 +269,64 @@ describe("SyncConfigurationPanel", () => {
     expect(within(legacy as HTMLElement).getByLabelText("Release year filter")).toHaveValue("any");
   });
 
-  it("shows the All reviewers defaults as any year, four stars, and no genre filters", () => {
+  it("disables Save when clean and indicates unsaved changes until reset", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    const favorites = screen.getByLabelText("Favorites group name").closest("article");
+    const scope = within(favorites as HTMLElement);
+
+    const save = scope.getByRole("button", { name: "Save group" });
+    expect(save).toBeDisabled();
+    expect(scope.queryByText("Unsaved changes")).not.toBeInTheDocument();
+
+    await user.type(scope.getByLabelText("Favorites group name"), " updated");
+    expect(save).toBeEnabled();
+    expect(scope.getByText("Unsaved changes")).toBeInTheDocument();
+
+    await user.click(scope.getByRole("button", { name: "Reset" }));
+    expect(save).toBeDisabled();
+    expect(scope.queryByText("Unsaved changes")).not.toBeInTheDocument();
+  });
+
+  it("offers a Disabled (no auto-sync) threshold option mapping to -1", async () => {
+    const user = userEvent.setup();
+    const props = renderPanel({ ratingOptions: [-1, 1, 2.5, 3, 4, 5] });
+    const favorites = screen.getByLabelText("Favorites group name").closest("article");
+    const scope = within(favorites as HTMLElement);
+
+    const thresholdSelect = scope.getByDisplayValue("Avg >= 4.0 stars");
+    await user.selectOptions(thresholdSelect, "-1");
+    expect(scope.getByDisplayValue("Disabled (no auto-sync)")).toBeInTheDocument();
+
+    await user.click(scope.getByRole("button", { name: "Save group" }));
+    expect(props.onSaveGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 2, name: "Favorites" }),
+      expect.objectContaining({ ratingThreshold: -1 }),
+    );
+  });
+
+  it("renders thresholds below 3.0 from existing groups", () => {
+    renderPanel({
+      ratingOptions: [-1, 1, 1.5, 2, 2.5, 3, 4, 5],
+      reviewerGroups: [group({ id: 2, name: "Favorites", ratingThreshold: 1.5 })],
+    });
+
+    const favorites = screen.getByLabelText("Favorites group name").closest("article");
+    expect(within(favorites as HTMLElement).getByDisplayValue("Avg >= 1.5 stars")).toBeInTheDocument();
+  });
+
+  it("explains that membership changes save immediately", () => {
+    renderPanel();
+    expect(screen.getByText("Membership changes save immediately.")).toBeInTheDocument();
+  });
+
+  it("shows group defaults as any year, four stars, and no genre filters", () => {
     renderPanel();
 
-    const allReviewers = screen.getByLabelText("All reviewers group name").closest("article");
-    const scope = within(allReviewers as HTMLElement);
+    const favorites = screen.getByLabelText("Favorites group name").closest("article");
+    const scope = within(favorites as HTMLElement);
 
     expect(scope.getByLabelText("Release year filter")).toHaveValue("any");
-    expect(scope.getByText("Default group")).toBeInTheDocument();
     expect(scope.getByLabelText("Enabled")).toBeChecked();
     expect(scope.getByText("Genre filters require a movie metadata lookup during sync.")).toBeInTheDocument();
     expect(scope.getByDisplayValue("Avg >= 4.0 stars")).toBeInTheDocument();

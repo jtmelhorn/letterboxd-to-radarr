@@ -24,6 +24,7 @@ export const reviewerGroups = sqliteTable("reviewer_groups", {
   syncInterval: text("sync_interval").notNull().default("1d"),
   requiresManualApproval: integer("requires_manual_approval", { mode: "boolean" }).notNull().default(false),
   filtersJson: text("filters_json").notNull().default('{"year":{"mode":"any"},"genres":{"include":[],"exclude":[]}}'),
+  lastSyncedAt: text("last_synced_at"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
@@ -139,8 +140,10 @@ export const syncResults = sqliteTable(
     reviewId: integer("review_id")
       .notNull()
       .references(() => reviews.id, { onDelete: "cascade" }),
+    filmId: text("film_id"),
     status: text("status").notNull(),
     radarrTmdbId: integer("radarr_tmdb_id"),
+    radarrMovieId: integer("radarr_movie_id"),
     message: text("message").notNull().default(""),
     attempts: integer("attempts").notNull().default(1),
     auto: integer("auto", { mode: "boolean" }).notNull().default(false),
@@ -148,7 +151,10 @@ export const syncResults = sqliteTable(
       .notNull()
       .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
   },
-  (table) => [index("sync_results_review_idx").on(table.reviewId)],
+  (table) => [
+    index("sync_results_review_idx").on(table.reviewId),
+    index("sync_results_film_created_idx").on(table.filmId, table.createdAt),
+  ],
 );
 
 export const pendingApprovals = sqliteTable(
@@ -186,10 +192,37 @@ export const appState = sqliteTable("app_state", {
   id: integer("id").primaryKey(),
   adminPasswordHash: text("admin_password_hash").notNull().default(""),
   setupCompletedAt: text("setup_completed_at"),
+  defaultGroupId: integer("default_group_id").references(() => reviewerGroups.id, { onDelete: "set null" }),
+  sessionEpoch: integer("session_epoch").notNull().default(0),
   updatedAt: text("updated_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
 });
+
+export const movieBlocklist = sqliteTable(
+  "movie_blocklist",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tmdbId: integer("tmdb_id"),
+    imdbId: text("imdb_id"),
+    radarrMovieId: integer("radarr_movie_id"),
+    title: text("title").notNull(),
+    normalizedTitle: text("normalized_title").notNull().default(""),
+    year: integer("year"),
+    filmId: text("film_id").notNull(),
+    source: text("source").notNull().default("manually_blocked"),
+    message: text("message").notNull().default(""),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+  },
+  (table) => [
+    uniqueIndex("movie_blocklist_tmdb_idx").on(table.tmdbId).where(sql`tmdb_id IS NOT NULL`),
+    index("movie_blocklist_imdb_idx").on(table.imdbId),
+    index("movie_blocklist_title_year_idx").on(table.normalizedTitle, table.year),
+    index("movie_blocklist_film_idx").on(table.filmId),
+  ],
+);
 
 export type ReviewRow = typeof reviews.$inferSelect;
 export type MovieMetadataRow = typeof movieMetadata.$inferSelect;
@@ -198,3 +231,4 @@ export type PendingApprovalRow = typeof pendingApprovals.$inferSelect;
 export type RadarrTargetRow = typeof radarrTargets.$inferSelect;
 export type AppStateRow = typeof appState.$inferSelect;
 export type ReviewerGroupRow = typeof reviewerGroups.$inferSelect;
+export type MovieBlocklistRow = typeof movieBlocklist.$inferSelect;

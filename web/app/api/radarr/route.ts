@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 
 import { isRequestAuthorized } from "@/app/lib/auth";
-import { addMovie } from "@/app/lib/radarr";
+import { addMovie, deleteMovieByRadarrId, resolveExistingRadarrMovieId } from "@/app/lib/radarr";
+import { addToBlocklist } from "@/app/lib/repos/movieBlocklist";
 import { getReviewById } from "@/app/lib/repos/reviews";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
-import { recordSyncResult } from "@/app/lib/repos/syncResults";
+import {
+  getLatestRadarrMovieIdForFilmId,
+  getLatestSyncResultForFilmId,
+  recordSyncResult,
+} from "@/app/lib/repos/syncResults";
+import { canonicalFilmGuid } from "@/app/lib/filmIdentity";
 import type { RadarrAddRequest, RadarrAddResponse } from "@/app/types/movie";
 
 export const runtime = "nodejs";
@@ -50,6 +56,7 @@ export async function POST(request: Request) {
         reviewId: review.id,
         status: result.status,
         radarrTmdbId: result.movie?.tmdbId ?? null,
+        radarrMovieId: result.movie?.radarrMovieId ?? null,
         message: result.message,
         auto: false,
       });
@@ -79,4 +86,101 @@ export async function POST(request: Request) {
       { status: 502 },
     );
   }
+}
+
+export async function DELETE(request: Request) {
+  if (!isRequestAuthorized(request)) {
+    return NextResponse.json({ message: "Unauthorized." }, { status: 401 });
+  }
+
+  let body: { reviewId?: number; deleteFiles?: boolean; blockFutureSync?: boolean };
+  try {
+    body = (await request.json()) as {
+      reviewId?: number;
+      deleteFiles?: boolean;
+      blockFutureSync?: boolean;
+    };
+  } catch {
+    return NextResponse.json({ message: "Request body must be valid JSON." }, { status: 400 });
+  }
+
+  const reviewId = typeof body.reviewId === "number" ? body.reviewId : null;
+  const review = reviewId ? getReviewById(reviewId) : null;
+  if (!review) {
+    return NextResponse.json(
+      { message: "A valid reviewId is required." },
+      { status: 400 },
+    );
+  }
+
+  const target = getRadarrTarget();
+  if (!target.baseUrl || !target.apiKey) {
+    return NextResponse.json(
+      { message: "Configure the Radarr Base URL and API key in Settings first." },
+      { status: 400 },
+    );
+  }
+
+  const deleteFiles = body.deleteFiles ?? false;
+  const blockFutureSync = body.blockFutureSync ?? true;
+  const filmId = canonicalFilmGuid(review);
+  const latestSync = getLatestSyncResultForFilmId(filmId);
+  const radarrMovieId =
+    latestSync?.radarrMovieId ??
+    getLatestRadarrMovieIdForFilmId(filmId) ??
+    (await resolveExistingRadarrMovieId(target, {
+      tmdbId: review.tmdbMovieId ?? latestSync?.radarrTmdbId ?? null,
+    }));
+  if (!radarrMovieId) {
+    return NextResponse.json(
+      {
+        message:
+          "Cannot safely remove this movie because this app could not find an exact matching Radarr movie ID.",
+      },
+      { status: 409 },
+    );
+  }
+
+  const result = await deleteMovieByRadarrId(target, radarrMovieId, {
+    deleteFiles,
+  });
+
+  if (result.status === "deleted" || result.status === "not_found") {
+    if (blockFutureSync) {
+      addToBlocklist({
+        tmdbId: review.tmdbMovieId ?? latestSync?.radarrTmdbId ?? null,
+        radarrMovieId,
+        title: review.title,
+        year: review.year,
+        filmId,
+        source: "removed_from_radarr",
+        message: `Removed from Radarr${result.status === "not_found" ? " (already missing)" : ""}.`,
+      });
+    }
+    recordSyncResult({
+      reviewId: review.id,
+      status: blockFutureSync ? "blocklisted" : "removed",
+      radarrTmdbId: review.tmdbMovieId ?? latestSync?.radarrTmdbId ?? null,
+      radarrMovieId,
+      message: blockFutureSync
+        ? "Removed from Radarr and blocked from future auto-sync."
+        : "Removed from Radarr.",
+      auto: false,
+    });
+  } else {
+    recordSyncResult({
+      reviewId: review.id,
+      status: "failed_remove",
+      radarrTmdbId: review.tmdbMovieId ?? latestSync?.radarrTmdbId ?? null,
+      radarrMovieId,
+      message: result.message,
+      auto: false,
+    });
+  }
+
+  const httpStatus = result.status === "deleted" || result.status === "not_found" ? 200 : result.httpStatus;
+  return NextResponse.json(
+    { message: result.message, status: result.status },
+    { status: httpStatus },
+  );
 }

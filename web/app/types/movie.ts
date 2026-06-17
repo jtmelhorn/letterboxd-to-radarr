@@ -1,5 +1,14 @@
 export type MetadataLookupStatus = "pending" | "matched" | "not_found" | "error";
 export type MetadataMediaType = "movie" | "tv";
+export type SyncMovieStatus =
+  | "added"
+  | "exists"
+  | "error"
+  | "skipped"
+  | "removed"
+  | "blocklisted"
+  | "failed_remove"
+  | "missing_in_radarr";
 
 export interface MovieReview {
   title: string;
@@ -11,6 +20,7 @@ export interface MovieReview {
   reviewText?: string;
   letterboxdUrl?: string;
   tmdbMovieId?: number;
+  imdbId?: string;
   tmdbTvId?: number;
   genres?: string[];
   metadataSource?: string | null;
@@ -29,12 +39,14 @@ export interface LetterboxdResponse {
 /** A stored review enriched with its id and latest Radarr sync status. */
 export interface ReviewDto extends MovieReview {
   id: number;
-  status: "added" | "exists" | "error" | null;
+  status: SyncMovieStatus | null;
 }
 
 export interface ReviewerDto {
   id: number;
   handle: string;
+  /** True when this reviewer is seeded by REVIEWER/LETTERBOXD_REVIEWER and cannot be deleted. */
+  fromEnv?: boolean;
 }
 
 export type SyncYearFilterMode = "any" | "exact" | "gte" | "lte" | "between";
@@ -79,7 +91,6 @@ export interface ReviewerGroupDto {
   id: number;
   name: string;
   enabled: boolean;
-  isDefault: boolean;
   /** @deprecated Use ratingThreshold. */
   autoThreshold: number;
   ratingThreshold: number;
@@ -87,6 +98,8 @@ export interface ReviewerGroupDto {
   requiresManualApproval: boolean;
   filters: SyncFilters;
   reviewerHandles: string[];
+  /** ISO timestamp of the last completed sync run for this group, if any. */
+  lastSyncedAt: string | null;
 }
 
 export type SyncInterval = "manual" | "30m" | "1h" | "12h" | "1d" | "1w";
@@ -110,7 +123,7 @@ export interface AggregatedReviewDto extends MovieReview {
   id: number;
   reviewerId: number;
   reviewerHandle: string;
-  status: "added" | "exists" | "error" | null;
+  status: SyncMovieStatus | null;
 }
 
 export interface AggregatedMovieDto {
@@ -123,6 +136,7 @@ export interface AggregatedMovieDto {
   backdropUrl?: string;
   letterboxdUrl?: string;
   tmdbMovieId?: number;
+  imdbId?: string;
   tmdbTvId?: number;
   genres: string[];
   metadataSource: string | null;
@@ -133,7 +147,7 @@ export interface AggregatedMovieDto {
   reviewerCount: number;
   reviewerHandles: string[];
   reviews: AggregatedReviewDto[];
-  status: "added" | "exists" | "error" | null;
+  status: SyncMovieStatus | null;
 }
 
 export interface RadarrAddRequest {
@@ -151,6 +165,7 @@ export interface RadarrAddResponse {
     title: string;
     year: number;
     tmdbId: number;
+    radarrMovieId?: number | null;
   };
 }
 
@@ -190,6 +205,12 @@ export interface PublicSettings {
   dataDir: string;
   authEnabled: boolean;
   setupComplete: boolean;
+  /** True when SYNC_CRON globally overrides per-group sync intervals. */
+  syncCronOverride: boolean;
+  /** True when the Radarr URL comes from the RADARR/RADARR_URL environment variable. */
+  radarrUrlFromEnv: boolean;
+  /** True when the Radarr API key comes from the RADARR_API_KEY/API_KEY environment variable. */
+  radarrApiKeyFromEnv: boolean;
 }
 
 export interface AuthStatusResponse {
@@ -220,6 +241,7 @@ export interface SyncResultItem {
   title: string;
   year: number | null;
   status: string;
+  radarrMovieId?: number | null;
   message: string;
   auto: boolean;
   at: number;
@@ -240,4 +262,17 @@ export interface ReviewerScope {
   type: "all" | "reviewer" | "group";
   reviewer?: string;
   groupId?: number;
+}
+
+export interface BlocklistedMovieDto {
+  id: number;
+  tmdbId: number | null;
+  imdbId: string | null;
+  radarrMovieId: number | null;
+  title: string;
+  year: number | null;
+  filmId: string;
+  source: string;
+  message: string;
+  createdAt: string;
 }

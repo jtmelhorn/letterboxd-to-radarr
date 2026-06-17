@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { isRequestAuthorized } from "@/app/lib/auth";
 import { addMovie } from "@/app/lib/radarr";
+import { isMovieBlocklisted } from "@/app/lib/repos/movieBlocklist";
 import { getPendingApproval, resolvePendingApproval } from "@/app/lib/repos/pendingApprovals";
 import { getReviewById } from "@/app/lib/repos/reviews";
 import { getRadarrTarget } from "@/app/lib/repos/settings";
@@ -35,6 +36,27 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const review = getReviewById(pending.reviewId);
+  if (
+    isMovieBlocklisted({
+      tmdbId: review?.tmdbMovieId ?? null,
+      filmId: pending.filmId,
+      title: pending.title,
+      year: pending.year,
+    })
+  ) {
+    recordSyncResult({
+      reviewId: pending.reviewId,
+      status: "skipped",
+      message: "Skipped: movie is blocklisted.",
+      auto: false,
+    });
+    const updated = resolvePendingApproval(id, "error", "Skipped: movie is blocklisted.");
+    return NextResponse.json(
+      { message: "Movie is blocklisted.", pendingApproval: updated },
+      { status: 409 },
+    );
+  }
+
   const result = await addMovie(target, {
     title: pending.title,
     year: pending.year,
@@ -45,6 +67,7 @@ export async function POST(request: Request, context: RouteContext) {
     reviewId: pending.reviewId,
     status: syncStatus,
     radarrTmdbId: result.movie?.tmdbId ?? null,
+    radarrMovieId: result.movie?.radarrMovieId ?? null,
     message: result.message,
     auto: false,
   });

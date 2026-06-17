@@ -9,12 +9,22 @@ interface RadarrImage {
 }
 
 interface RadarrLookupMovie {
+  id?: number;
   title?: string;
   titleSlug?: string;
   year?: number;
   tmdbId?: number;
+  imdbId?: string;
   genres?: string[];
   images?: RadarrImage[];
+}
+
+interface RadarrStoredMovie {
+  id?: number;
+  title?: string;
+  year?: number;
+  tmdbId?: number;
+  imdbId?: string;
 }
 
 interface RadarrQualityProfile {
@@ -31,6 +41,7 @@ export interface AddMovieInput {
   title: string;
   year: number | null;
   tmdbId?: number | null;
+  imdbId?: string | null;
 }
 
 export interface MovieMetadataLookupInput {
@@ -57,7 +68,12 @@ export interface AddMovieResult {
   status: "added" | "exists" | "not_found" | "error";
   message: string;
   httpStatus: number;
-  movie?: { title: string; year: number; tmdbId: number };
+  movie?: { title: string; year: number; tmdbId: number; radarrMovieId?: number | null };
+}
+
+export interface ExistingRadarrMovieLookupInput {
+  tmdbId?: number | null;
+  imdbId?: string | null;
 }
 
 export class RadarrError extends Error {
@@ -118,6 +134,12 @@ function errorMessageFromBody(body: unknown, fallback: string): string {
 
 function isAlreadyExistsMessage(message: string): boolean {
   return /already|exists|has been added/i.test(message);
+}
+
+function movieFromRadarrBody(body: unknown): RadarrStoredMovie | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const item = body as RadarrStoredMovie;
+  return typeof item.id === "number" ? item : null;
 }
 
 function normalizeLookupTitle(title: string): string {
@@ -271,6 +293,48 @@ function pickBestMatch(
   const byTitle = valid.find((r) => r.title?.trim().toLowerCase() === titleLower);
   const normalizedByTitle = valid.find((r) => normalizeLookupTitle(r.title ?? "") === normalizedTitle);
   return byTitle ?? normalizedByTitle ?? valid[0];
+}
+
+async function findExistingRadarrMovie(
+  baseUrl: string,
+  apiKey: string,
+  input: Pick<AddMovieInput, "tmdbId" | "imdbId">,
+): Promise<RadarrStoredMovie | null> {
+  const query =
+    input.tmdbId && Number.isFinite(input.tmdbId)
+      ? `tmdbId=${encodeURIComponent(String(input.tmdbId))}`
+      : input.imdbId
+        ? `imdbId=${encodeURIComponent(input.imdbId)}`
+        : "";
+  if (!query) return null;
+
+  const response = await radarrFetch(baseUrl, apiKey, `/api/v3/movie?${query}`);
+  if (!response.ok) return null;
+  const movies = (await response.json().catch(() => null)) as RadarrStoredMovie[] | null;
+  if (!Array.isArray(movies)) return null;
+  if (input.tmdbId) {
+    return movies.find((movie) => movie.tmdbId === input.tmdbId && typeof movie.id === "number") ?? null;
+  }
+  if (input.imdbId) {
+    return movies.find((movie) => movie.imdbId === input.imdbId && typeof movie.id === "number") ?? null;
+  }
+  return null;
+}
+
+export async function resolveExistingRadarrMovieId(
+  target: ResolvedRadarrTarget,
+  input: ExistingRadarrMovieLookupInput,
+): Promise<number | null> {
+  const baseUrl = normalizeRadarrUrl(target.baseUrl);
+  if (!baseUrl || !target.apiKey) return null;
+
+  const existing = await findExistingRadarrMovie(baseUrl, target.apiKey, {
+    tmdbId: input.tmdbId ?? null,
+    imdbId: input.imdbId ?? null,
+  });
+  return typeof existing?.id === "number" && Number.isInteger(existing.id) && existing.id > 0
+    ? existing.id
+    : null;
 }
 
 /**
@@ -440,20 +504,142 @@ export async function addMovie(
   if (!addResponse.ok) {
     const message = errorMessageFromBody(addBody, "Unable to add movie to Radarr.");
     if (isAlreadyExistsMessage(message)) {
+      const existing = await findExistingRadarrMovie(baseUrl, target.apiKey, {
+        tmdbId: match.tmdbId,
+        imdbId: match.imdbId ?? input.imdbId ?? null,
+      });
       return {
         status: "exists",
         message: "Already exists in Radarr.",
         httpStatus: 200,
-        movie: { title: match.title, year: match.year, tmdbId: match.tmdbId },
+        movie: {
+          title: existing?.title ?? match.title,
+          year: existing?.year ?? match.year,
+          tmdbId: existing?.tmdbId ?? match.tmdbId,
+          radarrMovieId: existing?.id ?? null,
+        },
       };
     }
     return { status: "error", message, httpStatus: addResponse.status };
   }
 
+  const added = movieFromRadarrBody(addBody);
+
   return {
     status: "added",
     message: "Movie added to Radarr.",
     httpStatus: 200,
-    movie: { title: match.title, year: match.year, tmdbId: match.tmdbId },
+    movie: {
+      title: added?.title ?? match.title,
+      year: added?.year ?? match.year,
+      tmdbId: added?.tmdbId ?? match.tmdbId,
+      radarrMovieId: added?.id ?? null,
+    },
   };
+}
+
+export interface RadarrLibraryMovie {
+  id: number;
+  tmdbId: number | null;
+  imdbId: string | null;
+}
+
+/**
+ * Fetch Radarr's full movie library in a single bulk call. Radarr returns the
+ * entire library from GET /api/v3/movie; no pagination is needed.
+ */
+export async function listRadarrMovies(target: ResolvedRadarrTarget): Promise<RadarrLibraryMovie[]> {
+  const baseUrl = normalizeRadarrUrl(target.baseUrl);
+  if (!baseUrl) {
+    throw new RadarrError("Radarr Base URL is invalid.", 400);
+  }
+  if (!target.apiKey) {
+    throw new RadarrError("Radarr API key is not configured.", 400);
+  }
+
+  let response: Response;
+  try {
+    response = await radarrFetch(baseUrl, target.apiKey, "/api/v3/movie");
+  } catch (error) {
+    throw new RadarrError(
+      error instanceof Error ? error.message : "Unable to communicate with Radarr.",
+      502,
+    );
+  }
+  if (!response.ok) {
+    throw new RadarrError(
+      errorMessageFromBody(await readBody(response), "Unable to fetch the Radarr movie library."),
+      response.status,
+    );
+  }
+
+  const body = (await response.json().catch(() => null)) as RadarrStoredMovie[] | null;
+  if (!Array.isArray(body)) {
+    throw new RadarrError("Radarr returned an unexpected movie library response.", 502);
+  }
+  return body
+    .filter((movie): movie is RadarrStoredMovie & { id: number } => typeof movie.id === "number")
+    .map((movie) => ({
+      id: movie.id,
+      tmdbId: typeof movie.tmdbId === "number" ? movie.tmdbId : null,
+      imdbId: typeof movie.imdbId === "string" && movie.imdbId ? movie.imdbId : null,
+    }));
+}
+
+export interface DeleteMovieResult {
+  status: "deleted" | "not_found" | "error";
+  message: string;
+  httpStatus: number;
+}
+
+export async function deleteMovieByRadarrId(
+  target: ResolvedRadarrTarget,
+  radarrMovieId: number,
+  options: { deleteFiles?: boolean } = {},
+): Promise<DeleteMovieResult> {
+  const baseUrl = normalizeRadarrUrl(target.baseUrl);
+  if (!baseUrl) {
+    return { status: "error", message: "Radarr Base URL is invalid.", httpStatus: 400 };
+  }
+  if (!target.apiKey) {
+    return { status: "error", message: "Radarr API key is not configured.", httpStatus: 400 };
+  }
+  if (!Number.isInteger(radarrMovieId) || radarrMovieId <= 0) {
+    return { status: "error", message: "A valid Radarr movie ID is required.", httpStatus: 400 };
+  }
+
+  const params = new URLSearchParams();
+  if (options.deleteFiles ?? false) params.set("deleteFiles", "true");
+  const queryString = params.toString() ? `?${params.toString()}` : "";
+
+  try {
+    const deleteResponse = await radarrFetch(
+      baseUrl,
+      target.apiKey,
+      `/api/v3/movie/${radarrMovieId}${queryString}`,
+      { method: "DELETE" },
+    );
+
+    if (deleteResponse.status === 404) {
+      return { status: "not_found", message: "Movie not found in Radarr.", httpStatus: 404 };
+    }
+    if (!deleteResponse.ok) {
+      return {
+        status: "error",
+        message: errorMessageFromBody(
+          await readBody(deleteResponse),
+          "Unable to delete movie from Radarr.",
+        ),
+        httpStatus: deleteResponse.status,
+      };
+    }
+
+    return { status: "deleted", message: "Movie removed from Radarr.", httpStatus: 200 };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "Unable to communicate with Radarr.",
+      httpStatus: 502,
+    };
+  }
 }

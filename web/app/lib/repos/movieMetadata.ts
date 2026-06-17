@@ -1,4 +1,5 @@
 import { eq, inArray } from "drizzle-orm";
+import pLimit from "p-limit";
 
 import { getDb } from "@/app/lib/db";
 import { movieMetadata } from "@/app/lib/db/schema";
@@ -40,6 +41,7 @@ interface MovieMetadataWrite {
 
 const CACHEABLE_STATUSES = new Set<MetadataLookupStatus>(["matched", "not_found", "error"]);
 const SQLITE_IN_CHUNK_SIZE = 500;
+const METADATA_CONCURRENCY = 3;
 
 export function normalizeMetadataTitle(title: string): string {
   return title
@@ -256,33 +258,39 @@ export async function enrichReviewsWithMetadata(
     uniqueRows.set(filmIdForReview(row), row);
   }
 
-  for (const row of uniqueRows.values()) {
-    const filmId = filmIdForReview(row);
-    const cached = metadataForFilmId(filmId);
-    if (shouldUseCachedMetadata(cached, force)) continue;
+  const limit = pLimit(METADATA_CONCURRENCY);
 
-    try {
-      await lookupAndStore(row);
-    } catch (error) {
-      console.warn("Metadata enrichment failed", {
-        title: row.title,
-        year: row.year,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      upsertMovieMetadata({
-        filmId,
-        title: row.title,
-        year: row.year,
-        genres: [],
-        metadataSource: isTvLikeReview(row) ? "tvmaze" : "radarr",
-        metadataId: null,
-        metadataMediaType: isTvLikeReview(row) ? "tv" : "movie",
-        metadataLookupStatus: "error",
-        metadataLastFetchedAt: new Date().toISOString(),
-        lookupError: error instanceof Error ? error.message : "Metadata enrichment failed.",
-      });
-    }
-  }
+  await Promise.all(
+    Array.from(uniqueRows.values()).map((row) =>
+      limit(async () => {
+        const filmId = filmIdForReview(row);
+        const cached = metadataForFilmId(filmId);
+        if (shouldUseCachedMetadata(cached, force)) return;
+
+        try {
+          await lookupAndStore(row);
+        } catch (error) {
+          console.warn("Metadata enrichment failed", {
+            title: row.title,
+            year: row.year,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          upsertMovieMetadata({
+            filmId,
+            title: row.title,
+            year: row.year,
+            genres: [],
+            metadataSource: isTvLikeReview(row) ? "tvmaze" : "radarr",
+            metadataId: null,
+            metadataMediaType: isTvLikeReview(row) ? "tv" : "movie",
+            metadataLookupStatus: "error",
+            metadataLastFetchedAt: new Date().toISOString(),
+            lookupError: error instanceof Error ? error.message : "Metadata enrichment failed.",
+          });
+        }
+      }),
+    ),
+  );
 }
 
 export async function refreshMetadataForReview(row: ReviewRow): Promise<CachedMovieMetadata | null> {

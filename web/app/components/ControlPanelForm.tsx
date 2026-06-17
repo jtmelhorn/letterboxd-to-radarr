@@ -1,6 +1,7 @@
 "use client";
 
 import type { FormEvent, ReactNode } from "react";
+import { CheckIcon, ExclamationIcon } from "@/app/components/icons";
 
 import type { PublicSettings, RadarrOptionsResponse } from "@/app/types/movie";
 
@@ -37,50 +38,13 @@ interface ControlPanelFormProps {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onTestConnection: () => void;
   onAutoTestConnection?: () => void;
+  onSkipRadarr?: () => void;
   submitLabel: string;
   canSubmit?: boolean;
 }
 
-const inputCls =
-  "h-11 w-full rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-4 text-sm text-cornsilk placeholder-cornsilk/40 transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25 disabled:cursor-not-allowed disabled:opacity-60";
-
-const selectCls =
-  "h-11 w-full appearance-none rounded-[var(--radius-control)] border border-white/10 bg-black/20 px-4 pr-10 text-sm text-cornsilk transition focus:border-pine/60 focus:outline-none focus:ring-2 focus:ring-pine/25 disabled:cursor-not-allowed disabled:opacity-60";
-
 const labelCls = "text-sm font-semibold text-cornsilk";
-const helperCls = "text-xs leading-relaxed text-cornsilk/65";
-
-function CheckIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2.5}
-      viewBox="0 0 24 24"
-    >
-      <path d="M5 13l4 4L19 7" />
-    </svg>
-  );
-}
-
-function ExclamationIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      viewBox="0 0 24 24"
-    >
-      <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-    </svg>
-  );
-}
+const helperCls = "ui-helper";
 
 function SectionCard({
   title,
@@ -92,7 +56,7 @@ function SectionCard({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[var(--radius-card)] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
+    <section className="ui-section p-4 sm:p-5">
       <div className="mb-4 space-y-1">
         <h3 className="text-base font-extrabold tracking-tight text-cornsilk">{title}</h3>
         {description && <p className={helperCls}>{description}</p>}
@@ -114,7 +78,11 @@ function FieldLabel({
   return (
     <label className={labelCls} htmlFor={htmlFor}>
       {children}
-      {required && <span className="ml-1 text-gold" aria-label="required">*</span>}
+      {required && (
+        <span className="ml-1 text-gold" aria-label="required">
+          *
+        </span>
+      )}
     </label>
   );
 }
@@ -139,14 +107,6 @@ function Alert({
   );
 }
 
-function SelectChevron() {
-  return (
-    <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs text-cornsilk/55">
-      ▼
-    </span>
-  );
-}
-
 export function ControlPanelForm({
   mode,
   settings,
@@ -166,6 +126,7 @@ export function ControlPanelForm({
   onSubmit,
   onTestConnection,
   onAutoTestConnection,
+  onSkipRadarr,
   submitLabel,
   canSubmit = true,
 }: ControlPanelFormProps) {
@@ -185,8 +146,11 @@ export function ControlPanelForm({
     isSetup && !canSubmit
       ? [
           !letterboxdUsername?.trim() && "Letterboxd username",
-          !settingsDraft.radarrUrl.trim() && "Radarr base URL",
-          !settingsDraft.radarrApiKey.trim() && !settings.hasRadarrApiKey && "Radarr API key",
+          !settingsDraft.radarrUrl.trim() && !settings.radarrUrlFromEnv && "Radarr base URL",
+          !settingsDraft.radarrApiKey.trim() &&
+            !settings.hasRadarrApiKey &&
+            !settings.radarrApiKeyFromEnv &&
+            "Radarr API key",
           settingsDraft.qualityProfileId === "" && "Quality profile",
           !settingsDraft.rootFolderPath.trim() && "Root folder",
         ].filter(Boolean)
@@ -205,7 +169,7 @@ export function ControlPanelForm({
             </FieldLabel>
             <input
               autoComplete="username"
-              className={inputCls}
+              className="ui-input"
               id={`${idPrefix}-letterboxd-username`}
               placeholder="your-letterboxd-handle"
               value={letterboxdUsername ?? ""}
@@ -232,14 +196,21 @@ export function ControlPanelForm({
             </div>
             <input
               autoComplete="url"
-              className={inputCls}
+              className="ui-input"
+              disabled={settings.radarrUrlFromEnv}
               id={`${idPrefix}-radarr-url`}
               inputMode="url"
               placeholder="http://192.168.1.100:7878"
-              value={settingsDraft.radarrUrl}
+              value={settings.radarrUrlFromEnv ? settings.radarrUrl : settingsDraft.radarrUrl}
               onBlur={onAutoTestConnection}
               onChange={(e) => onDraftChange((current) => ({ ...current, radarrUrl: e.target.value }))}
             />
+            {settings.radarrUrlFromEnv && (
+              <p className={helperCls}>
+                Set by the RADARR environment variable — remove it from your container
+                configuration to edit it here.
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -248,14 +219,27 @@ export function ControlPanelForm({
             </FieldLabel>
             <input
               autoComplete="off"
-              className={inputCls}
+              className="ui-input"
+              disabled={settings.radarrApiKeyFromEnv}
               id={`${idPrefix}-radarr-api-key`}
-              placeholder={settings.hasRadarrApiKey ? "Saved — leave blank to keep unchanged" : "Paste API key"}
+              placeholder={
+                settings.radarrApiKeyFromEnv
+                  ? "Set by environment"
+                  : settings.hasRadarrApiKey
+                    ? "Saved — leave blank to keep unchanged"
+                    : "Paste API key"
+              }
               type="password"
-              value={settingsDraft.radarrApiKey}
+              value={settings.radarrApiKeyFromEnv ? "" : settingsDraft.radarrApiKey}
               onBlur={onAutoTestConnection}
               onChange={(e) => onDraftChange((current) => ({ ...current, radarrApiKey: e.target.value }))}
             />
+            {settings.radarrApiKeyFromEnv && (
+              <p className={helperCls}>
+                Set by the API_KEY environment variable — remove it from your container
+                configuration to edit it here.
+              </p>
+            )}
             {onAutoTestConnection && (
               <p className={helperCls}>
                 Use “Test connection” to load profiles and folders. The form also checks once after you leave
@@ -267,8 +251,8 @@ export function ControlPanelForm({
 
         <div className="flex flex-wrap items-center gap-3">
           <button
-            className="inline-flex h-10 items-center justify-center rounded-[var(--radius-control)] border border-white/10 bg-white/[0.035] px-5 text-sm font-bold text-cornsilk/85 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-cornsilk disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={isTestingConnection || !settingsDraft.radarrUrl}
+            className="ui-btn ui-btn-secondary"
+            disabled={isTestingConnection || (!settingsDraft.radarrUrl && !settings.radarrUrlFromEnv)}
             onClick={onTestConnection}
             type="button"
           >
@@ -309,55 +293,49 @@ export function ControlPanelForm({
             <FieldLabel htmlFor={`${idPrefix}-quality-profile`} required={isSetup}>
               Quality profile
             </FieldLabel>
-            <div className="relative">
-              <select
-                className={selectCls}
-                disabled={!radarrOptions}
-                id={`${idPrefix}-quality-profile`}
-                value={settingsDraft.qualityProfileId === "" ? "" : String(settingsDraft.qualityProfileId)}
-                onChange={(e) =>
-                  onDraftChange((current) => ({
-                    ...current,
-                    qualityProfileId: e.target.value === "" ? "" : Number(e.target.value),
-                  }))
-                }
-              >
-                {!isSetup && <option value="">{profilePlaceholder}</option>}
-                {isSetup && settingsDraft.qualityProfileId === "" && (
-                  <option value="">{profilePlaceholder}</option>
-                )}
-                {radarrOptions?.qualityProfiles.map((profile) => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.name}
-                  </option>
-                ))}
-              </select>
-              <SelectChevron />
-            </div>
+            <select
+              className="ui-select"
+              disabled={!radarrOptions}
+              id={`${idPrefix}-quality-profile`}
+              value={settingsDraft.qualityProfileId === "" ? "" : String(settingsDraft.qualityProfileId)}
+              onChange={(e) =>
+                onDraftChange((current) => ({
+                  ...current,
+                  qualityProfileId: e.target.value === "" ? "" : Number(e.target.value),
+                }))
+              }
+            >
+              {!isSetup && <option value="">{profilePlaceholder}</option>}
+              {isSetup && settingsDraft.qualityProfileId === "" && (
+                <option value="">{profilePlaceholder}</option>
+              )}
+              {radarrOptions?.qualityProfiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="space-y-2">
             <FieldLabel htmlFor={`${idPrefix}-root-folder`} required={isSetup}>
               Root folder
             </FieldLabel>
-            <div className="relative">
-              <select
-                className={selectCls}
-                disabled={!radarrOptions}
-                id={`${idPrefix}-root-folder`}
-                value={settingsDraft.rootFolderPath}
-                onChange={(e) => onDraftChange((current) => ({ ...current, rootFolderPath: e.target.value }))}
-              >
-                {!isSetup && <option value="">{folderPlaceholder}</option>}
-                {isSetup && !settingsDraft.rootFolderPath && <option value="">{folderPlaceholder}</option>}
-                {radarrOptions?.rootFolders.map((folder) => (
-                  <option key={folder.path} value={folder.path}>
-                    {folder.path}
-                  </option>
-                ))}
-              </select>
-              <SelectChevron />
-            </div>
+            <select
+              className="ui-select"
+              disabled={!radarrOptions}
+              id={`${idPrefix}-root-folder`}
+              value={settingsDraft.rootFolderPath}
+              onChange={(e) => onDraftChange((current) => ({ ...current, rootFolderPath: e.target.value }))}
+            >
+              {!isSetup && <option value="">{folderPlaceholder}</option>}
+              {isSetup && !settingsDraft.rootFolderPath && <option value="">{folderPlaceholder}</option>}
+              {radarrOptions?.rootFolders.map((folder) => (
+                <option key={folder.path} value={folder.path}>
+                  {folder.path}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </SectionCard>
@@ -369,23 +347,20 @@ export function ControlPanelForm({
         >
           <div className="space-y-2">
             <FieldLabel htmlFor={`${idPrefix}-auto-threshold`}>Auto-sync threshold</FieldLabel>
-            <div className="relative">
-              <select
-                className={selectCls}
-                id={`${idPrefix}-auto-threshold`}
-                value={settingsDraft.autoThreshold}
-                onChange={(e) =>
-                  onDraftChange((current) => ({ ...current, autoThreshold: Number(e.target.value) }))
-                }
-              >
-                {ratingOptions.map((rating) => (
-                  <option key={rating} value={rating}>
-                    Sync rated ≥ {rating.toFixed(1)} ★
-                  </option>
-                ))}
-              </select>
-              <SelectChevron />
-            </div>
+            <select
+              className="ui-select"
+              id={`${idPrefix}-auto-threshold`}
+              value={settingsDraft.autoThreshold}
+              onChange={(e) =>
+                onDraftChange((current) => ({ ...current, autoThreshold: Number(e.target.value) }))
+              }
+            >
+              {ratingOptions.map((rating) => (
+                <option key={rating} value={rating}>
+                  Sync rated ≥ {rating.toFixed(1)} ★
+                </option>
+              ))}
+            </select>
           </div>
         </SectionCard>
       )}
@@ -409,8 +384,21 @@ export function ControlPanelForm({
       )}
 
       <div className="flex flex-col-reverse gap-3 pt-1 sm:flex-row sm:items-center sm:justify-end">
+        {isSetup && onSkipRadarr && !canSubmit && Boolean(letterboxdUsername?.trim()) && (
+          <div className="flex flex-col gap-1 sm:mr-auto">
+            <button
+              className="ui-btn ui-btn-secondary"
+              disabled={isSaving}
+              type="button"
+              onClick={onSkipRadarr}
+            >
+              Skip Radarr for now
+            </button>
+            <p className={helperCls}>Saves only the reviewer. Connect Radarr later from Settings.</p>
+          </div>
+        )}
         <button
-          className="inline-flex h-11 items-center justify-center rounded-[var(--radius-control)] bg-pine px-6 text-sm font-extrabold text-ink transition hover:bg-pine/90 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-pine/35 disabled:cursor-not-allowed disabled:opacity-50"
+          className="ui-btn ui-btn-primary"
           disabled={isSaving || !canSubmit}
           type="submit"
         >
@@ -428,8 +416,10 @@ export function canCompleteSetup(
 ): boolean {
   return (
     letterboxdUsername.trim().length > 0 &&
-    settingsDraft.radarrUrl.trim().length > 0 &&
-    (settingsDraft.radarrApiKey.trim().length > 0 || settings.hasRadarrApiKey) &&
+    (settingsDraft.radarrUrl.trim().length > 0 || settings.radarrUrlFromEnv) &&
+    (settingsDraft.radarrApiKey.trim().length > 0 ||
+      settings.hasRadarrApiKey ||
+      settings.radarrApiKeyFromEnv) &&
     settingsDraft.qualityProfileId !== "" &&
     settingsDraft.rootFolderPath.trim().length > 0 &&
     Number.isFinite(settingsDraft.autoThreshold)

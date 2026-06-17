@@ -49,7 +49,7 @@ Optional environment variables:
 
 - `APP_PASSWORD`: optional admin password. When set, users sign in with this password. When omitted, the first visitor must set a password in the UI (stored hashed in the data volume). The app is not open without authentication.
 - `APP_ENCRYPTION_KEY`: 32-byte base64 or hex key used to encrypt the stored Radarr API key. If unset, a random key is generated and persisted as `secret.key` in the data directory.
-- `SYNC_CRON`: cron expression for the background sync (default `0 0 * * *`, once daily at midnight). Set to `off` to disable background syncing.
+- `SYNC_CRON`: optional global override for background sync scheduling. By default (unset), each sync group runs on its own configured interval (30 minutes, hourly, every 12 hours, daily, or weekly), and the UI shows when each group last synced. When `SYNC_CRON` is set to a cron expression, **all** enabled groups run on that single schedule and per-group intervals are ignored (the sync configuration screen indicates this override). Set to `off` (or `AUTO_SYNC=false`) to disable background syncing entirely.
 - `DATA_DIR`: override the data directory (defaults to `/data` in production, `web/.data` in development).
 
 To build the image locally instead of pulling from GitHub Container Registry, uncomment `build: ./web` in `docker-compose.yml`.

@@ -32,38 +32,7 @@ afterEach(() => {
 });
 
 describeWithSqlite("reviewer group filters", () => {
-  it("marks the default group explicitly and allows it to be disabled", async () => {
-    const { getOrCreateUser } = await import("@/app/lib/repos/users");
-    const { deleteReviewerGroup, getReviewerGroup, upsertReviewerGroup } = await import(
-      "@/app/lib/repos/reviewerGroups"
-    );
-
-    getOrCreateUser("alice");
-
-    const initial = getReviewerGroup(1);
-    expect(initial).toMatchObject({
-      id: 1,
-      name: "All reviewers",
-      enabled: true,
-      isDefault: true,
-      reviewerHandles: ["alice"],
-    });
-
-    upsertReviewerGroup({
-      id: 1,
-      name: "All reviewers",
-      enabled: false,
-      ratingThreshold: 4,
-      syncInterval: "1d",
-      requiresManualApproval: false,
-      reviewerHandles: [],
-    });
-
-    expect(getReviewerGroup(1)).toMatchObject({ enabled: false, isDefault: true });
-    expect(() => deleteReviewerGroup(1)).toThrow("The default reviewer group cannot be deleted.");
-  });
-
-  it("persists enabled state for custom groups", async () => {
+  it("persists enabled state for groups", async () => {
     const { getOrCreateUser } = await import("@/app/lib/repos/users");
     const { getReviewerGroup, upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
 
@@ -77,8 +46,145 @@ describeWithSqlite("reviewer group filters", () => {
       reviewerHandles: ["alice"],
     });
 
-    expect(saved).toMatchObject({ enabled: false, isDefault: false });
+    expect(saved).toMatchObject({ enabled: false });
     expect(getReviewerGroup(saved.id)).toMatchObject({ enabled: false, reviewerHandles: ["alice"] });
+  });
+
+  it("seeds the default group and adds new reviewers to it", async () => {
+    const { getDefaultReviewerGroupId } = await import("@/app/lib/repos/appState");
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { getDefaultReviewerGroup, listReviewerGroups, upsertReviewerGroup } = await import(
+      "@/app/lib/repos/reviewerGroups"
+    );
+
+    const defaultGroup = getDefaultReviewerGroup();
+    expect(defaultGroup).toMatchObject({
+      name: "All reviewers",
+      enabled: true,
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      reviewerHandles: [],
+    });
+    expect(getDefaultReviewerGroupId()).toBe(defaultGroup?.id);
+    expect(listReviewerGroups()).toHaveLength(1);
+
+    getOrCreateUser("Alice");
+
+    expect(getDefaultReviewerGroup()?.reviewerHandles).toEqual(["alice"]);
+
+    upsertReviewerGroup({
+      id: defaultGroup!.id,
+      name: defaultGroup!.name,
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: false,
+      reviewerHandles: [],
+    });
+
+    expect(getDefaultReviewerGroup()?.reviewerHandles).toEqual(["alice"]);
+  });
+
+  it("prevents deleting the default group while still allowing it to be disabled", async () => {
+    const { getDefaultReviewerGroup, deleteReviewerGroup, upsertReviewerGroup } = await import(
+      "@/app/lib/repos/reviewerGroups"
+    );
+
+    const defaultGroup = getDefaultReviewerGroup();
+    expect(defaultGroup).not.toBeNull();
+
+    expect(() => deleteReviewerGroup(defaultGroup!.id)).toThrow("cannot be deleted");
+
+    upsertReviewerGroup({
+      id: defaultGroup!.id,
+      name: defaultGroup!.name,
+      enabled: false,
+      ratingThreshold: defaultGroup!.ratingThreshold,
+      syncInterval: defaultGroup!.syncInterval,
+      requiresManualApproval: defaultGroup!.requiresManualApproval,
+      filters: defaultGroup!.filters,
+      reviewerHandles: defaultGroup!.reviewerHandles,
+    });
+
+    expect(getDefaultReviewerGroup()).toMatchObject({ enabled: false, name: "All reviewers" });
+  });
+
+  it("adopts an existing All reviewers group on upgrade without duplicating it", async () => {
+    const Database = require("better-sqlite3") as typeof import("better-sqlite3");
+    const oldDb = new Database(path.join(dataDir, "app.db"));
+    oldDb.exec(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        handle TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      );
+
+      CREATE TABLE reviewer_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        auto_threshold REAL NOT NULL DEFAULT 4,
+        sync_interval TEXT NOT NULL DEFAULT '1d',
+        requires_manual_approval INTEGER NOT NULL DEFAULT 0,
+        filters_json TEXT NOT NULL DEFAULT '{"year":{"mode":"any"},"genres":{"include":[],"exclude":[]}}',
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      );
+
+      CREATE TABLE reviewer_group_members (
+        group_id INTEGER NOT NULL REFERENCES reviewer_groups(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        PRIMARY KEY (group_id, user_id)
+      );
+
+      CREATE TABLE app_state (
+        id INTEGER PRIMARY KEY,
+        admin_password_hash TEXT NOT NULL DEFAULT '',
+        setup_completed_at TEXT,
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      );
+
+      INSERT INTO app_state (id) VALUES (1);
+      INSERT INTO users (handle) VALUES ('bob');
+      INSERT INTO reviewer_groups (id, name, auto_threshold, sync_interval)
+        VALUES (7, 'All reviewers', 4.5, 'manual');
+    `);
+    oldDb.close();
+
+    const { getDefaultReviewerGroupId } = await import("@/app/lib/repos/appState");
+    const { getDefaultReviewerGroup, listReviewerGroups } = await import(
+      "@/app/lib/repos/reviewerGroups"
+    );
+
+    expect(getDefaultReviewerGroupId()).toBe(7);
+    expect(listReviewerGroups()).toHaveLength(1);
+    expect(getDefaultReviewerGroup()).toMatchObject({
+      id: 7,
+      name: "All reviewers",
+      ratingThreshold: 4.5,
+      syncInterval: "manual",
+      reviewerHandles: ["bob"],
+    });
+  });
+
+  it("allows deleting any group", async () => {
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { deleteReviewerGroup, getReviewerGroup, upsertReviewerGroup } = await import(
+      "@/app/lib/repos/reviewerGroups"
+    );
+
+    getOrCreateUser("alice");
+    const saved = upsertReviewerGroup({
+      name: "Deletable",
+      ratingThreshold: 4,
+      syncInterval: "1d",
+      requiresManualApproval: false,
+      reviewerHandles: ["alice"],
+    });
+
+    expect(getReviewerGroup(saved.id)).not.toBeNull();
+    deleteReviewerGroup(saved.id);
+    expect(getReviewerGroup(saved.id)).toBeNull();
   });
 
   it("only lists enabled non-manual groups as schedulable", async () => {
@@ -115,22 +221,16 @@ describeWithSqlite("reviewer group filters", () => {
 
     const names = listSchedulableReviewerGroups().map((group) => group.name);
 
-    expect(names).toContain("All reviewers");
     expect(names).toContain("Daily");
     expect(names).not.toContain("Disabled");
     expect(names).not.toContain("Manual");
   });
 
-  it("persists filters and returns empty filters for existing defaults", async () => {
+  it("persists filters and returns empty filters by default", async () => {
     const { getOrCreateUser } = await import("@/app/lib/repos/users");
     const { getReviewerGroup, upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
 
     getOrCreateUser("alice");
-
-    expect(getReviewerGroup(1)?.filters).toEqual({
-      year: { mode: "any" },
-      genres: { include: [], exclude: [] },
-    });
 
     const saved = upsertReviewerGroup({
       name: "2026 without docs",
@@ -234,5 +334,143 @@ describeWithSqlite("reviewer group filters", () => {
       year: { mode: "exact", exactYear: 2026 },
       genres: { include: [], exclude: ["Documentary"] },
     });
+  });
+
+  it("merges partial updates with the stored row instead of resetting defaults", async () => {
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { getReviewerGroup, upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+
+    getOrCreateUser("alice");
+    getOrCreateUser("bob");
+    const saved = upsertReviewerGroup({
+      name: "Partial updates",
+      ratingThreshold: 4.5,
+      syncInterval: "12h",
+      requiresManualApproval: true,
+      filters: {
+        year: { mode: "exact", exactYear: 2026 },
+        genres: { include: [], exclude: ["Documentary"] },
+      },
+      reviewerHandles: ["alice"],
+    });
+
+    // Membership-only update preserves every other field.
+    upsertReviewerGroup({ id: saved.id, reviewerHandles: ["alice", "bob"] });
+    expect(getReviewerGroup(saved.id)).toMatchObject({
+      name: "Partial updates",
+      ratingThreshold: 4.5,
+      syncInterval: "12h",
+      requiresManualApproval: true,
+      filters: {
+        year: { mode: "exact", exactYear: 2026 },
+        genres: { include: [], exclude: ["Documentary"] },
+      },
+      reviewerHandles: ["alice", "bob"],
+    });
+
+    // Flag-only update preserves membership and the rest.
+    upsertReviewerGroup({ id: saved.id, requiresManualApproval: false });
+    expect(getReviewerGroup(saved.id)).toMatchObject({
+      ratingThreshold: 4.5,
+      syncInterval: "12h",
+      requiresManualApproval: false,
+      reviewerHandles: ["alice", "bob"],
+    });
+
+    // Threshold-only and interval-only updates change exactly one field each.
+    upsertReviewerGroup({ id: saved.id, ratingThreshold: 3.5 });
+    upsertReviewerGroup({ id: saved.id, syncInterval: "1w" });
+    expect(getReviewerGroup(saved.id)).toMatchObject({
+      name: "Partial updates",
+      ratingThreshold: 3.5,
+      syncInterval: "1w",
+      requiresManualApproval: false,
+      reviewerHandles: ["alice", "bob"],
+    });
+  });
+
+  it("stamps and exposes lastSyncedAt without touching it on regular saves", async () => {
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { getReviewerGroup, stampReviewerGroupLastSynced, upsertReviewerGroup } = await import(
+      "@/app/lib/repos/reviewerGroups"
+    );
+
+    getOrCreateUser("alice");
+    const saved = upsertReviewerGroup({
+      name: "Stamped",
+      ratingThreshold: 4,
+      reviewerHandles: ["alice"],
+    });
+    expect(getReviewerGroup(saved.id)?.lastSyncedAt).toBeNull();
+
+    stampReviewerGroupLastSynced(saved.id);
+    const stamped = getReviewerGroup(saved.id)?.lastSyncedAt;
+    expect(stamped).toBeTruthy();
+    expect(Number.isNaN(Date.parse(stamped!))).toBe(false);
+
+    // A config save must not reset the stamp.
+    upsertReviewerGroup({ id: saved.id, ratingThreshold: 3.5 });
+    expect(getReviewerGroup(saved.id)?.lastSyncedAt).toBe(stamped);
+  });
+
+  it("rejects unknown reviewer handles by name", async () => {
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+
+    getOrCreateUser("alice");
+    expect(() =>
+      upsertReviewerGroup({
+        name: "Unknown member",
+        reviewerHandles: ["alice", "ghost"],
+      }),
+    ).toThrow("Unknown reviewer handle(s): ghost.");
+  });
+
+  it("accepts legacy autoThreshold bodies and partial PUTs through the route", async () => {
+    process.env.APP_PASSWORD = "test-password";
+    try {
+      const { getOrCreateUser } = await import("@/app/lib/repos/users");
+      const { getReviewerGroup, upsertReviewerGroup } = await import("@/app/lib/repos/reviewerGroups");
+      const { buildSessionToken, SESSION_COOKIE } = await import("@/app/lib/auth");
+      const { PUT } = await import("@/app/api/reviewer-groups/route");
+
+      getOrCreateUser("alice");
+      const saved = upsertReviewerGroup({
+        name: "Route partial",
+        ratingThreshold: 4.5,
+        syncInterval: "12h",
+        requiresManualApproval: true,
+        reviewerHandles: ["alice"],
+      });
+
+      const cookie = `${SESSION_COOKIE}=${encodeURIComponent(buildSessionToken())}`;
+      const legacyRes = await PUT(
+        new Request("http://localhost/api/reviewer-groups", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", cookie },
+          body: JSON.stringify({ id: saved.id, autoThreshold: 3 }),
+        }),
+      );
+      expect(legacyRes.status).toBe(200);
+      expect(getReviewerGroup(saved.id)).toMatchObject({
+        ratingThreshold: 3,
+        syncInterval: "12h",
+        requiresManualApproval: true,
+        reviewerHandles: ["alice"],
+      });
+
+      const unknownRes = await PUT(
+        new Request("http://localhost/api/reviewer-groups", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", cookie },
+          body: JSON.stringify({ id: saved.id, reviewerHandles: ["ghost"] }),
+        }),
+      );
+      expect(unknownRes.status).toBe(400);
+      const unknownBody = (await unknownRes.json()) as { message: string };
+      expect(unknownBody.message).toContain("ghost");
+    } finally {
+      delete process.env.APP_PASSWORD;
+    }
   });
 });
