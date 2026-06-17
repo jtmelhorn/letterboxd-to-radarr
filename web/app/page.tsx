@@ -735,12 +735,6 @@ export default function Home() {
         ? selectedGenres[0]
         : `${selectedGenres.length} genres`;
 
-  // Drives the mobile "Filters (N)" badge. Group scope replaces Row 2 with a
-  // "Using group filters" badge, so the count is only meaningful outside it.
-  const activeFilterCount = activeReviewerGroup
-    ? 0
-    : (minimumRating > 0 ? 1 : 0) + (selectedGenres.length > 0 ? 1 : 0) + (hideAdded ? 1 : 0);
-
   const filteredMovies = useMemo(
     () =>
       sortMoviesByRating(
@@ -1689,19 +1683,119 @@ export default function Home() {
               </div>
 
               <div className="ui-section sticky top-0 z-10 px-3 py-2">
-                {/* Compact toolbar — one row on desktop, stacks on small screens */}
-                <div className="flex flex-wrap items-center gap-2">
-                  {/* Left cluster — always visible */}
+                {/* Single compact toolbar — filters | scope | search */}
+                <div className="flex flex-nowrap items-center gap-2">
+                  {/* Filters cluster */}
+                  {currentScope.type === "group" ? (
+                    <span className="ui-badge ui-badge-green shrink-0">Using group filters</span>
+                  ) : (
+                    <>
+                      <select
+                        aria-label="Minimum rating"
+                        className="ui-select ui-select-sm w-auto shrink-0 font-bold"
+                        value={minimumRating}
+                        onChange={(event) => setMinimumRating(Number(event.target.value))}
+                      >
+                        <option value={0}>All ratings</option>
+                        {[3.0, 3.5, 4.0, 4.5, 5.0].map((val) => (
+                          <option key={val} value={val}>
+                            {val.toFixed(1)}★&amp;up
+                          </option>
+                        ))}
+                      </select>
+
+                      <div ref={genreDropdownRef} className="relative shrink-0">
+                        <button
+                          aria-expanded={isGenreFilterOpen}
+                          aria-haspopup="listbox"
+                          aria-label="Filter by genre"
+                          className={`flex h-8 items-center justify-between gap-1.5 rounded-[var(--radius-control)] border px-2.5 text-xs font-bold transition focus:outline-none focus:ring-2 focus:ring-pine/25 ${
+                            isGenreFilterOpen || selectedGenres.length > 0
+                              ? "border-pine/50 bg-pine/10 text-chartreuse"
+                              : "border-white/10 bg-black/20 text-cornsilk/80 hover:border-white/20 hover:bg-white/[0.05] hover:text-cornsilk"
+                          }`}
+                          onClick={() => setIsGenreFilterOpen((open) => !open)}
+                          type="button"
+                        >
+                          <span className="max-w-[7rem] truncate">{genreFilterLabel}</span>
+                          <span className="pointer-events-none text-[10px] text-cornsilk/45">▼</span>
+                        </button>
+                        {isGenreFilterOpen && (
+                          <div className="absolute left-0 top-full z-30 mt-2 w-56 rounded-[var(--radius-control)] border border-cornsilk/10 bg-ink p-2 shadow-2xl">
+                            <div className="flex items-center justify-between gap-2 border-b border-cornsilk/10 px-2 pb-2">
+                              <span className="text-xs font-extrabold text-cornsilk">Genres</span>
+                              {selectedGenres.length > 0 && (
+                                <button
+                                  className="text-xs font-bold text-pine transition hover:text-chartreuse"
+                                  onClick={() => setSelectedGenres([])}
+                                  type="button"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                            </div>
+                            <div className="max-h-56 overflow-y-auto py-1">
+                              {genreOptions.length === 0 ? (
+                                <p className="px-2 py-3 text-xs leading-relaxed text-cornsilk/70">
+                                  Cached genres will appear after metadata refresh.
+                                </p>
+                              ) : (
+                                genreOptions.map((genre) => (
+                                  <label
+                                    key={genre}
+                                    className="flex cursor-pointer items-center gap-2 rounded-[var(--radius-control)] px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]"
+                                  >
+                                    <input
+                                      checked={selectedGenres.includes(genre)}
+                                      className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                                      onChange={(e) =>
+                                        setSelectedGenres((current) =>
+                                          e.target.checked
+                                            ? [...new Set([...current, genre])]
+                                            : current.filter((item) => item !== genre),
+                                        )
+                                      }
+                                      type="checkbox"
+                                    />
+                                    <span className="truncate">{genre}</span>
+                                  </label>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <label
+                        className={`flex h-8 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] border px-2.5 text-xs font-bold transition focus-within:ring-2 focus-within:ring-pine/25 ${
+                          hideAdded
+                            ? "border-pine/50 bg-pine/10 text-chartreuse"
+                            : "border-white/10 bg-black/20 text-cornsilk/80 hover:border-white/20 hover:bg-white/[0.05] hover:text-cornsilk"
+                        }`}
+                      >
+                        <input
+                          aria-label="Hide added movies"
+                          checked={hideAdded}
+                          className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                          onChange={(e) => setHideAdded(e.target.checked)}
+                          type="checkbox"
+                        />
+                        <span className="whitespace-nowrap">Hide added</span>
+                      </label>
+                    </>
+                  )}
+
+                  {/* Scope dropdown — sits between filters and search */}
                   <select
                     aria-label="Reviewer scope"
-                    className="ui-select ui-select-sm w-auto min-w-[8rem] font-bold sm:min-w-[10rem]"
+                    className="ui-select ui-select-sm w-auto shrink-0 font-bold"
                     value={scopeSelection}
                     onChange={(event) => {
                       setScopeSelection(event.target.value as ScopeSelection);
                       setHasAutoFetched(false);
                     }}
                   >
-                    <option value="all">All enabled groups</option>
+                    <option value="all">All groups</option>
                     {reviewers.map((reviewer) => (
                       <option key={reviewer.handle} value={`reviewer:${reviewer.handle}`}>
                         @{reviewer.handle}
@@ -1709,145 +1803,19 @@ export default function Home() {
                     ))}
                     {reviewerGroups.map((group) => (
                       <option key={group.id} value={`group:${group.id}`}>
-                        Group: {group.name}
+                        {group.name}
                       </option>
                     ))}
                   </select>
 
-                  <span className="ui-badge ui-badge-slate shrink-0 opacity-80">
-                    {stats.filtered} of {stats.total}
-                  </span>
-
-                  <Button
-                    aria-controls="filter-row-2"
-                    aria-expanded={isMobileFiltersOpen}
-                    className="relative lg:hidden"
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => setIsMobileFiltersOpen((open) => !open)}
-                  >
-                    Filters
-                    {activeFilterCount > 0 && (
-                      <span className="ml-1 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gold px-1 text-[11px] font-bold text-ink">
-                        {activeFilterCount}
-                      </span>
-                    )}
-                  </Button>
-
-                  {/* Inline filters — inline on desktop, toggled by Filters on mobile */}
-                  <div
-                    className={`${
-                      isMobileFiltersOpen ? "flex" : "hidden"
-                    } order-20 w-full items-center gap-2 lg:order-none lg:flex lg:w-auto`}
-                    id="filter-row-2"
-                  >
-                    {currentScope.type === "group" ? (
-                      <span className="ui-badge ui-badge-green">Using group filters</span>
-                    ) : (
-                      <>
-                        <select
-                          aria-label="Minimum rating"
-                          className="ui-select ui-select-sm w-auto min-w-[7.5rem] font-bold"
-                          value={minimumRating}
-                          onChange={(event) => setMinimumRating(Number(event.target.value))}
-                        >
-                          <option value={0}>All ratings</option>
-                          {[3.0, 3.5, 4.0, 4.5, 5.0].map((val) => (
-                            <option key={val} value={val}>
-                              {val.toFixed(1)}★ &amp; up
-                            </option>
-                          ))}
-                        </select>
-
-                        <div ref={genreDropdownRef} className="relative">
-                          <button
-                            aria-expanded={isGenreFilterOpen}
-                            aria-haspopup="listbox"
-                            aria-label="Filter by genre"
-                            className={`flex h-8 min-w-[8rem] items-center justify-between gap-2 rounded-[var(--radius-control)] border px-3 text-xs font-bold transition focus:outline-none focus:ring-2 focus:ring-pine/25 ${
-                              isGenreFilterOpen || selectedGenres.length > 0
-                                ? "border-pine/50 bg-pine/10 text-chartreuse"
-                                : "border-white/10 bg-black/20 text-cornsilk/80 hover:border-white/20 hover:bg-white/[0.05] hover:text-cornsilk"
-                            }`}
-                            onClick={() => setIsGenreFilterOpen((open) => !open)}
-                            type="button"
-                          >
-                            <span className="truncate">{genreFilterLabel}</span>
-                            <span className="pointer-events-none text-[10px] text-cornsilk/45">▼</span>
-                          </button>
-                          {isGenreFilterOpen && (
-                            <div className="absolute left-0 top-full z-30 mt-2 w-60 rounded-[var(--radius-control)] border border-cornsilk/10 bg-ink p-2 shadow-2xl">
-                              <div className="flex items-center justify-between gap-2 border-b border-cornsilk/10 px-2 pb-2">
-                                <span className="text-xs font-extrabold text-cornsilk">Genres</span>
-                                {selectedGenres.length > 0 && (
-                                  <button
-                                    className="text-xs font-bold text-pine transition hover:text-chartreuse"
-                                    onClick={() => setSelectedGenres([])}
-                                    type="button"
-                                  >
-                                    Clear
-                                  </button>
-                                )}
-                              </div>
-                              <div className="max-h-56 overflow-y-auto py-1">
-                                {genreOptions.length === 0 ? (
-                                  <p className="px-2 py-3 text-xs leading-relaxed text-cornsilk/70">
-                                    Cached genres will appear after metadata refresh.
-                                  </p>
-                                ) : (
-                                  genreOptions.map((genre) => (
-                                    <label
-                                      key={genre}
-                                      className="flex cursor-pointer items-center gap-2 rounded-[var(--radius-control)] px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]"
-                                    >
-                                      <input
-                                        checked={selectedGenres.includes(genre)}
-                                        className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                                        onChange={(e) =>
-                                          setSelectedGenres((current) =>
-                                            e.target.checked
-                                              ? [...new Set([...current, genre])]
-                                              : current.filter((item) => item !== genre),
-                                          )
-                                        }
-                                        type="checkbox"
-                                      />
-                                      <span className="truncate">{genre}</span>
-                                    </label>
-                                  ))
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        <label
-                          className={`flex h-8 cursor-pointer items-center gap-2 whitespace-nowrap rounded-[var(--radius-control)] border px-3 text-xs font-bold transition focus-within:ring-2 focus-within:ring-pine/25 ${
-                            hideAdded
-                              ? "border-pine/50 bg-pine/10 text-chartreuse"
-                              : "border-white/10 bg-black/20 text-cornsilk/80 hover:border-white/20 hover:bg-white/[0.05] hover:text-cornsilk"
-                          }`}
-                        >
-                          <input
-                            aria-label="Hide added movies"
-                            checked={hideAdded}
-                            className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                            onChange={(e) => setHideAdded(e.target.checked)}
-                            type="checkbox"
-                          />
-                          <span className="whitespace-nowrap">Hide added</span>
-                        </label>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Search — right on desktop, full width on mobile */}
-                  <div className="relative order-10 flex basis-full items-center lg:order-none lg:ml-auto lg:basis-auto lg:flex-1 lg:max-w-[480px]">
+                  {/* Search — right, takes remaining space */}
+                  <div className="relative ml-auto flex w-full min-w-[8rem] max-w-[480px] items-center">
                     <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-cornsilk/45" />
                     <Input
                       aria-label="Search movies"
-                      className="ui-input-sm h-8 w-full pl-9 pr-8"
+                      className="ui-input-sm h-8 w-full"
                       placeholder="Search movies, year, reviewer, or genre…"
+                      style={{ paddingLeft: "2.25rem", paddingRight: "2rem" }}
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                     />
