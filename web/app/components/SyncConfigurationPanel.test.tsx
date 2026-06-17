@@ -84,15 +84,24 @@ describe("SyncConfigurationPanel", () => {
     );
   });
 
-  it("can create a group and save configured filters", async () => {
+  it("can create a group with full settings and save configured filters on existing groups", async () => {
     const user = userEvent.setup();
     const props = renderPanel();
 
+    await user.click(screen.getByRole("button", { name: "+ New group" }));
     await user.type(screen.getByPlaceholderText("Group name"), "Weekend picks");
     await user.selectOptions(screen.getAllByDisplayValue("Avg >= 4.0 stars")[0], "5");
     await user.click(screen.getByRole("button", { name: "Create group" }));
 
-    expect(props.onCreateGroup).toHaveBeenCalledWith({ name: "Weekend picks", ratingThreshold: 5 });
+    expect(props.onCreateGroup).toHaveBeenCalledWith({
+      name: "Weekend picks",
+      enabled: true,
+      ratingThreshold: 5,
+      syncInterval: "1d",
+      requiresManualApproval: false,
+      filters: { year: { mode: "any" }, genres: { include: [], exclude: [] } },
+      reviewerHandles: [],
+    });
 
     const favorites = screen.getByLabelText("Favorites group name").closest("article");
     expect(favorites).toBeTruthy();
@@ -118,6 +127,53 @@ describe("SyncConfigurationPanel", () => {
         },
       }),
     );
+  });
+
+  it("opens the new-group draft with documented defaults", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByRole("button", { name: "+ New group" }));
+
+    const draft = screen.getByLabelText("New group name").closest("article");
+    expect(draft).toBeTruthy();
+    const scope = within(draft as HTMLElement);
+
+    expect(scope.getByLabelText("New group name")).toHaveValue("");
+    expect(scope.getByLabelText("Enabled")).toBeChecked();
+    expect(scope.getByDisplayValue("Avg >= 4.0 stars")).toBeInTheDocument();
+    expect(scope.getByDisplayValue("Daily")).toBeInTheDocument();
+    expect(scope.getByLabelText("Require approval")).not.toBeChecked();
+    expect(scope.getByLabelText("Release year filter")).toHaveValue("any");
+    expect(scope.getByLabelText("Included genres")).toHaveTextContent("Select included genres");
+    expect(scope.getByLabelText("Excluded genres")).toHaveTextContent("Select excluded genres");
+  });
+
+  it("can create a group with a reviewer pre-assigned", async () => {
+    const user = userEvent.setup();
+    const props = renderPanel();
+
+    await user.click(screen.getByRole("button", { name: "+ New group" }));
+    await user.selectOptions(screen.getByLabelText("Add reviewer to new group"), "alice");
+    await user.type(screen.getByPlaceholderText("Group name"), "Cinephiles");
+    await user.click(screen.getByRole("button", { name: "Create group" }));
+
+    expect(props.onCreateGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Cinephiles", reviewerHandles: ["alice"] }),
+    );
+  });
+
+  it("canceling the new-group draft discards it without calling onCreateGroup", async () => {
+    const user = userEvent.setup();
+    const props = renderPanel();
+
+    await user.click(screen.getByRole("button", { name: "+ New group" }));
+    await user.type(screen.getByPlaceholderText("Group name"), "Throwaway");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(props.onCreateGroup).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("New group name")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ New group" })).toBeInTheDocument();
   });
 
   it("shows reviewer pool without group badges", () => {

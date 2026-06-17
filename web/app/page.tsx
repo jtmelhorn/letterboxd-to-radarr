@@ -25,6 +25,7 @@ import {
   InboxIcon,
   LockIcon,
   RadarrIcon,
+  SearchIcon,
   ServerIcon,
   SparklesIcon,
   StarIcon,
@@ -59,6 +60,7 @@ import type {
   ReviewerDto,
   ReviewerGroupDto,
   ReviewerScope,
+  SyncFilters,
   SyncInterval,
   SyncResultItem,
   SyncRunSummary,
@@ -729,6 +731,12 @@ export default function Home() {
         ? selectedGenres[0]
         : `${selectedGenres.length} genres`;
 
+  // Drives the mobile "Filters (N)" badge. Group scope replaces Row 2 with a
+  // "Using group filters" badge, so the count is only meaningful outside it.
+  const activeFilterCount = activeReviewerGroup
+    ? 0
+    : (minimumRating > 0 ? 1 : 0) + (selectedGenres.length > 0 ? 1 : 0) + (hideAdded ? 1 : 0);
+
   const filteredMovies = useMemo(
     () =>
       sortMoviesByRating(
@@ -1026,7 +1034,15 @@ export default function Home() {
     }
   }
 
-  async function createReviewerGroup(input: { name: string; ratingThreshold: number }): Promise<boolean> {
+  async function createReviewerGroup(input: {
+    name: string;
+    enabled: boolean;
+    ratingThreshold: number;
+    syncInterval: SyncInterval;
+    requiresManualApproval: boolean;
+    filters: SyncFilters;
+    reviewerHandles: string[];
+  }): Promise<boolean> {
     const name = input.name.trim();
     if (!name) return false;
     setSettingsError(null);
@@ -1036,12 +1052,12 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
-          enabled: true,
+          enabled: input.enabled,
           ratingThreshold: input.ratingThreshold,
-          syncInterval: "1d",
-          requiresManualApproval: false,
-          filters: { year: { mode: "any" }, genres: { include: [], exclude: [] } },
-          reviewerHandles: [],
+          syncInterval: input.syncInterval,
+          requiresManualApproval: input.requiresManualApproval,
+          filters: input.filters,
+          reviewerHandles: input.reviewerHandles,
         }),
       });
       const body = (await res.json().catch(() => null)) as { groups?: ReviewerGroupDto[]; message?: string } | null;
@@ -1669,160 +1685,187 @@ export default function Home() {
               </div>
 
               <div className="ui-section sticky top-0 z-10 px-3 py-2.5">
+                {/* Row 1 — scope + count + search (always visible) */}
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                  <div className="flex min-w-0 flex-[1_1_auto] items-center gap-2 sm:gap-3">
-                    <div className="relative flex-[0_1_auto]">
-                      <select
-                        aria-label="Reviewer scope"
-                        className="ui-select ui-select-sm w-auto min-w-[10rem] pr-8 font-bold"
-                        value={scopeSelection}
-                        onChange={(event) => {
-                          setScopeSelection(event.target.value as ScopeSelection);
-                          setHasAutoFetched(false);
-                        }}
-                      >
-                        <option value="all">All enabled groups</option>
-                        {reviewers.map((reviewer) => (
-                          <option key={reviewer.handle} value={`reviewer:${reviewer.handle}`}>
-                            @{reviewer.handle}
-                          </option>
-                        ))}
-                        {reviewerGroups.map((group) => (
-                          <option key={group.id} value={`group:${group.id}`}>
-                            Group: {group.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <span className="hidden text-xs text-cornsilk/55 sm:inline">
-                      {stats.filtered} of {stats.total}
-                    </span>
-                  </div>
-
-                  <div
-                    className={`${
-                      isMobileFiltersOpen ? "flex" : "hidden"
-                    } w-full flex-wrap items-center gap-2 lg:flex lg:w-auto`}
-                  >
-                    {currentScope.type === "group" ? (
-                      <span className="ui-badge ui-badge-green">Using group filters</span>
-                    ) : (
-                      <>
-                        <div className="flex h-8 flex-wrap items-center gap-1 rounded-[var(--radius-control)] border border-white/10 bg-black/20 p-0.5">
-                          <button
-                            className={`h-7 rounded-md px-2 text-[11px] font-bold transition-all ${
-                              minimumRating === 0
-                                ? "bg-pine text-ink shadow"
-                                : "text-cornsilk/65 hover:text-cornsilk"
-                            }`}
-                            onClick={() => setMinimumRating(0)}
-                            type="button"
-                          >
-                            All
-                          </button>
-                          {[3.0, 3.5, 4.0, 4.5, 5.0].map((val) => (
-                            <button
-                              key={val}
-                              className={`h-7 rounded-md px-2 text-[11px] font-bold transition-all ${
-                                minimumRating === val
-                                  ? "bg-pine text-ink shadow"
-                                  : "text-cornsilk/65 hover:text-cornsilk"
-                              }`}
-                              onClick={() => setMinimumRating(val)}
-                              type="button"
-                            >
-                              {val.toFixed(1)}★
-                            </button>
-                          ))}
-                        </div>
-
-                        <div ref={genreDropdownRef} className="relative flex-[0_1_auto]">
-                          <button
-                            className="ui-input ui-input-sm flex h-8 w-auto min-w-[8rem] items-center justify-between gap-2 pr-8 font-bold"
-                            onClick={() => setIsGenreFilterOpen((open) => !open)}
-                            type="button"
-                          >
-                            <span className="truncate">{genreFilterLabel}</span>
-                            <span className="pointer-events-none absolute right-2.5 text-cornsilk/45">▼</span>
-                          </button>
-                          {isGenreFilterOpen && (
-                            <div className="absolute left-0 top-full z-30 mt-2 w-60 rounded-xl border border-cornsilk/10 bg-ink p-2 shadow-2xl">
-                              <div className="flex items-center justify-between gap-2 border-b border-cornsilk/10 px-2 pb-2">
-                                <span className="text-xs font-extrabold text-cornsilk">Genres</span>
-                                {selectedGenres.length > 0 && (
-                                  <button
-                                    className="text-xs font-bold text-pine transition hover:text-chartreuse"
-                                    onClick={() => setSelectedGenres([])}
-                                    type="button"
-                                  >
-                                    Clear
-                                  </button>
-                                )}
-                              </div>
-                              <div className="max-h-56 overflow-y-auto py-1">
-                                {genreOptions.length === 0 ? (
-                                  <p className="px-2 py-3 text-xs leading-relaxed text-cornsilk/70">
-                                    Cached genres will appear after metadata refresh.
-                                  </p>
-                                ) : (
-                                  genreOptions.map((genre) => (
-                                    <label
-                                      key={genre}
-                                      className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]"
-                                    >
-                                      <input
-                                        checked={selectedGenres.includes(genre)}
-                                        className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                                        onChange={(e) =>
-                                          setSelectedGenres((current) =>
-                                            e.target.checked
-                                              ? [...new Set([...current, genre])]
-                                              : current.filter((item) => item !== genre),
-                                          )
-                                        }
-                                        type="checkbox"
-                                      />
-                                      <span className="truncate">{genre}</span>
-                                    </label>
-                                  ))
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        <label className="ui-input ui-input-sm flex h-8 w-auto cursor-pointer items-center gap-2 pr-3">
-                          <input
-                            checked={hideAdded}
-                            className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
-                            onChange={(e) => setHideAdded(e.target.checked)}
-                            type="checkbox"
-                          />
-                          <span className="whitespace-nowrap text-[11px] font-bold text-cornsilk/70">
-                            Hide added
-                          </span>
-                        </label>
-                      </>
-                    )}
-                  </div>
-
-                  <div className="flex min-w-[12rem] flex-[1_1_220px] items-center gap-2 lg:ml-auto lg:max-w-sm">
-                    <Button
-                      className="lg:hidden"
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => setIsMobileFiltersOpen((open) => !open)}
+                  <div className="relative flex-[0_1_auto]">
+                    <select
+                      aria-label="Reviewer scope"
+                      className="ui-select ui-select-sm w-auto min-w-[10rem] pr-8 font-bold"
+                      value={scopeSelection}
+                      onChange={(event) => {
+                        setScopeSelection(event.target.value as ScopeSelection);
+                        setHasAutoFetched(false);
+                      }}
                     >
-                      Filters
-                    </Button>
+                      <option value="all">All enabled groups</option>
+                      {reviewers.map((reviewer) => (
+                        <option key={reviewer.handle} value={`reviewer:${reviewer.handle}`}>
+                          @{reviewer.handle}
+                        </option>
+                      ))}
+                      {reviewerGroups.map((group) => (
+                        <option key={group.id} value={`group:${group.id}`}>
+                          Group: {group.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <span className="ui-badge ui-badge-slate hidden sm:inline-flex">
+                    {stats.filtered} of {stats.total}
+                  </span>
+
+                  <Button
+                    aria-controls="filter-row-2"
+                    aria-expanded={isMobileFiltersOpen}
+                    className="relative lg:hidden"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setIsMobileFiltersOpen((open) => !open)}
+                  >
+                    Filters
+                    {activeFilterCount > 0 && (
+                      <span className="ml-1 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gold px-1 text-[11px] font-bold text-ink">
+                        {activeFilterCount}
+                      </span>
+                    )}
+                  </Button>
+
+                  <div className="relative flex min-w-[10rem] flex-[1_1_220px] items-center lg:ml-auto lg:max-w-sm">
+                    <SearchIcon className="pointer-events-none absolute left-2.5 h-4 w-4 text-cornsilk/45" />
                     <Input
                       aria-label="Search movies"
-                      className="ui-input-sm h-8"
+                      className="ui-input-sm h-8 pl-9 pr-8"
                       placeholder="Search movies, year, reviewer, or genre…"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                     />
+                    {searchQuery && (
+                      <button
+                        aria-label="Clear search"
+                        className="absolute right-2 flex h-5 w-5 items-center justify-center rounded text-cornsilk/45 transition hover:bg-white/10 hover:text-cornsilk"
+                        onClick={() => setSearchQuery("")}
+                        type="button"
+                      >
+                        <XIcon className="h-3 w-3" />
+                      </button>
+                    )}
                   </div>
+                </div>
+
+                {/* Row 2 — display filters (collapses behind the mobile toggle) */}
+                <div
+                  className={`${
+                    isMobileFiltersOpen ? "flex" : "hidden"
+                  } mt-2 flex-wrap items-center gap-2 lg:flex`}
+                  id="filter-row-2"
+                >
+                  {currentScope.type === "group" ? (
+                    <span className="ui-badge ui-badge-green">Using group filters</span>
+                  ) : (
+                    <div className="ui-surface flex w-full flex-wrap items-stretch divide-x divide-white/10">
+                      <div
+                        className="flex flex-wrap items-center gap-1 px-2 py-1"
+                        role="group"
+                        aria-label="Minimum rating"
+                      >
+                        <span className="sr-only">Minimum rating</span>
+                        <button
+                          className={`h-7 rounded-md px-2 text-[11px] font-bold transition-all ${
+                            minimumRating === 0
+                              ? "bg-pine text-ink shadow"
+                              : "text-cornsilk/65 hover:text-cornsilk"
+                          }`}
+                          onClick={() => setMinimumRating(0)}
+                          type="button"
+                        >
+                          All
+                        </button>
+                        {[3.0, 3.5, 4.0, 4.5, 5.0].map((val) => (
+                          <button
+                            key={val}
+                            className={`h-7 rounded-md px-2 text-[11px] font-bold transition-all ${
+                              minimumRating === val
+                                ? "bg-pine text-ink shadow"
+                                : "text-cornsilk/65 hover:text-cornsilk"
+                            }`}
+                            onClick={() => setMinimumRating(val)}
+                            type="button"
+                          >
+                            {val.toFixed(1)}★
+                          </button>
+                        ))}
+                      </div>
+
+                      <div ref={genreDropdownRef} className="relative flex-[0_1_auto] px-1 py-1">
+                        <button
+                          aria-expanded={isGenreFilterOpen}
+                          aria-haspopup="listbox"
+                          aria-label="Filter by genre"
+                          className="flex h-8 w-auto min-w-[8rem] items-center justify-between gap-2 rounded-md px-2.5 font-bold text-xs text-cornsilk/80 transition hover:bg-white/[0.04] hover:text-cornsilk focus:outline-none focus:ring-2 focus:ring-pine/25"
+                          onClick={() => setIsGenreFilterOpen((open) => !open)}
+                          type="button"
+                        >
+                          <span className="truncate">{genreFilterLabel}</span>
+                          <span className="pointer-events-none text-cornsilk/45">▼</span>
+                        </button>
+                        {isGenreFilterOpen && (
+                          <div className="absolute left-0 top-full z-30 mt-2 w-60 rounded-xl border border-cornsilk/10 bg-ink p-2 shadow-2xl">
+                            <div className="flex items-center justify-between gap-2 border-b border-cornsilk/10 px-2 pb-2">
+                              <span className="text-xs font-extrabold text-cornsilk">Genres</span>
+                              {selectedGenres.length > 0 && (
+                                <button
+                                  className="text-xs font-bold text-pine transition hover:text-chartreuse"
+                                  onClick={() => setSelectedGenres([])}
+                                  type="button"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                            </div>
+                            <div className="max-h-56 overflow-y-auto py-1">
+                              {genreOptions.length === 0 ? (
+                                <p className="px-2 py-3 text-xs leading-relaxed text-cornsilk/70">
+                                  Cached genres will appear after metadata refresh.
+                                </p>
+                              ) : (
+                                genreOptions.map((genre) => (
+                                  <label
+                                    key={genre}
+                                    className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-cornsilk/75 transition hover:bg-white/[0.06]"
+                                  >
+                                    <input
+                                      checked={selectedGenres.includes(genre)}
+                                      className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                                      onChange={(e) =>
+                                        setSelectedGenres((current) =>
+                                          e.target.checked
+                                            ? [...new Set([...current, genre])]
+                                            : current.filter((item) => item !== genre),
+                                        )
+                                      }
+                                      type="checkbox"
+                                    />
+                                    <span className="truncate">{genre}</span>
+                                  </label>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <label className="flex h-8 cursor-pointer items-center gap-2 px-3 text-cornsilk/80 transition hover:bg-white/[0.04]">
+                        <input
+                          checked={hideAdded}
+                          className="h-3.5 w-3.5 rounded border-cornsilk/20 bg-ink text-pine focus:ring-pine/40"
+                          onChange={(e) => setHideAdded(e.target.checked)}
+                          type="checkbox"
+                        />
+                        <span className="whitespace-nowrap text-[11px] font-bold">Hide added</span>
+                      </label>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

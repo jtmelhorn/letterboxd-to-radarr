@@ -12,6 +12,7 @@ import type {
   RadarrOptionsResponse,
   ReviewerDto,
   ReviewerGroupDto,
+  SyncFilters,
   SyncInterval,
 } from "@/app/types/movie";
 
@@ -27,6 +28,16 @@ type GroupUpdate = Partial<
     | "reviewerHandles"
   >
 >;
+
+type CreateGroupInput = {
+  name: string;
+  enabled: boolean;
+  ratingThreshold: number;
+  syncInterval: SyncInterval;
+  requiresManualApproval: boolean;
+  filters: SyncFilters;
+  reviewerHandles: string[];
+};
 
 type Tab = "groups" | "radarr" | "blocklist";
 
@@ -81,7 +92,7 @@ export function SettingsModal({
   reviewers: ReviewerDto[];
   syncIntervalOptions: Array<{ value: SyncInterval; label: string }>;
   onAddReviewer: (handle: string) => Promise<boolean>;
-  onCreateGroup: (input: { name: string; ratingThreshold: number }) => Promise<boolean>;
+  onCreateGroup: (input: CreateGroupInput) => Promise<boolean>;
   onDeleteGroup: (group: ReviewerGroupDto) => Promise<void>;
   onRemoveReviewer: (handle: string) => Promise<void>;
   onSaveGroup: (group: ReviewerGroupDto, update: GroupUpdate) => Promise<boolean>;

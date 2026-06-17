@@ -28,6 +28,7 @@ import type {
 
 const MAX_ATTEMPTS = 3;
 const RADARR_CONCURRENCY = 3;
+const RSS_CONCURRENCY = 3;
 
 export interface SyncOptions {
   auto: boolean;
@@ -106,17 +107,26 @@ async function refreshHandles(
   handles: string[],
   options: { fetchMetadata?: boolean } = {},
 ): Promise<number> {
-  let fetched = 0;
-  for (const handle of handles) {
-    const user = getOrCreateUser(handle);
-    const movies = await fetchLetterboxdReviews(handle);
-    upsertReviews(user.id, movies);
-    if (options.fetchMetadata) {
-      await enrichReviewsWithMetadata(getReviewRows(user.id));
-    }
-    fetched += movies.length;
+  if (handles.length === 0) return 0;
+
+  const rssLimit = pLimit(RSS_CONCURRENCY);
+  const counts = await Promise.all(
+    handles.map((handle) =>
+      rssLimit(async () => {
+        const user = getOrCreateUser(handle);
+        const movies = await fetchLetterboxdReviews(handle);
+        upsertReviews(user.id, movies);
+        return movies.length;
+      }),
+    ),
+  );
+
+  if (options.fetchMetadata) {
+    const allRows = handles.flatMap((handle) => getReviewRows(getOrCreateUser(handle).id));
+    await enrichReviewsWithMetadata(allRows);
   }
-  return fetched;
+
+  return counts.reduce((sum, count) => sum + count, 0);
 }
 
 interface GroupSyncRun {
