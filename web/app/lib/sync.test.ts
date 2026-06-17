@@ -1127,4 +1127,150 @@ describeWithSqlite("sync filtering", () => {
     expect(response.status).toBe(409);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  const rewatchedFilmRss = (slug: string, rating: number, date: string, tmdbId: number) =>
+    `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:letterboxd="https://letterboxd.com" xmlns:tmdb="https://www.themoviedb.org">
+  <channel>
+    <item>
+      <title>Casino Royale, 2006 - ${"★".repeat(Math.floor(rating))}</title>
+      <link>https://letterboxd.com/alice/film/${slug}/</link>
+      <guid isPermaLink="false">letterboxd-watch-9001</guid>
+      <pubDate>${date}</pubDate>
+      <letterboxd:filmTitle>Casino Royale</letterboxd:filmTitle>
+      <letterboxd:filmYear>2006</letterboxd:filmYear>
+      <letterboxd:memberRating>${rating.toFixed(1)}</letterboxd:memberRating>
+      <tmdb:movieId>${tmdbId}</tmdb:movieId>
+      <description><![CDATA[ <p><img src="https://cdn.test/${slug}.jpg"/></p>
+<p>Watched on Monday April 13, 2026.</p> ]]></description>
+    </item>
+  </channel>
+</rss>`;
+
+  it("preserves a stored real review when a rewatch-only re-sync updates the rating", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url === "https://letterboxd.com/alice/rss/") {
+          return new Response(rewatchedFilmRss("casino-royale", 3.5, "Mon, 13 Apr 2026 00:00:00 GMT", 100), {
+            status: 200,
+            headers: { "Content-Type": "application/rss+xml" },
+          });
+        }
+        return Response.json({ message: "Unexpected request" }, { status: 500 });
+      }),
+    );
+
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviews, getReviewRows } = await import("@/app/lib/repos/reviews");
+    const { refreshReviewer } = await import("@/app/lib/sync");
+    const { canonicalFilmGuid } = await import("@/app/lib/filmIdentity");
+
+    const alice = getOrCreateUser("alice");
+    upsertReviews(alice.id, [
+      {
+        title: "Casino Royale",
+        year: 2006,
+        rating: 4.5,
+        tmdbMovieId: 100,
+        letterboxdUrl: "https://letterboxd.com/alice/film/casino-royale/",
+        reviewText: "Best Bond film, hands down.",
+        reviewedAt: "2025-06-01T00:00:00.000Z",
+      },
+    ]);
+
+    await refreshReviewer("alice");
+
+    const rows = getReviewRows(alice.id);
+    const royale = rows.filter((row) => row.title === "Casino Royale");
+    expect(royale).toHaveLength(1);
+    expect(royale[0]!.rating).toBe(3.5);
+    expect(royale[0]!.reviewText).toBe("Best Bond film, hands down.");
+    expect(canonicalFilmGuid(royale[0]!)).toBe("film:casino-royale");
+  });
+
+  it("collapses a divergent-slug rewatch onto the existing row by tmdb id, keeping one film", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url === "https://letterboxd.com/alice/rss/") {
+          return new Response(rewatchedFilmRss("casino-royale-2006", 3, "Mon, 13 Apr 2026 00:00:00 GMT", 200), {
+            status: 200,
+            headers: { "Content-Type": "application/rss+xml" },
+          });
+        }
+        return Response.json({ message: "Unexpected request" }, { status: 500 });
+      }),
+    );
+
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviews, getReviewRows } = await import("@/app/lib/repos/reviews");
+    const { getAggregatedMovies } = await import("@/app/lib/repos/aggregatedReviews");
+    const { refreshReviewer } = await import("@/app/lib/sync");
+
+    const alice = getOrCreateUser("alice");
+    upsertReviews(alice.id, [
+      {
+        title: "Casino Royale",
+        year: 2006,
+        rating: 4.5,
+        tmdbMovieId: 200,
+        letterboxdUrl: "https://letterboxd.com/alice/film/casino-royale/",
+        reviewText: "Best Bond film, hands down.",
+        reviewedAt: "2025-06-01T00:00:00.000Z",
+      },
+    ]);
+
+    await refreshReviewer("alice");
+
+    const rows = getReviewRows(alice.id).filter((row) => row.title === "Casino Royale");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.rating).toBe(3);
+    expect(rows[0]!.reviewText).toBe("Best Bond film, hands down.");
+
+    const movies = getAggregatedMovies().filter((movie) => movie.title === "Casino Royale");
+    expect(movies).toHaveLength(1);
+    expect(movies[0]!.reviews).toHaveLength(1);
+    expect(movies[0]!.tmdbMovieId).toBe(200);
+    expect(movies[0]!.reviews[0]!.reviewText).toBe("Best Bond film, hands down.");
+  });
+
+  it("cleans up 'Watched on ...' review text already stored from the old footer bug on startup", async () => {
+    const { getOrCreateUser } = await import("@/app/lib/repos/users");
+    const { upsertReviews, getReviewRows } = await import("@/app/lib/repos/reviews");
+    const { getSqlite, stripWatchedFooterReviewText } = await import("@/app/lib/db");
+
+    const alice = getOrCreateUser("alice");
+    // Seed one polluted diary-style row and one real review.
+    upsertReviews(alice.id, [
+      {
+        title: "Old Watch",
+        year: 2024,
+        rating: 3,
+        tmdbMovieId: 555,
+        letterboxdUrl: "https://letterboxd.com/alice/film/old-watch/",
+        reviewText: "Watched on Friday January 2, 2026.",
+      },
+      {
+        title: "Real Review",
+        year: 2024,
+        rating: 5,
+        tmdbMovieId: 556,
+        letterboxdUrl: "https://letterboxd.com/alice/film/real-review/",
+        reviewText: "An all-time favorite that holds up in 2026.",
+      },
+    ]);
+
+    stripWatchedFooterReviewText(getSqlite());
+
+    const rows = getReviewRows(alice.id);
+    const oldWatch = rows.find((r) => r.title === "Old Watch");
+    const realReview = rows.find((r) => r.title === "Real Review");
+    expect(oldWatch).toBeDefined();
+    expect(oldWatch!.reviewText).toBeNull();
+    expect(realReview).toBeDefined();
+    expect(realReview!.reviewText).toBe("An all-time favorite that holds up in 2026.");
+  });
 });

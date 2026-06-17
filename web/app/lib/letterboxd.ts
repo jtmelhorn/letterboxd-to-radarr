@@ -86,7 +86,14 @@ function extractFromContent(content: string): { posterUrl?: string; reviewText?:
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean)
-    .filter((line) => !/^Watched\s+.+\s+(on|\.)\s*/i.test(line) && !/^Watched\s*$/.test(line));
+    // Letterboxd diary/rewatch ("watch") items have no review body; their
+    // content is just "<p>Watched on Saturday May 30, 2026.</p>". Strip those
+    // footer lines so they don't become fake review text. Also drop a bare
+    // "Watched" line. The previous regex never matched the real format.
+    .filter(
+      (line) =>
+        !/^Watched\s+on\s+.+\d{4}\.?\s*$/i.test(line) && !/^Watched\s*$/i.test(line),
+    );
 
   const reviewText = lines.join("\n\n").trim() || undefined;
   return { posterUrl, reviewText };
@@ -108,17 +115,91 @@ function reviewTime(reviewedAt: string | undefined): number {
   return Number.isNaN(time) ? 0 : time;
 }
 
+/**
+ * Merge two reviews of the same film. The most-recent entry wins rating /
+ * reviewedAt (so a rewatch updates the star), but every other field is carried
+ * forward from whichever entry actually has it. This prevents a
+ * diary/rewatch entry (no reviewText) from erasing a real review when both
+ * appear in the same feed, while still reflecting the latest watch.
+ */
+function mergeReviews(a: MovieReview, b: MovieReview): MovieReview {
+  const newest = reviewTime(a.reviewedAt) >= reviewTime(b.reviewedAt) ? a : b;
+  const other = newest === a ? b : a;
+  const pick = (val: string | undefined, fallback: string | undefined): string | undefined =>
+    val && val.trim().length > 0 ? val : fallback;
+
+  const merged: MovieReview = {
+    title: pick(newest.title, other.title) ?? newest.title,
+    year: newest.year ?? other.year ?? null,
+    rating: newest.rating,
+    guid: pick(newest.guid, other.guid) ?? newest.guid,
+  };
+  const reviewedAt = pick(newest.reviewedAt, other.reviewedAt);
+  if (reviewedAt) merged.reviewedAt = reviewedAt;
+  const posterUrl = pick(newest.posterUrl, other.posterUrl);
+  if (posterUrl) merged.posterUrl = posterUrl;
+  const backdropUrl = pick(newest.backdropUrl, other.backdropUrl);
+  if (backdropUrl) merged.backdropUrl = backdropUrl;
+  // Prefer real review text over the rewatch/diary entry (which has none).
+  const reviewText = pick(newest.reviewText, other.reviewText);
+  if (reviewText) merged.reviewText = reviewText;
+  const letterboxdUrl = pick(newest.letterboxdUrl, other.letterboxdUrl);
+  if (letterboxdUrl) merged.letterboxdUrl = letterboxdUrl;
+  const tmdbMovieId =
+    typeof newest.tmdbMovieId === "number" && newest.tmdbMovieId > 0
+      ? newest.tmdbMovieId
+      : other.tmdbMovieId;
+  if (typeof tmdbMovieId === "number" && tmdbMovieId > 0) merged.tmdbMovieId = tmdbMovieId;
+  const tmdbTvId =
+    typeof newest.tmdbTvId === "number" && newest.tmdbTvId > 0
+      ? newest.tmdbTvId
+      : other.tmdbTvId;
+  if (typeof tmdbTvId === "number" && tmdbTvId > 0) merged.tmdbTvId = tmdbTvId;
+  return merged;
+}
+
+/**
+ * Collapse reviews of the same film into one row. Two reviews are considered
+ * the same film when they share a canonical guid, OR when they share a
+ * tmdb_movie_id / tmdb_tv_id (Letterboxd sometimes year-disambiguates the film
+ * slug differently for the original review vs. a rewatch, which previously
+ * produced duplicate film cards). When a group collapses, the most-recent
+ * rating/reviewedAt wins and other fields are merged so a real review is never
+ * discarded in favor of a diary/rewatch entry.
+ */
 function dedupeMovies(movies: MovieReview[]): MovieReview[] {
-  const map = new Map<string, MovieReview>();
+  const byGuid = new Map<string, MovieReview>();
+  const byTmdbMovie = new Map<number, string>();
+  const byTmdbTv = new Map<number, string>();
+
+  const resolveKey = (movie: MovieReview): string => {
+    const guid = canonicalFilmGuid(movie);
+    if (typeof movie.tmdbMovieId === "number" && movie.tmdbMovieId > 0) {
+      const existing = byTmdbMovie.get(movie.tmdbMovieId);
+      if (existing) return existing;
+      byTmdbMovie.set(movie.tmdbMovieId, guid);
+    }
+    if (typeof movie.tmdbTvId === "number" && movie.tmdbTvId > 0) {
+      const existing = byTmdbTv.get(movie.tmdbTvId);
+      if (existing) return existing;
+      byTmdbTv.set(movie.tmdbTvId, guid);
+    }
+    return guid;
+  };
+
   for (const movie of movies) {
     const guid = canonicalFilmGuid(movie);
     const normalized = { ...movie, guid };
-    const existing = map.get(guid);
-    if (!existing || reviewTime(normalized.reviewedAt) > reviewTime(existing.reviewedAt)) {
-      map.set(guid, normalized);
+    const key = resolveKey(normalized);
+    const existing = byGuid.get(key);
+    if (!existing) {
+      byGuid.set(key, normalized);
+    } else {
+      byGuid.set(key, mergeReviews(existing, normalized));
     }
   }
-  return Array.from(map.values());
+
+  return Array.from(byGuid.values());
 }
 
 function mapItems(items: LetterboxdFeedItem[]): MovieReview[] {

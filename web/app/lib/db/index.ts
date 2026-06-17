@@ -246,6 +246,29 @@ function backfillSyncResultFilmIds(sqlite: Database.Database): void {
   tx();
 }
 
+/**
+ * One-time cleanup: review rows polluted by the old Letterboxd footer bug
+ * stored "Watched on Saturday May 30, 2026." (and bare "Watched") as real
+ * review text. Null those out so the films recover their "No written review"
+ * state without waiting for a re-fetch. Real reviews are never matched because
+ * the pattern requires the trailing year + period of the diary footer.
+ */
+export function stripWatchedFooterReviewText(sqlite: Database.Database): void {
+  sqlite
+    .prepare(
+      `UPDATE reviews
+          SET review_text = NULL,
+              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        WHERE review_text IS NOT NULL
+          AND (
+            review_text GLOB 'Watched on *[0-9][0-9][0-9][0-9].'
+            OR review_text = 'Watched'
+            OR review_text = 'Watched.'
+          )`,
+    )
+    .run();
+}
+
 function init(): { sqlite: Database.Database; db: DrizzleDb } {
   const dataDir = getDataDir();
   mkdirSync(dataDir, { recursive: true });
@@ -339,6 +362,7 @@ function init(): { sqlite: Database.Database; db: DrizzleDb } {
   migrateLegacyJson(sqlite);
   ensureDefaultReviewerGroup(sqlite);
   backfillSyncResultFilmIds(sqlite);
+  stripWatchedFooterReviewText(sqlite);
 
   const db = drizzle(sqlite, { schema });
   return { sqlite, db };
